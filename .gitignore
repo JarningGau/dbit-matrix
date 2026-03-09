@@ -1,0 +1,26 @@
+# Raw/test data (do not commit large sequencing files)
+data/
+
+# Runtime outputs and generated command files
+work/
+
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Common logs and temp files
+*.log
+*.out
+*.err
+*.tmp
+
+# Local environment files
+.env
+.venv/
+venv/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
