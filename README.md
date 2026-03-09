@@ -66,9 +66,13 @@ python scripts/extract_bc.py \
 
 输出：
 
-- `"$work_path/demux/0001.R1.fq.gz"`：R1 去掉 `barcodeB-linker2-barcodeA-linker1-Tn5` 前缀
-- `"$work_path/demux/0001.R2.fq.gz"`：保留原始 R2 序列
-- `"$work_path/demux/0001.stats.json"`：保留率与过滤原因统计
+- `"$work_path/demux/0001.R1.demux.fq.gz"`
+- `"$work_path/demux/0001.R1.spike-in.fq.gz"`：未匹配序列
+- `"$work_path/demux/0001.R2.demux.fq.gz"`
+- `"$work_path/demux/0001.R2.spike-in.fq.gz"`：未匹配序列
+- `"$work_path/demux/0001.stats.json"`
+
+匹配到的 reads name 会改为：`@barcodesA+barcodesB:original_reads_name`
 
 3. alignment
 4. pool
