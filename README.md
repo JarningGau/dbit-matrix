@@ -7,7 +7,7 @@
   - DBiT-DNAme-TAPS
   - DBiT-DNAme-EMSeq
 
-环境管理使用 `pixi` 和 `nv`，流程需要同时支持 HPC（`sbatch`）与本地 shell。
+环境管理使用 `pixi + uv`，流程需要同时支持 HPC（`sbatch`）与本地 shell。
 
 当前目录说明：
 
@@ -15,6 +15,66 @@
 - `data/raw`: 原始数据
 - `configs/barcodes_50a.tsv`: spatial barcode whitelist
 - `workflow`: 测试脚本，用来跑通测试数据
+
+## 环境固定（pixi + uv）
+
+首次初始化并生成锁文件：
+
+```bash
+pixi lock
+pixi install
+```
+
+之后运行脚本统一使用 `pixi run`：
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --dry-run
+```
+
+如果未来需要增加 PyPI 依赖（由 `uv` 解析并写入锁文件），使用：
+
+```bash
+pixi add --pypi <package>
+pixi lock
+```
+
+## 环境测试（验收）
+
+建议在每次拉取更新后执行以下检查，确认环境可用且可复现。
+
+1) 安装环境
+
+```bash
+pixi install
+```
+
+2) 检查关键工具来源和版本
+
+```bash
+pixi run which python
+pixi run python --version
+pixi run which fastp
+pixi run fastp --version
+```
+
+3) 运行最小 smoke test（不执行实际提交）
+
+```bash
+pixi run make-cmd-dry-run
+```
+
+4) 验证 lockfile 可复现
+
+在另一台机器（或清理本地 `.pixi` 后）仅保留 `pixi.toml + pixi.lock`，重新执行：
+
+```bash
+pixi install
+pixi run make-cmd-dry-run
+```
+
+若命令可正常执行且输出一致，可认为环境固定成功。
 
 ## DBiT-DNAme-TAPS
 
@@ -84,7 +144,7 @@ python scripts/extract_bc.py \
 1) 使用 workflow 配置生成命令（推荐先 dry-run）
 
 ```bash
-python scripts/make_cmd.py \
+pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --dry-run
 ```
@@ -94,7 +154,7 @@ python scripts/make_cmd.py \
 2) 生成并立即提交（local）
 
 ```bash
-python scripts/make_cmd.py \
+pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --submit
 ```
@@ -102,7 +162,7 @@ python scripts/make_cmd.py \
 3) 临时切换到 slurm（CLI 参数优先级高于配置）
 
 ```bash
-python scripts/make_cmd.py \
+pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --runner slurm \
   --submit
@@ -113,7 +173,7 @@ slurm 的 `fastp_split` 脚本默认包含 `module load fastp`。
 ## 生成 demux 命令
 
 ```bash
-python scripts/make_cmd.py \
+pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage demux_extract_bc \
   --dry-run
@@ -121,7 +181,7 @@ python scripts/make_cmd.py \
 
 生成并立刻提交
 ```bash
-python scripts/make_cmd.py \
+pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage demux_extract_bc \
   --submit

@@ -1,0 +1,12 @@
+[workspace]
+name = "dbit-matrix"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.11.*"
+fastp = "0.24.*"
+
+[tasks]
+make-cmd-dry-run = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --dry-run"
+make-cmd-submit = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --submit"
