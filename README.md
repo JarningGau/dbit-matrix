@@ -64,18 +64,24 @@ python scripts/extract_bc.py \
   -o "$work_path/demux/0001"
 ```
 
+输出：
+
+- `"$work_path/demux/0001.R1.fq.gz"`：R1 去掉 `barcodeB-linker2-barcodeA-linker1-Tn5` 前缀
+- `"$work_path/demux/0001.R2.fq.gz"`：保留原始 R2 序列
+- `"$work_path/demux/0001.stats.json"`：保留率与过滤原因统计
+
 3. alignment
 4. pool
 5. split bam by spots
 6. call CpG methylation rates
 
-## 快速开始（fastp）
+## 快速开始（命令生成）
 
 1) 使用 workflow 配置生成命令（推荐先 dry-run）
 
 ```bash
 python scripts/make_cmd.py \
-  --workflow-config workflow/fastp_test.json \
+  --workflow-config workflow/dbit_taps_test.json \
   --dry-run
 ```
 
@@ -85,7 +91,7 @@ python scripts/make_cmd.py \
 
 ```bash
 python scripts/make_cmd.py \
-  --workflow-config workflow/fastp_test.json \
+  --workflow-config workflow/dbit_taps_test.json \
   --submit
 ```
 
@@ -93,9 +99,30 @@ python scripts/make_cmd.py \
 
 ```bash
 python scripts/make_cmd.py \
-  --workflow-config workflow/fastp_test.json \
+  --workflow-config workflow/dbit_taps_test.json \
   --runner slurm \
   --submit
 ```
 
-slurm 生成脚本默认包含 `module load fastp`。
+slurm 的 `fastp_split` 脚本默认包含 `module load fastp`。
+
+## 生成 demux 命令
+
+```bash
+python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage demux_extract_bc \
+  --dry-run
+```
+
+生成并立刻提交
+```bash
+python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage demux_extract_bc \
+  --submit
+```
+
+执行时会扫描 `"$work_path/shard_fastq/"*.R1.fq.gz`，并按 chunk 调用 `scripts/extract_bc.py`。
+
+当 `--runner slurm` 且 `--stage demux_extract_bc` 时，会为每个 chunk 生成一个独立 sbatch 脚本（例如 `02_demux_extract_bc_0001.sbatch`），`--submit` 会逐个提交这些任务。
