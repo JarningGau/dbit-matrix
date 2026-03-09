@@ -8,9 +8,8 @@
     "number_of_split_parts": 2,
     "fastp_bin": "fastp",
     "slurm": {
-        "partition": "cpu",
-        "time": "02:00:00",
+        "partition": "amd-ep2,intel-sc3",
         "mem": "16G",
-        "cpus_per_task": 8
+        "cpus_per_task": 2
     }
 }
