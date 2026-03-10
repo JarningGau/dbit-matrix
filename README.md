@@ -172,6 +172,7 @@ spike-in 可以有多个参考基因组（例如 lambda、pUC19），
 建议每个参考单独比对并按 `<chunk>.<spike_name>.bam` 命名输出。
 在 `scripts/align.py` 中执行顺序固定为：先对每个 spike-in 参考比对，再对 host genome 比对并生成 `.cb.bam`。
 
+```bash
 bwa mem -t 2 \
 $bwa_index_host_genome \
 $work_path/demux/0001.R1.demux.fq.gz \
@@ -189,8 +190,32 @@ $bwa_index_puc19 \
 $work_path/demux/0001.R1.spike-in.fq.gz \
 $work_path/demux/0001.R2.spike-in.fq.gz |\
 samtools view -b -o $work_path/align_shards/0001.puc19.bam -
+```
 
 4. pool
+
+输入来源：
+- host: `"$work_path/align_shards/"*.cb.bam`
+- spike-in: `"$work_path/align_shards/"*.<spike_name>.bam`
+
+执行约定：
+- `runner=local`：一个脚本内先处理 spike-in，再处理 host。
+- `runner=slurm`：拆成两个 sbatch，分别处理 spike-in 与 host。
+
+```bash
+## host genome
+samtools cat -o $work_path/pooled/pooled.cb.bam $work_path/align_shards/*.cb.bam
+samtools sort -m 16G -@ 4 -t CB -o $work_path/pooled/pooled.byCB.bam $work_path/pooled/pooled.cb.bam
+rm $work_path/pooled/pooled.cb.bam
+
+## spike-in
+## pool -> sort by coords -> index -> remove tmp file
+### lambda
+samtools cat -o $work_path/pooled/pooled.lambda.bam $work_path/align_shards/*.lambda.bam && samtools sort -o $work_path/pooled/pooled.lambda.sorted.bam $work_path/pooled/pooled.lambda.bam && samtools index $work_path/pooled/pooled.lambda.sorted.bam && rm $work_path/pooled/pooled.lambda.bam
+### puc19
+samtools cat -o $work_path/pooled/pooled.puc19.bam $work_path/align_shards/*.puc19.bam && samtools sort -o $work_path/pooled/pooled.puc19.sorted.bam $work_path/pooled/pooled.puc19.bam && samtools index $work_path/pooled/pooled.puc19.sorted.bam && rm $work_path/pooled/pooled.puc19.bam
+```
+
 5. split bam by spots
 6. call CpG methylation rates
 
@@ -267,3 +292,24 @@ pixi run python scripts/make_cmd.py \
 执行时会扫描 `"$work_path/demux/"*.R1.demux.fq.gz`，并要求存在对应的 `*.R2.demux.fq.gz`。
 当 `--runner local` 时，生成 `03_align.sh`，内部按 chunk 顺序运行 `scripts/align.py`；每个 chunk 会在同一条执行链中先跑全部 spike-in，再跑 host。
 当 `--runner slurm` 且 `--stage align` 时，会为每个 chunk 生成一个独立 sbatch 脚本（例如 `03_align_0001.sbatch`）；单个 sbatch 内绑定该 chunk 的 spike-in + host 对齐顺序执行，`--submit` 会逐个提交这些任务。
+
+## 生成 pool 命令
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage pool \
+  --dry-run
+```
+
+生成并立刻提交
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage pool \
+  --submit
+```
+
+执行时会扫描 `"$work_path/align_shards/"*.cb.bam` 和 `"$work_path/align_shards/"*.<spike_name>.bam`。  
+当 `--runner local` 时，生成 `04_pool.sh`，内部先处理 spike-in，再处理 host。  
+当 `--runner slurm` 且 `--stage pool` 时，会生成两个 sbatch：`04_pool_spike.sbatch` 与 `04_pool_host.sbatch`；`--submit` 会依次提交这两个任务。

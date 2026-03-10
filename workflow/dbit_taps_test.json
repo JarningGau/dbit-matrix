@@ -21,6 +21,8 @@
     "bwa_bin": "bwa",
     "sinto_bin": "sinto",
     "samtools_bin": "samtools",
+    "samtools_threads": 4,
+    "host_sort_mem": "16G",
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
         "puc19": "/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa"
@@ -40,6 +42,11 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "64G",
             "cpus_per_task": 32
+        },
+        "pool": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "64G",
+            "cpus_per_task": 8
         }
     }
 }

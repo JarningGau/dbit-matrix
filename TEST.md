@@ -52,3 +52,25 @@ pixi run python scripts/align.py \
   --spike-in-index lambda=/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa \
   --spike-in-index puc19=/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa \
   --dry-run
+
+# pool CLI 帮助与命令生成回归
+pixi run python scripts/pool.py --help
+
+pixi run python scripts/pool.py \
+  --work-path work/test-DNAme-TAPS \
+  --samtools-bin samtools \
+  --spike-in-name lambda \
+  --spike-in-name puc19 \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage pool \
+  --runner local \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage pool \
+  --runner slurm \
+  --dry-run

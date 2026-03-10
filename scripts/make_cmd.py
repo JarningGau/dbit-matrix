@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        choices=["fastp_split", "demux_extract_bc", "align"],
+        choices=["fastp_split", "demux_extract_bc", "align", "pool"],
         help="Workflow stage to generate command script for. Default: fastp_split.",
     )
     parser.add_argument("--sample-id", help="Sample identifier.")
@@ -93,6 +93,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--samtools-bin",
         help="samtools executable path or command name. Default: samtools.",
+    )
+    parser.add_argument(
+        "--samtools-threads",
+        type=int,
+        help="Thread count for samtools sort in pool stage. Default: 4.",
+    )
+    parser.add_argument(
+        "--host-sort-mem",
+        help="Memory per thread for host samtools sort -m in pool stage. Default: 16G.",
     )
     parser.add_argument(
         "--spike-in-index",
@@ -280,6 +289,39 @@ def build_align_local_batch_command(args: argparse.Namespace, sample_work: Path)
     return quoted(command)
 
 
+def parse_spike_names(spike_in_index: list[str]) -> list[str]:
+    names: list[str] = []
+    for item in spike_in_index:
+        name, _, _ = item.partition("=")
+        name = name.strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def build_pool_command(
+    args: argparse.Namespace, sample_work: Path, mode: str
+) -> str:
+    script_path = Path("scripts/pool.py")
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--samtools-bin",
+        args.samtools_bin,
+        "--samtools-threads",
+        str(args.samtools_threads),
+        "--host-sort-mem",
+        args.host_sort_mem,
+        "--mode",
+        mode,
+    ]
+    for spike_name in parse_spike_names(args.spike_in_index):
+        command.extend(["--spike-in-name", spike_name])
+    return quoted(command)
+
+
 def discover_demux_chunks(sample_work: Path) -> list[tuple[str, Path, Path, Path]]:
     chunk_dir = sample_work / "shard_fastq"
     demux_dir = sample_work / "demux"
@@ -358,7 +400,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         raise ValueError("workflow config key 'slurm' must be an object")
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
 
-    if any(key in slurm_cfg_raw for key in ("fastp_split", "demux_extract_bc", "align")):
+    if any(
+        key in slurm_cfg_raw
+        for key in ("fastp_split", "demux_extract_bc", "align", "pool")
+    ):
         stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
     else:
         # Backward compatibility: legacy flat slurm config.
@@ -401,6 +446,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "bwa_bin": pick(args.bwa_bin, cfg.get("bwa_bin")),
         "sinto_bin": pick(args.sinto_bin, cfg.get("sinto_bin")),
         "samtools_bin": pick(args.samtools_bin, cfg.get("samtools_bin")),
+        "samtools_threads": pick(args.samtools_threads, cfg.get("samtools_threads")),
+        "host_sort_mem": pick(args.host_sort_mem, cfg.get("host_sort_mem")),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
@@ -422,6 +469,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         required.extend(["barcode1_whitelist", "barcode2_whitelist"])
     elif stage == "align":
         required.extend(["bwa_index"])
+    elif stage == "pool":
+        pass
     else:
         raise ValueError(f"unsupported stage: {stage}")
 
@@ -464,6 +513,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["bwa_bin"] = settings["bwa_bin"] or "bwa"
     settings["sinto_bin"] = settings["sinto_bin"] or "sinto"
     settings["samtools_bin"] = settings["samtools_bin"] or "samtools"
+    settings["samtools_threads"] = (
+        int(settings["samtools_threads"])
+        if settings["samtools_threads"] is not None
+        else 4
+    )
+    if settings["samtools_threads"] <= 0:
+        raise ValueError("samtools_threads must be > 0")
+    settings["host_sort_mem"] = settings["host_sort_mem"] or "16G"
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -638,7 +695,7 @@ def main() -> int:
                     )
                     generate_slurm_script(command, script_path, log_dir, slurm_args)
                 generated_scripts.append(script_path)
-    else:
+    elif settings["stage"] == "align":
         command_args = argparse.Namespace(
             bwa_index=settings["bwa_index"],
             bwa_threads=settings["bwa_threads"],
@@ -701,6 +758,74 @@ def main() -> int:
                     )
                     generate_slurm_script(command, script_path, log_dir, slurm_args)
                 generated_scripts.append(script_path)
+    else:
+        command_args = argparse.Namespace(
+            samtools_bin=settings["samtools_bin"],
+            samtools_threads=settings["samtools_threads"],
+            host_sort_mem=settings["host_sort_mem"],
+            spike_in_index=settings["spike_in_index"],
+        )
+        if settings["runner"] == "local":
+            script_path = command_dir / "04_pool.sh"
+            command = build_pool_command(command_args, sample_work, "all")
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            host_script_path = command_dir / "04_pool_host.sbatch"
+            spike_script_path = command_dir / "04_pool_spike.sbatch"
+            host_command = build_pool_command(command_args, sample_work, "host")
+            spike_command = build_pool_command(command_args, sample_work, "spike")
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={spike_script_path}")
+            print(f"[make_cmd] command={spike_command}")
+            print(f"[make_cmd] script={host_script_path}")
+            print(f"[make_cmd] command={host_command}")
+            if not settings["dry_run"]:
+                spike_output = settings["slurm_output"].replace(
+                    "%x", f"dbit_pool_spike_{settings['sample_id']}"
+                )
+                spike_error = settings["slurm_error"].replace(
+                    "%x", f"dbit_pool_spike_{settings['sample_id']}"
+                )
+                host_output = settings["slurm_output"].replace(
+                    "%x", f"dbit_pool_host_{settings['sample_id']}"
+                )
+                host_error = settings["slurm_error"].replace(
+                    "%x", f"dbit_pool_host_{settings['sample_id']}"
+                )
+                spike_slurm_args = argparse.Namespace(
+                    job_name=f"dbit_pool_spike_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=spike_output,
+                    slurm_error=spike_error,
+                    module_line="",
+                )
+                host_slurm_args = argparse.Namespace(
+                    job_name=f"dbit_pool_host_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=host_output,
+                    slurm_error=host_error,
+                    module_line="",
+                )
+                generate_slurm_script(
+                    spike_command, spike_script_path, log_dir, spike_slurm_args
+                )
+                generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
+            generated_scripts.append(spike_script_path)
+            generated_scripts.append(host_script_path)
 
     for script_path in generated_scripts:
         print(f"[make_cmd] generated={script_path}")
