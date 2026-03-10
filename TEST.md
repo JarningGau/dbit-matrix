@@ -43,3 +43,12 @@ pixi run python scripts/make_cmd.py \
   --stage align \
   --runner slurm \
   --dry-run
+
+# 可选：验证多 spike-in 顺序（先 spike-in 再 host）
+pixi run python scripts/align.py \
+  --work-path work/test-DNAme-TAPS \
+  --chunk 0001 \
+  --bwa-index /mnt/e/LiLab_HL/resource/bwa/mm10/genome.fa \
+  --spike-in-index lambda=/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa \
+  --spike-in-index puc19=/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa \
+  --dry-run

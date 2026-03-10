@@ -23,12 +23,20 @@
 ### 4) HPC / Slurm 规范
 - 不在 sbatch 模板中写与当前阶段无关的通用参数（例如不需要则不写 `--time`）。
 - `demux_extract_bc` 在 Slurm 下采用“每个 chunk 一个 sbatch 脚本”，禁止单任务内 `for` 循环串行跑全量 chunk。
+- `align` 在 Slurm 下同样采用“每个 chunk 一个 sbatch 脚本”，并在单个 chunk 脚本内按固定顺序执行该 chunk 的 spike-in 与 host 对齐。
 - Slurm也用pixi来做环境管理，避免module load污染环境。
 
 ### 5) 输入输出契约
 - 每个阶段必须定义稳定的输入/输出命名约定，并在 `README.md` 同步说明。
 - 变更输出文件名或 reads header 格式时，必须同时更新文档与下游依赖。
 - `demux` 输出需区分 matched 与 spike-in，统计文件需包含保留率和拒绝原因。
+- `align` 输入约定：matched 使用 `*.R1/2.demux.fq.gz`，spike-in 使用 `*.R1/2.spike-in.fq.gz`。
+- `align` 输出约定：host 输出 `<chunk>.cb.bam`；spike-in 输出 `<chunk>.<spike_name>.bam`。
+- `align` 执行顺序约定：先跑 spike-in（可多个），再跑 host genome，确保行为可预测且便于回归。
+
+### 5.1) Align Spike-in 配置约束
+- `workflow/*.json` 中 align 相关参数保持显式：`bwa_index`、`bwa_threads`、`bwa_bin`、`sinto_bin`、`samtools_bin`。
+- spike-in 参考配置统一使用 `spike_in_index`，支持对象或 `NAME=INDEX` 列表两种表示法，便于处理 0/1/N 个 spike-in 场景。
 
 ### 6) 环境与可复现性
 - 统一使用 `pixi + uv` 管理环境，依赖以 `pixi.toml + pixi.lock` 为准。

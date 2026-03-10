@@ -57,6 +57,12 @@ pixi run which python
 pixi run python --version
 pixi run which fastp
 pixi run fastp --version
+pixi run which bwa
+pixi run bwa 2>&1 | head -n 1
+pixi run which sinto
+pixi run sinto --help >/dev/null
+pixi run which samtools
+pixi run samtools --version | head -n 1
 ```
 
 3) 运行最小 smoke test（不执行实际提交）
@@ -217,7 +223,7 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
-slurm 的 `fastp_split` 脚本默认包含 `module load fastp`。
+slurm 脚本使用 `pixi` 环境中的工具（不依赖 `module load`）。
 
 ## 生成 demux 命令
 
