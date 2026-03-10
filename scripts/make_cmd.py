@@ -59,6 +59,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--linker2", help="Linker2 sequence for demux stage.")
     parser.add_argument("--tn5", help="Tn5 sequence for demux stage.")
     parser.add_argument(
+        "--linker-edit-distance",
+        type=int,
+        help="Max edit distance for linker/Tn5 fallback in demux stage.",
+    )
+    parser.add_argument(
+        "--barcode-hamming-distance",
+        type=int,
+        help="Max Hamming distance for whitelist fallback in demux stage.",
+    )
+    parser.add_argument(
         "--gzip-level",
         type=int,
         help="gzip compress level (0-9) for demux output FASTQ.",
@@ -130,6 +140,10 @@ def build_demux_chunk_command(
             args.linker2,
             "--tn5",
             args.tn5,
+            "--linker-edit-distance",
+            str(args.linker_edit_distance),
+            "--barcode-hamming-distance",
+            str(args.barcode_hamming_distance),
             "--gzip-level",
             str(args.gzip_level),
         ]
@@ -177,6 +191,8 @@ def build_demux_local_batch_command(args: argparse.Namespace, sample_work: Path)
         f"--linker1 {shlex.quote(args.linker1)} "
         f"--linker2 {shlex.quote(args.linker2)} "
         f"--tn5 {shlex.quote(args.tn5)} "
+        f"--linker-edit-distance {int(args.linker_edit_distance)} "
+        f"--barcode-hamming-distance {int(args.barcode_hamming_distance)} "
         f"--gzip-level {int(args.gzip_level)}\n"
         "done\n"
         "\n"
@@ -261,6 +277,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "linker1": pick(args.linker1, cfg.get("linker1")),
         "linker2": pick(args.linker2, cfg.get("linker2")),
         "tn5": pick(args.tn5, cfg.get("tn5")),
+        "linker_edit_distance": pick(
+            args.linker_edit_distance, cfg.get("linker_edit_distance")
+        ),
+        "barcode_hamming_distance": pick(
+            args.barcode_hamming_distance, cfg.get("barcode_hamming_distance")
+        ),
         "gzip_level": pick(args.gzip_level, cfg.get("gzip_level")),
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -293,6 +315,20 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         settings["linker2"] or "ATCCACGTGCTTGAGAGGCCAGAGCATTCG"
     )
     settings["tn5"] = settings["tn5"] or "CATCGGCGTACGACTAGATGTGTATAAGAGACAG"
+    settings["linker_edit_distance"] = (
+        int(settings["linker_edit_distance"])
+        if settings["linker_edit_distance"] is not None
+        else 1
+    )
+    settings["barcode_hamming_distance"] = (
+        int(settings["barcode_hamming_distance"])
+        if settings["barcode_hamming_distance"] is not None
+        else 1
+    )
+    if settings["linker_edit_distance"] < 0:
+        raise ValueError("linker_edit_distance must be >= 0")
+    if settings["barcode_hamming_distance"] < 0:
+        raise ValueError("barcode_hamming_distance must be >= 0")
     settings["gzip_level"] = (
         int(settings["gzip_level"]) if settings["gzip_level"] is not None else 6
     )
@@ -412,6 +448,8 @@ def main() -> int:
             linker1=settings["linker1"],
             linker2=settings["linker2"],
             tn5=settings["tn5"],
+            linker_edit_distance=settings["linker_edit_distance"],
+            barcode_hamming_distance=settings["barcode_hamming_distance"],
             gzip_level=settings["gzip_level"],
         )
         if settings["runner"] == "local":

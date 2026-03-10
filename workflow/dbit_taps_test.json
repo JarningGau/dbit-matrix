@@ -13,7 +13,9 @@
     "linker1": "GTGGCCGATGTTTCG",
     "linker2": "ATCCACGTGCTTGAGAGGCCAGAGCATTCG",
     "tn5": "CATCGGCGTACGACTAGATGTGTATAAGAGACAG",
-    "gzip_level": 6,
+    "linker_edit_distance": 1,
+    "barcode_hamming_distance": 1,
+    "gzip_level": 1,
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",

@@ -94,6 +94,8 @@ pixi run make-cmd-dry-run
 - linker1: `GTGGCCGATGTTTCG`
 - linker2: `ATCCACGTGCTTGAGAGGCCAGAGCATTCG`
 - tn5: `CATCGGCGTACGACTAGATGTGTATAAGAGACAG`
+- linker_edit_distance: linker1/linker2/tn5 的模糊匹配编辑距离上限（默认 `1`）
+- barcode_hamming_distance: barcode whitelist 纠错的汉明距离上限（默认 `1`）
 - gzip_level: demux 输出 FASTQ 的 gzip 压缩等级（`0-9`，默认 `6`）
 
 ## 核心处理流程
@@ -117,12 +119,14 @@ fastp \
    每个 chunk 一个命令：
 
 ```bash
-python scripts/extract_bc.py \
+pixi run python scripts/extract_bc.py \
   "$work_path/shard_fastq/0001.R1.fq.gz" \
   "$work_path/shard_fastq/0001.R2.fq.gz" \
   -b1 configs/barcodes_50a.tsv \
   -b2 configs/barcodes_50a.tsv \
-  -o "$work_path/demux/0001"
+  -o "$work_path/demux/0001" \
+  --linker-edit-distance 1 \
+  --barcode-hamming-distance 1
 ```
 
 输出：
@@ -137,6 +141,17 @@ python scripts/extract_bc.py \
 运行 `extract_bc.py` 时会周期性输出处理速度（`xx reads/s`），默认每秒刷新一次；
 可用 `--progress-interval-seconds` 调整刷新间隔（设为 `0` 可关闭）。
 可用 `--gzip-level` 调整输出压缩等级（`0-9`，等级越低通常越快）。
+定位和匹配策略：
+
+- 模糊匹配底层使用 `fuzzysearch.find_near_matches`（仅在 exact 失败时启用）。
+- `linker2` 在前端窗口内定位（`0 ~ bc2_len + len(linker2) + 12`），并要求窗口内唯一可接受命中（多命中或并列最优视为歧义，直接拒绝）。
+- 用 linker2 左侧/右侧固定长度提取 barcodeB/barcodeA，再校验 linker1。
+- `linker1` 采用分层容错：exact -> mismatch-only -> full edit distance。
+- Tn5 检索用于界定 insert 起点：
+  - `len(tn5) > 15` 时仅用 Tn5 右侧 15bp 检索；
+  - 否则使用 Tn5 全长检索；
+  - 二者都只在 `after_pos` 后的小窗口内搜索并要求唯一可接受命中，命中后直接计算 `tn5_end`。
+- whitelist 匹配顺序为：精确匹配 -> 汉明距离退化匹配（需唯一最优）。
 
 3. alignment
 4. pool

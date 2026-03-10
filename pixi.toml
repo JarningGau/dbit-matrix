@@ -10,3 +10,6 @@ fastp = "0.24.*"
 [tasks]
 make-cmd-dry-run = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --dry-run"
 make-cmd-submit = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --submit"
+
+[pypi-dependencies]
+fuzzysearch = ">=0.8.1, <0.9"

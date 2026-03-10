@@ -211,7 +211,12 @@ def find_pattern_layered(
         max_l_dist=max_edit_distance,
     )
     if near_matches:
-        return start_pos + near_matches[0].start
+        # unique best by edit distance; ties are ambiguous
+        best_dist = min(match.dist for match in near_matches)
+        best = [match for match in near_matches if match.dist == best_dist]
+        if len(best) != 1:
+            return None
+        return start_pos + best[0].start
     return None
 
 
@@ -225,6 +230,48 @@ def hamming_distance(a: str, b: str, stop_at: int | None = None) -> int:
             if stop_at is not None and dist > stop_at:
                 return dist
     return dist
+
+
+def find_exact_positions(text: str, pattern: str, start_pos: int, end_pos: int) -> list[int]:
+    positions: list[int] = []
+    if not pattern:
+        return positions
+    i = text.find(pattern, start_pos, end_pos)
+    while i >= 0:
+        positions.append(i)
+        i = text.find(pattern, i + 1, end_pos)
+    return positions
+
+
+def find_unique_pattern_in_window(
+    text: str,
+    pattern: str,
+    start_pos: int,
+    end_pos: int,
+    max_edit_distance: int,
+) -> int | None:
+    if start_pos < 0:
+        start_pos = 0
+    if end_pos > len(text):
+        end_pos = len(text)
+    if start_pos >= end_pos:
+        return None
+
+    # 1) Exact unique
+    exact_positions = find_exact_positions(text, pattern, start_pos, end_pos)
+    if len(exact_positions) == 1:
+        return exact_positions[0]
+    if len(exact_positions) > 1:
+        return None
+
+    # 2) Layered fuzzy in window
+    return find_pattern_layered(
+        text,
+        pattern,
+        start_pos=start_pos,
+        end_pos=end_pos,
+        max_edit_distance=max_edit_distance,
+    )
 
 
 def match_whitelist(obs: str, allow_set: set[str], max_hamming: int) -> str | None:
@@ -251,22 +298,18 @@ def match_whitelist(obs: str, allow_set: set[str], max_hamming: int) -> str | No
     return best
 
 
-def find_linker2(s1_u: str, linker2: str, max_edit_distance: int) -> tuple[int, int] | None:
-    # Exact path searches globally to maximize recall.
-    pos = s1_u.find(linker2)
-    if pos >= 0:
-        return pos, pos + len(linker2)
-    if max_edit_distance <= 0:
-        return None
-
-    # Fuzzy path is limited to a small front window (DBiT linker2 is near read start).
-    fuzzy_start = 0
-    fuzzy_end = min(len(s1_u), len(linker2) + 24)
-    pos = find_pattern_layered(
+def find_linker2(
+    s1_u: str,
+    linker2: str,
+    max_edit_distance: int,
+    window_start: int,
+    window_end: int,
+) -> tuple[int, int] | None:
+    pos = find_unique_pattern_in_window(
         s1_u,
         linker2,
-        start_pos=fuzzy_start,
-        end_pos=fuzzy_end,
+        start_pos=window_start,
+        end_pos=window_end,
         max_edit_distance=max_edit_distance,
     )
     if pos is None:
@@ -275,7 +318,11 @@ def find_linker2(s1_u: str, linker2: str, max_edit_distance: int) -> tuple[int, 
 
 
 def find_tn5(
-    s1_u: str, tn5: str, after_pos: int, max_edit_distance: int
+    s1_u: str,
+    tn5: str,
+    after_pos: int,
+    max_edit_distance: int,
+    window_span: int = 40,
 ) -> tuple[int, int] | None:
     if len(tn5) > 15:
         seed = tn5[-15:]
@@ -283,14 +330,15 @@ def find_tn5(
     else:
         seed = tn5
         offset = 0
-    seed_start_min = after_pos + offset
-    if seed_start_min >= len(s1_u):
+    seed_window_start = after_pos + offset
+    seed_window_end = min(len(s1_u), seed_window_start + window_span)
+    if seed_window_start >= len(s1_u) or seed_window_start >= seed_window_end:
         return None
-    seed_pos = find_pattern_layered(
+    seed_pos = find_unique_pattern_in_window(
         s1_u,
         seed,
-        start_pos=seed_start_min,
-        end_pos=len(s1_u),
+        start_pos=seed_window_start,
+        end_pos=seed_window_end,
         max_edit_distance=max_edit_distance,
     )
     if seed_pos is None:
@@ -361,8 +409,10 @@ def main() -> int:
             return
         reads_now = total - reads_last
         rate = reads_now / dt
+        kept_fraction = (kept / total) if total else 0.0
         print(
-            f"[extract_bc] progress reads={total} kept={kept} speed={rate:.0f} reads/s"
+            f"[extract_bc] progress reads={total} kept={kept} "
+            f"keep_rate={kept_fraction:.4f} speed={rate:.0f} reads/s"
         )
         t_last = now
         reads_last = total
@@ -392,8 +442,14 @@ def main() -> int:
                     report_progress()
                     continue
 
+                linker2_window_start = 0
+                linker2_window_end = min(len(s1_u), bc2_len + len(linker2) + 12)
                 linker2_pos = find_linker2(
-                    s1_u, linker2, max_edit_distance=args.linker_edit_distance
+                    s1_u,
+                    linker2,
+                    max_edit_distance=args.linker_edit_distance,
+                    window_start=linker2_window_start,
+                    window_end=linker2_window_end,
                 )
                 if linker2_pos is None:
                     reject_counts["structure_mismatch"] += 1
@@ -513,8 +569,10 @@ def main() -> int:
     print(f"[extract_bc] output_r2_spike_in={out_r2_spike}")
     print(f"[extract_bc] stats={out_stats}")
     elapsed = max(time.monotonic() - t0, 1e-9)
+    keep_rate = (kept / total) if total else 0.0
     print(
-        f"[extract_bc] kept={kept}/{total} spike_in={total - kept} "
+        f"[extract_bc] kept={kept}/{total} keep_rate={keep_rate:.4f} "
+        f"spike_in={total - kept} "
         f"avg_speed={total / elapsed:.1f} reads/s"
     )
     return 0
