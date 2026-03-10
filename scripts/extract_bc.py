@@ -11,11 +11,13 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Iterator, TextIO
 
+from fuzzysearch import find_near_matches
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Parse R1 as barcodeB-linker2-barcodeA-linker1-Tn5-insert, "
+            "Locate linker2/Tn5 on R1, extract barcodeA/barcodeB, "
             "filter by whitelist, and output paired FASTQ."
         )
     )
@@ -57,6 +59,18 @@ def parse_args() -> argparse.Namespace:
         "--tn5",
         default="CATCGGCGTACGACTAGATGTGTATAAGAGACAG",
         help="Expected Tn5 mosaic end sequence on R1.",
+    )
+    parser.add_argument(
+        "--linker-edit-distance",
+        type=int,
+        default=1,
+        help="Max edit distance for linker/Tn5 matching fallback. Default: 1.",
+    )
+    parser.add_argument(
+        "--barcode-hamming-distance",
+        type=int,
+        default=1,
+        help="Max Hamming distance for whitelist fallback. Default: 1.",
     )
     parser.add_argument(
         "--progress-interval-seconds",
@@ -115,10 +129,187 @@ def annotate_header(header: str, bc1: str, bc2: str) -> str:
     return f"{parts[0]} {parts[1]}"
 
 
+def levenshtein_distance(a: str, b: str, max_dist: int | None = None) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+
+    if max_dist is not None and abs(len(a) - len(b)) > max_dist:
+        return max_dist + 1
+
+    if len(a) > len(b):
+        a, b = b, a
+
+    prev = list(range(len(a) + 1))
+    for i, bc in enumerate(b, start=1):
+        curr = [i]
+        row_min = i
+        for j, ac in enumerate(a, start=1):
+            cost = 0 if ac == bc else 1
+            curr_val = min(
+                prev[j] + 1,
+                curr[j - 1] + 1,
+                prev[j - 1] + cost,
+            )
+            curr.append(curr_val)
+            row_min = min(row_min, curr_val)
+        if max_dist is not None and row_min > max_dist:
+            return max_dist + 1
+        prev = curr
+    return prev[-1]
+
+
+def find_pattern_layered(
+    text: str,
+    pattern: str,
+    start_pos: int,
+    end_pos: int,
+    max_edit_distance: int,
+) -> int | None:
+    if not pattern:
+        return None
+    if start_pos < 0:
+        start_pos = 0
+    if end_pos > len(text):
+        end_pos = len(text)
+    if start_pos >= end_pos:
+        return None
+
+    max_start_exact = min(end_pos - len(pattern), len(text) - len(pattern))
+    if max_start_exact < start_pos:
+        max_start_exact = start_pos - 1
+
+    # 1) Exact fast path.
+    if max_start_exact >= start_pos:
+        exact = text.find(pattern, start_pos, max_start_exact + len(pattern))
+        if exact >= 0:
+            return exact
+
+    if max_edit_distance <= 0:
+        return None
+
+    # 2) Mismatch-only fallback (substitution).
+    if max_start_exact >= start_pos:
+        for pos in range(start_pos, max_start_exact + 1):
+            if (
+                hamming_distance(
+                    text[pos : pos + len(pattern)],
+                    pattern,
+                    stop_at=max_edit_distance,
+                )
+                <= max_edit_distance
+            ):
+                return pos
+
+    # 3) Full edit-distance fallback (handles indel) via fuzzysearch.
+    near_matches = find_near_matches(
+        pattern,
+        text[start_pos:end_pos],
+        max_l_dist=max_edit_distance,
+    )
+    if near_matches:
+        return start_pos + near_matches[0].start
+    return None
+
+
+def hamming_distance(a: str, b: str, stop_at: int | None = None) -> int:
+    if len(a) != len(b):
+        raise ValueError("hamming distance requires equal-length strings")
+    dist = 0
+    for ac, bc in zip(a, b):
+        if ac != bc:
+            dist += 1
+            if stop_at is not None and dist > stop_at:
+                return dist
+    return dist
+
+
+def match_whitelist(obs: str, allow_set: set[str], max_hamming: int) -> str | None:
+    if obs in allow_set:
+        return obs
+    if max_hamming <= 0:
+        return None
+
+    best: str | None = None
+    best_dist = max_hamming + 1
+    tie = False
+    for candidate in allow_set:
+        if len(candidate) != len(obs):
+            continue
+        dist = hamming_distance(obs, candidate, stop_at=best_dist - 1)
+        if dist < best_dist:
+            best = candidate
+            best_dist = dist
+            tie = False
+        elif dist == best_dist:
+            tie = True
+    if best is None or best_dist > max_hamming or tie:
+        return None
+    return best
+
+
+def find_linker2(s1_u: str, linker2: str, max_edit_distance: int) -> tuple[int, int] | None:
+    # Exact path searches globally to maximize recall.
+    pos = s1_u.find(linker2)
+    if pos >= 0:
+        return pos, pos + len(linker2)
+    if max_edit_distance <= 0:
+        return None
+
+    # Fuzzy path is limited to a small front window (DBiT linker2 is near read start).
+    fuzzy_start = 0
+    fuzzy_end = min(len(s1_u), len(linker2) + 24)
+    pos = find_pattern_layered(
+        s1_u,
+        linker2,
+        start_pos=fuzzy_start,
+        end_pos=fuzzy_end,
+        max_edit_distance=max_edit_distance,
+    )
+    if pos is None:
+        return None
+    return pos, pos + len(linker2)
+
+
+def find_tn5(
+    s1_u: str, tn5: str, after_pos: int, max_edit_distance: int
+) -> tuple[int, int] | None:
+    if len(tn5) > 15:
+        seed = tn5[-15:]
+        offset = len(tn5) - len(seed)
+    else:
+        seed = tn5
+        offset = 0
+    seed_start_min = after_pos + offset
+    if seed_start_min >= len(s1_u):
+        return None
+    seed_pos = find_pattern_layered(
+        s1_u,
+        seed,
+        start_pos=seed_start_min,
+        end_pos=len(s1_u),
+        max_edit_distance=max_edit_distance,
+    )
+    if seed_pos is None:
+        return None
+    tn5_start = seed_pos - offset
+    tn5_end = tn5_start + len(tn5)
+    if tn5_start < 0 or tn5_end > len(s1_u):
+        return None
+    return tn5_start, tn5_end
+
+
 def main() -> int:
     args = parse_args()
     if args.gzip_level < 0 or args.gzip_level > 9:
         raise ValueError("--gzip-level must be between 0 and 9")
+    if args.linker_edit_distance < 0:
+        raise ValueError("--linker-edit-distance must be >= 0")
+    if args.barcode_hamming_distance < 0:
+        raise ValueError("--barcode-hamming-distance must be >= 0")
     linker1 = args.linker1.upper()
     linker2 = args.linker2.upper()
     tn5 = args.tn5.upper()
@@ -146,6 +337,9 @@ def main() -> int:
     reject_counts: dict[str, int] = {
         "short_r1": 0,
         "structure_mismatch": 0,
+        "linker2_not_found": 0,
+        "linker1_mismatch": 0,
+        "tn5_not_found": 0,
         "barcode1_not_in_whitelist": 0,
         "barcode2_not_in_whitelist": 0,
     }
@@ -198,28 +392,87 @@ def main() -> int:
                     report_progress()
                     continue
 
-                barcode2 = s1_u[:bc2_len]
-                linker2_obs = s1_u[bc2_len : bc2_len + len(linker2)]
-                bc1_start = bc2_len + len(linker2)
-                barcode1 = s1_u[bc1_start : bc1_start + bc1_len]
-                linker1_start = bc1_start + bc1_len
-                linker1_obs = s1_u[linker1_start : linker1_start + len(linker1)]
-                tn5_start = linker1_start + len(linker1)
-                tn5_obs = s1_u[tn5_start : tn5_start + len(tn5)]
-
-                if linker1_obs != linker1 or linker2_obs != linker2 or tn5_obs != tn5:
+                linker2_pos = find_linker2(
+                    s1_u, linker2, max_edit_distance=args.linker_edit_distance
+                )
+                if linker2_pos is None:
                     reject_counts["structure_mismatch"] += 1
+                    reject_counts["linker2_not_found"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
                     report_progress()
                     continue
-                if barcode1 not in bc1_allow:
+                linker2_start, linker2_end = linker2_pos
+                bc2_start = linker2_start - bc2_len
+                bc1_end = linker2_end + bc1_len
+                linker1_start = bc1_end
+                linker1_end = linker1_start + len(linker1)
+                if bc2_start < 0 or linker1_end > len(s1_u):
+                    reject_counts["structure_mismatch"] += 1
+                    reject_counts["linker1_mismatch"] += 1
+                    r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
+                    r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
+                    continue
+
+                barcode2_obs = s1_u[bc2_start:linker2_start]
+                barcode1_obs = s1_u[linker2_end:bc1_end]
+                linker1_obs = s1_u[linker1_start:linker1_end]
+                # linker1 fast path: exact first, then mismatch-only, then full edit.
+                linker1_ok = linker1_obs == linker1
+                if not linker1_ok and args.linker_edit_distance > 0:
+                    if (
+                        hamming_distance(
+                            linker1_obs, linker1, stop_at=args.linker_edit_distance
+                        )
+                        <= args.linker_edit_distance
+                    ):
+                        linker1_ok = True
+                    elif (
+                        levenshtein_distance(
+                            linker1_obs,
+                            linker1,
+                            max_dist=args.linker_edit_distance,
+                        )
+                        <= args.linker_edit_distance
+                    ):
+                        linker1_ok = True
+                if not linker1_ok:
+                    reject_counts["structure_mismatch"] += 1
+                    reject_counts["linker1_mismatch"] += 1
+                    r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
+                    r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
+                    continue
+
+                tn5_pos = find_tn5(
+                    s1_u,
+                    tn5,
+                    after_pos=linker1_end,
+                    max_edit_distance=args.linker_edit_distance,
+                )
+                if tn5_pos is None:
+                    reject_counts["structure_mismatch"] += 1
+                    reject_counts["tn5_not_found"] += 1
+                    r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
+                    r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
+                    continue
+                _tn5_start, tn5_end = tn5_pos
+
+                barcode1 = match_whitelist(
+                    barcode1_obs, bc1_allow, args.barcode_hamming_distance
+                )
+                if barcode1 is None:
                     reject_counts["barcode1_not_in_whitelist"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
                     report_progress()
                     continue
-                if barcode2 not in bc2_allow:
+                barcode2 = match_whitelist(
+                    barcode2_obs, bc2_allow, args.barcode_hamming_distance
+                )
+                if barcode2 is None:
                     reject_counts["barcode2_not_in_whitelist"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
@@ -229,8 +482,8 @@ def main() -> int:
                 kept += 1
                 annotated_h1 = annotate_header(h1, barcode1, barcode2)
                 annotated_h2 = annotate_header(h2, barcode1, barcode2)
-                trimmed_s1 = s1[prefix_len:]
-                trimmed_q1 = q1[prefix_len:]
+                trimmed_s1 = s1[tn5_end:]
+                trimmed_q1 = q1[tn5_end:]
                 r1_demux_out.write(f"{annotated_h1}\n{trimmed_s1}\n{p1}\n{trimmed_q1}\n")
                 r2_demux_out.write(f"{annotated_h2}\n{s2}\n{p2}\n{q2}\n")
                 report_progress()
