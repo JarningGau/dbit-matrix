@@ -251,7 +251,33 @@ pixi run python scripts/split_bams.py \
 - 统计文件：`$work_path/split_bams/per_spot_read_counts.tsv`
 - 统计表列：`X_index`, `Y_index`, `spot`, `reads`
 
-6. call CpG methylation rates
+6. sort spot BAMs in parallel
+
+当 split 阶段输出 spot BAM 后，可用 `scripts/bam_sort_parallel.py` 并行执行：
+- `samtools sort -o <spot>.sorted.bam <spot>.bam`
+- `samtools index <spot>.sorted.bam`
+- 删除原始 `<spot>.bam`
+
+示例：
+
+```bash
+pixi run python scripts/bam_sort_parallel.py \
+  --work-path "$work_path" \
+  --jobs 8
+```
+
+也可直接指定 BAM 目录：
+
+```bash
+pixi run python scripts/bam_sort_parallel.py \
+  --bam-dir "$work_path/split_bams" \
+  --jobs 32 \
+  --dry-run
+```
+
+默认会扫描 `"$work_path/split_bams/"**/*.bam`，自动跳过 `*.sorted.bam`。
+
+7. call CpG methylation rates
 
 ## 生成 fastp 命令
 
@@ -366,6 +392,26 @@ pixi run python scripts/make_cmd.py \
 ```
 
 执行时会读取 `"$work_path/pooled/pooled.byCB.bam"`，并调用 `scripts/split_bams.py` 输出到 `"$work_path/split_bams/"`。  
+随后会继续调用 `scripts/bam_sort_parallel.py`，对 split 输出的 spot BAM 做并行 `sort + index + remove raw bam`。  
 当 workflow 配置中的 `split_smoke=true` 或命令行增加 `--split-smoke` 时，仅随机输出 16 个非空 spot BAM。  
-当 `--runner local` 时，生成 `05_split.sh`。  
-当 `--runner slurm` 且 `--stage split` 时，会生成单个 `05_split.sbatch`；`--submit` 会提交该任务。
+当 `--runner local` 时，生成 `05_split.sh`，脚本内按顺序执行 `split -> sort`。  
+当 `--runner slurm` 且 `--stage split` 时，会生成两个 sbatch：`05_split_bams.sbatch` 与 `05_split_sort.sbatch`；`--submit` 时会先提交 split，再以 `afterok` 依赖提交 sort。  
+`bam_sort_parallel.py` 的默认并发数为 `8`，也可通过 `split_sort_jobs` 或 `--split-sort-jobs` 调整。
+若需要为 split 下的两个 sbatch 设置不同资源，推荐在 `workflow/*.json` 中使用 step-specific 结构：
+
+```json
+"slurm": {
+  "split": {
+    "split_bams": {
+      "partition": "amd-ep2,intel-sc3",
+      "mem": "8G",
+      "cpus_per_task": 1
+    },
+    "sort": {
+      "partition": "amd-ep2,intel-sc3",
+      "mem": "8G",
+      "cpus_per_task": 8
+    }
+  }
+}
+```
