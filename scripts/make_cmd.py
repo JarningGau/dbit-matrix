@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        choices=["fastp_split", "demux_extract_bc", "align", "pool"],
+        choices=["fastp_split", "demux_extract_bc", "align", "pool", "split"],
         help="Workflow stage to generate command script for. Default: fastp_split.",
     )
     parser.add_argument("--sample-id", help="Sample identifier.")
@@ -102,6 +102,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--host-sort-mem",
         help="Memory per thread for host samtools sort -m in pool stage. Default: 16G.",
+    )
+    parser.add_argument(
+        "--split-barcodes",
+        help="Barcode whitelist path for split stage. Default: barcode1_whitelist.",
+    )
+    parser.add_argument(
+        "--split-cb-tag",
+        help="CB-like tag name used in split stage. Default: CB.",
+    )
+    parser.add_argument(
+        "--split-threads-read",
+        type=int,
+        help="Reader threads for split stage. Default: 1.",
+    )
+    parser.add_argument(
+        "--split-threads-write",
+        type=int,
+        help="Writer threads for split stage. Default: 1.",
+    )
+    parser.add_argument(
+        "--split-smoke",
+        action="store_true",
+        default=None,
+        help="Enable smoke mode for split stage and emit up to 16 spot BAMs.",
     )
     parser.add_argument(
         "--spike-in-index",
@@ -322,6 +346,29 @@ def build_pool_command(
     return quoted(command)
 
 
+def build_split_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path("scripts/split_bams.py")
+    command = [
+        sys.executable,
+        str(script_path),
+        "--in-bam",
+        str(sample_work / "pooled" / "pooled.byCB.bam"),
+        "--barcodes",
+        args.split_barcodes,
+        "--out-dir",
+        str(sample_work / "split_bams"),
+        "--cb-tag",
+        args.split_cb_tag,
+        "--threads-read",
+        str(args.split_threads_read),
+        "--threads-write",
+        str(args.split_threads_write),
+    ]
+    if args.split_smoke:
+        command.append("--smoke")
+    return quoted(command)
+
+
 def discover_demux_chunks(sample_work: Path) -> list[tuple[str, Path, Path, Path]]:
     chunk_dir = sample_work / "shard_fastq"
     demux_dir = sample_work / "demux"
@@ -402,7 +449,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     if any(
         key in slurm_cfg_raw
-        for key in ("fastp_split", "demux_extract_bc", "align", "pool")
+        for key in ("fastp_split", "demux_extract_bc", "align", "pool", "split")
     ):
         stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
     else:
@@ -448,6 +495,18 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "samtools_bin": pick(args.samtools_bin, cfg.get("samtools_bin")),
         "samtools_threads": pick(args.samtools_threads, cfg.get("samtools_threads")),
         "host_sort_mem": pick(args.host_sort_mem, cfg.get("host_sort_mem")),
+        "split_barcodes": pick(
+            args.split_barcodes,
+            cfg.get("split_barcodes", cfg.get("barcode1_whitelist")),
+        ),
+        "split_cb_tag": pick(args.split_cb_tag, cfg.get("split_cb_tag")),
+        "split_threads_read": pick(
+            args.split_threads_read, cfg.get("split_threads_read")
+        ),
+        "split_threads_write": pick(
+            args.split_threads_write, cfg.get("split_threads_write")
+        ),
+        "split_smoke": pick(args.split_smoke, cfg.get("split_smoke")),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
@@ -471,6 +530,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         required.extend(["bwa_index"])
     elif stage == "pool":
         pass
+    elif stage == "split":
+        required.extend(["split_barcodes"])
     else:
         raise ValueError(f"unsupported stage: {stage}")
 
@@ -521,6 +582,25 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if settings["samtools_threads"] <= 0:
         raise ValueError("samtools_threads must be > 0")
     settings["host_sort_mem"] = settings["host_sort_mem"] or "16G"
+    settings["split_barcodes"] = (
+        settings["split_barcodes"] or settings["barcode1_whitelist"]
+    )
+    settings["split_cb_tag"] = settings["split_cb_tag"] or "CB"
+    settings["split_threads_read"] = (
+        int(settings["split_threads_read"])
+        if settings["split_threads_read"] is not None
+        else 1
+    )
+    settings["split_threads_write"] = (
+        int(settings["split_threads_write"])
+        if settings["split_threads_write"] is not None
+        else 1
+    )
+    if settings["split_threads_read"] <= 0:
+        raise ValueError("split_threads_read must be > 0")
+    if settings["split_threads_write"] <= 0:
+        raise ValueError("split_threads_write must be > 0")
+    settings["split_smoke"] = bool(settings["split_smoke"])
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -758,7 +838,7 @@ def main() -> int:
                     )
                     generate_slurm_script(command, script_path, log_dir, slurm_args)
                 generated_scripts.append(script_path)
-    else:
+    elif settings["stage"] == "pool":
         command_args = argparse.Namespace(
             samtools_bin=settings["samtools_bin"],
             samtools_threads=settings["samtools_threads"],
@@ -826,6 +906,44 @@ def main() -> int:
                 generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
             generated_scripts.append(spike_script_path)
             generated_scripts.append(host_script_path)
+    else:
+        command_args = argparse.Namespace(
+            split_barcodes=settings["split_barcodes"],
+            split_cb_tag=settings["split_cb_tag"],
+            split_threads_read=settings["split_threads_read"],
+            split_threads_write=settings["split_threads_write"],
+            split_smoke=settings["split_smoke"],
+        )
+        command = build_split_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "05_split.sh"
+        else:
+            script_path = command_dir / "05_split.sbatch"
+        print(f"[make_cmd] runner={settings['runner']}")
+        print(f"[make_cmd] stage={settings['stage']}")
+        print(f"[make_cmd] sample_id={settings['sample_id']}")
+        print(f"[make_cmd] script={script_path}")
+        print(f"[make_cmd] command={command}")
+        if settings["dry_run"]:
+            return 0
+        if settings["runner"] == "local":
+            generate_local_script(command, script_path)
+        else:
+            slurm_args = argparse.Namespace(
+                job_name=f"dbit_split_{settings['sample_id']}",
+                slurm_partition=settings["slurm_partition"],
+                slurm_mem=settings["slurm_mem"],
+                slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                slurm_output=settings["slurm_output"].replace(
+                    "%x", f"dbit_split_{settings['sample_id']}"
+                ),
+                slurm_error=settings["slurm_error"].replace(
+                    "%x", f"dbit_split_{settings['sample_id']}"
+                ),
+                module_line="",
+            )
+            generate_slurm_script(command, script_path, log_dir, slurm_args)
+        generated_scripts.append(script_path)
 
     for script_path in generated_scripts:
         print(f"[make_cmd] generated={script_path}")

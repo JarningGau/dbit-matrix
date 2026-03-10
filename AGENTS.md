@@ -7,7 +7,7 @@
 
 ### 1) 迭代策略
 - 先做最小可运行闭环（MVP），再做扩展，不做“先设计全量再实现”。
-- 以阶段推进：`fastp_split -> demux_extract_bc -> align -> pool -> call`。
+- 以阶段推进：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call`。
 - 每次迭代只引入一个主要变化点，避免多变量叠加导致排障困难。
 
 ### 2) 脚本与职责边界

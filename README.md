@@ -217,6 +217,40 @@ samtools cat -o $work_path/pooled/pooled.puc19.bam $work_path/align_shards/*.puc
 ```
 
 5. split bam by spots
+
+输入来源：`$work_path/pooled/pooled.byCB.bam`
+
+按照 `CB` tag 分割 BAM 文件。当前约定与 `scripts/split_bams.py` 一致：
+- 当前 `CB` tag 格式为 `CB:Z:AAACATCG+AAACATCG`。
+- 读取 `CB` tag 中 `+` 左侧作为 X barcode，右侧作为 Y barcode。
+- 使用 barcode whitelist（如 `configs/barcodes_50a.tsv`）将 X/Y barcode 映射为 spot 坐标。
+- 缺失 `CB` tag、`CB` 格式非法，或 barcode 不在 whitelist 中的 reads 会被跳过。
+
+示例：
+
+```bash
+pixi run python scripts/split_bams.py \
+  --in-bam "$work_path/pooled/pooled.byCB.bam" \
+  --barcodes configs/barcodes_50a.tsv \
+  --out-dir "$work_path/split_bams"
+```
+
+测试阶段可增加 `--smoke`，随机抽样输出 16 个非空 spot BAM（若不足 16 个则输出全部）：
+
+```bash
+pixi run python scripts/split_bams.py \
+  --in-bam "$work_path/pooled/pooled.byCB.bam" \
+  --barcodes configs/barcodes_50a.tsv \
+  --out-dir "$work_path/split_bams.smoke" \
+  --smoke
+```
+
+输出：
+- 输出目录：`$work_path/split_bams/`
+- 分 spot BAM：`$work_path/split_bams/<X_index>/<X_index>_<Y_index>.bam`
+- 统计文件：`$work_path/split_bams/per_spot_read_counts.tsv`
+- 统计表列：`X_index`, `Y_index`, `spot`, `reads`
+
 6. call CpG methylation rates
 
 ## 生成 fastp 命令
@@ -313,3 +347,25 @@ pixi run python scripts/make_cmd.py \
 执行时会扫描 `"$work_path/align_shards/"*.cb.bam` 和 `"$work_path/align_shards/"*.<spike_name>.bam`。  
 当 `--runner local` 时，生成 `04_pool.sh`，内部先处理 spike-in，再处理 host。  
 当 `--runner slurm` 且 `--stage pool` 时，会生成两个 sbatch：`04_pool_spike.sbatch` 与 `04_pool_host.sbatch`；`--submit` 会依次提交这两个任务。
+
+## 生成 split 命令
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage split \
+  --dry-run
+```
+
+生成并立刻提交
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage split \
+  --submit
+```
+
+执行时会读取 `"$work_path/pooled/pooled.byCB.bam"`，并调用 `scripts/split_bams.py` 输出到 `"$work_path/split_bams/"`。  
+当 workflow 配置中的 `split_smoke=true` 或命令行增加 `--split-smoke` 时，仅随机输出 16 个非空 spot BAM。  
+当 `--runner local` 时，生成 `05_split.sh`。  
+当 `--runner slurm` 且 `--stage split` 时，会生成单个 `05_split.sbatch`；`--submit` 会提交该任务。

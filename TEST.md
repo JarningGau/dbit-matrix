@@ -74,3 +74,19 @@ pixi run python scripts/make_cmd.py \
   --stage pool \
   --runner slurm \
   --dry-run
+
+# split_bams CLI 帮助
+pixi run python scripts/split_bams.py --help
+
+# split stage 命令生成回归
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage split \
+  --dry-run
+
+# 可选：split_bams smoke 模式，仅随机输出 16 个非空 spot BAM
+pixi run python scripts/split_bams.py \
+  --in-bam work/test-DNAme-TAPS/pooled/pooled.byCB.bam \
+  --barcodes configs/barcodes_50a.tsv \
+  --out-dir work/test-DNAme-TAPS/split_bams.smoke \
+  --smoke
