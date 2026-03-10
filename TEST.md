@@ -28,3 +28,18 @@ pixi run python scripts/extract_bc.py \
   --gzip-level 1
 
 [extract_bc] kept=275554/487575 spike_in=212021 avg_speed=64884.6 reads/s
+
+# align CLI 帮助与命令生成回归
+pixi run python scripts/align.py --help
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage align \
+  --runner local \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage align \
+  --runner slurm \
+  --dry-run

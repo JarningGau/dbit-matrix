@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        choices=["fastp_split", "demux_extract_bc"],
+        choices=["fastp_split", "demux_extract_bc", "align"],
         help="Workflow stage to generate command script for. Default: fastp_split.",
     )
     parser.add_argument("--sample-id", help="Sample identifier.")
@@ -72,6 +72,36 @@ def parse_args() -> argparse.Namespace:
         "--gzip-level",
         type=int,
         help="gzip compress level (0-9) for demux output FASTQ.",
+    )
+    parser.add_argument(
+        "--bwa-index",
+        help="bwa index prefix for align stage.",
+    )
+    parser.add_argument(
+        "--bwa-threads",
+        type=int,
+        help="Thread count for bwa mem in align stage. Default: 2.",
+    )
+    parser.add_argument(
+        "--bwa-bin",
+        help="bwa executable path or command name. Default: bwa.",
+    )
+    parser.add_argument(
+        "--sinto-bin",
+        help="sinto executable path or command name. Default: sinto.",
+    )
+    parser.add_argument(
+        "--samtools-bin",
+        help="samtools executable path or command name. Default: samtools.",
+    )
+    parser.add_argument(
+        "--spike-in-index",
+        action="append",
+        default=None,
+        help=(
+            "Spike-in reference in NAME=INDEX format. "
+            "May be specified multiple times."
+        ),
     )
     parser.add_argument(
         "--submit",
@@ -200,6 +230,56 @@ def build_demux_local_batch_command(args: argparse.Namespace, sample_work: Path)
     )
 
 
+def build_align_chunk_command(
+    args: argparse.Namespace, sample_work: Path, chunk: str
+) -> str:
+    script_path = Path("scripts/align.py")
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--chunk",
+        chunk,
+        "--bwa-index",
+        args.bwa_index,
+        "--bwa-threads",
+        str(args.bwa_threads),
+        "--bwa-bin",
+        args.bwa_bin,
+        "--sinto-bin",
+        args.sinto_bin,
+        "--samtools-bin",
+        args.samtools_bin,
+    ]
+    for item in args.spike_in_index:
+        command.extend(["--spike-in-index", item])
+    return quoted(command)
+
+
+def build_align_local_batch_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path("scripts/align.py")
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--bwa-index",
+        args.bwa_index,
+        "--bwa-threads",
+        str(args.bwa_threads),
+        "--bwa-bin",
+        args.bwa_bin,
+        "--sinto-bin",
+        args.sinto_bin,
+        "--samtools-bin",
+        args.samtools_bin,
+    ]
+    for item in args.spike_in_index:
+        command.extend(["--spike-in-index", item])
+    return quoted(command)
+
+
 def discover_demux_chunks(sample_work: Path) -> list[tuple[str, Path, Path, Path]]:
     chunk_dir = sample_work / "shard_fastq"
     demux_dir = sample_work / "demux"
@@ -212,6 +292,40 @@ def discover_demux_chunks(sample_work: Path) -> list[tuple[str, Path, Path, Path
         out_prefix = demux_dir / chunk
         chunks.append((chunk, r1, r2, out_prefix))
     return chunks
+
+
+def discover_align_chunks(sample_work: Path) -> list[tuple[str, Path, Path]]:
+    demux_dir = sample_work / "demux"
+    chunks: list[tuple[str, Path, Path]] = []
+    for r1 in sorted(demux_dir.glob("*.R1.demux.fq.gz")):
+        chunk = r1.name[: -len(".R1.demux.fq.gz")]
+        r2 = demux_dir / f"{chunk}.R2.demux.fq.gz"
+        if not r2.exists():
+            raise ValueError(f"missing paired R2 for chunk '{chunk}': {r2}")
+        chunks.append((chunk, r1, r2))
+    return chunks
+
+
+def normalize_spike_in_index(raw) -> list[str]:
+    if raw in (None, ""):
+        return []
+    if isinstance(raw, list):
+        values = raw
+    elif isinstance(raw, dict):
+        values = [f"{name}={index}" for name, index in raw.items()]
+    else:
+        raise ValueError("spike_in_index must be a list or object in workflow config")
+    normalized: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            raise ValueError("spike_in_index entries must be strings")
+        name, sep, index = item.partition("=")
+        if not sep or not name.strip() or not index.strip():
+            raise ValueError(
+                f"invalid spike_in_index entry (expected NAME=INDEX): {item}"
+            )
+        normalized.append(f"{name.strip()}={index.strip()}")
+    return normalized
 
 
 def write_text(path: Path, content: str) -> None:
@@ -244,9 +358,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         raise ValueError("workflow config key 'slurm' must be an object")
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
 
-    if any(
-        key in slurm_cfg_raw for key in ("fastp_split", "demux_extract_bc")
-    ):
+    if any(key in slurm_cfg_raw for key in ("fastp_split", "demux_extract_bc", "align")):
         stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
     else:
         # Backward compatibility: legacy flat slurm config.
@@ -284,6 +396,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.barcode_hamming_distance, cfg.get("barcode_hamming_distance")
         ),
         "gzip_level": pick(args.gzip_level, cfg.get("gzip_level")),
+        "bwa_index": pick(args.bwa_index, cfg.get("bwa_index")),
+        "bwa_threads": pick(args.bwa_threads, cfg.get("bwa_threads")),
+        "bwa_bin": pick(args.bwa_bin, cfg.get("bwa_bin")),
+        "sinto_bin": pick(args.sinto_bin, cfg.get("sinto_bin")),
+        "samtools_bin": pick(args.samtools_bin, cfg.get("samtools_bin")),
+        "spike_in_index": normalize_spike_in_index(
+            pick(args.spike_in_index, cfg.get("spike_in_index"))
+        ),
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
         "slurm_cpus_per_task": pick(
@@ -300,6 +420,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         required.extend(["r1", "r2", "number_of_split_parts"])
     elif stage == "demux_extract_bc":
         required.extend(["barcode1_whitelist", "barcode2_whitelist"])
+    elif stage == "align":
+        required.extend(["bwa_index"])
     else:
         raise ValueError(f"unsupported stage: {stage}")
 
@@ -334,6 +456,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["gzip_level"] < 0 or settings["gzip_level"] > 9:
         raise ValueError("gzip_level must be between 0 and 9")
+    settings["bwa_threads"] = (
+        int(settings["bwa_threads"]) if settings["bwa_threads"] is not None else 2
+    )
+    if settings["bwa_threads"] <= 0:
+        raise ValueError("bwa_threads must be > 0")
+    settings["bwa_bin"] = settings["bwa_bin"] or "bwa"
+    settings["sinto_bin"] = settings["sinto_bin"] or "sinto"
+    settings["samtools_bin"] = settings["samtools_bin"] or "samtools"
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -441,7 +571,7 @@ def main() -> int:
             )
             generate_slurm_script(command, script_path, log_dir, slurm_args)
         generated_scripts.append(script_path)
-    else:
+    elif settings["stage"] == "demux_extract_bc":
         command_args = argparse.Namespace(
             barcode1_whitelist=settings["barcode1_whitelist"],
             barcode2_whitelist=settings["barcode2_whitelist"],
@@ -499,6 +629,69 @@ def main() -> int:
                 if not settings["dry_run"]:
                     slurm_args = argparse.Namespace(
                         job_name=f"dbit_demux_{settings['sample_id']}_{chunk}",
+                        slurm_partition=settings["slurm_partition"],
+                        slurm_mem=settings["slurm_mem"],
+                        slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                        slurm_output=chunk_output,
+                        slurm_error=chunk_error,
+                        module_line="",
+                    )
+                    generate_slurm_script(command, script_path, log_dir, slurm_args)
+                generated_scripts.append(script_path)
+    else:
+        command_args = argparse.Namespace(
+            bwa_index=settings["bwa_index"],
+            bwa_threads=settings["bwa_threads"],
+            bwa_bin=settings["bwa_bin"],
+            sinto_bin=settings["sinto_bin"],
+            samtools_bin=settings["samtools_bin"],
+            spike_in_index=settings["spike_in_index"],
+        )
+        if settings["runner"] == "local":
+            script_path = command_dir / "03_align.sh"
+            command = build_align_local_batch_command(command_args, sample_work)
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            chunks = discover_align_chunks(sample_work)
+            if not chunks:
+                if settings["dry_run"]:
+                    print(f"[make_cmd] runner={settings['runner']}")
+                    print(f"[make_cmd] stage={settings['stage']}")
+                    print(f"[make_cmd] sample_id={settings['sample_id']}")
+                    print(
+                        f"[make_cmd] no chunks found: {sample_work / 'demux'}/*.R1.demux.fq.gz"
+                    )
+                    return 0
+                raise ValueError(
+                    f"no chunks found under: {sample_work / 'demux'}/*.R1.demux.fq.gz"
+                )
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] chunk_count={len(chunks)}")
+            for chunk, _, _ in chunks:
+                base_name = f"03_align_{chunk}"
+                script_path = command_dir / f"{base_name}.sbatch"
+                command = build_align_chunk_command(command_args, sample_work, chunk)
+                chunk_output = settings["slurm_output"].replace(
+                    "%x", f"dbit_align_{settings['sample_id']}_{chunk}"
+                )
+                chunk_error = settings["slurm_error"].replace(
+                    "%x", f"dbit_align_{settings['sample_id']}_{chunk}"
+                )
+                print(f"[make_cmd] script={script_path}")
+                print(f"[make_cmd] command={command}")
+                if not settings["dry_run"]:
+                    slurm_args = argparse.Namespace(
+                        job_name=f"dbit_align_{settings['sample_id']}_{chunk}",
                         slurm_partition=settings["slurm_partition"],
                         slurm_mem=settings["slurm_mem"],
                         slurm_cpus_per_task=settings["slurm_cpus_per_task"],

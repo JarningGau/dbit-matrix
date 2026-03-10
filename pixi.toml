@@ -6,6 +6,9 @@ platforms = ["linux-64"]
 [dependencies]
 python = "3.11.*"
 fastp = "0.24.*"
+bwa = ">=0.7.19,<0.8"
+sinto = ">=0.9.0,<0.10"
+samtools = ">=1.23,<2"
 
 [tasks]
 make-cmd-dry-run = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --dry-run"
@@ -13,3 +16,4 @@ make-cmd-submit = "python scripts/make_cmd.py --workflow-config workflow/dbit_ta
 
 [pypi-dependencies]
 fuzzysearch = ">=0.8.1, <0.9"
+setuptools = "<81"

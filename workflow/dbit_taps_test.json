@@ -16,6 +16,15 @@
     "linker_edit_distance": 1,
     "barcode_hamming_distance": 1,
     "gzip_level": 1,
+    "bwa_index": "/mnt/e/LiLab_HL/resource/bwa/mm10/genome.fa",
+    "bwa_threads": 8,
+    "bwa_bin": "bwa",
+    "sinto_bin": "sinto",
+    "samtools_bin": "samtools",
+    "spike_in_index": {
+        "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
+        "puc19": "/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa"
+    },
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
@@ -26,6 +35,11 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "8G",
             "cpus_per_task": 1
+        },
+        "align": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "64G",
+            "cpus_per_task": 32
         }
     }
 }

@@ -14,7 +14,7 @@
 - `scripts`: CLI 脚本
 - `data/raw`: 原始数据
 - `configs/barcodes_50a.tsv`: spatial barcode whitelist
-- `workflow`: 测试脚本，用来跑通测试数据
+- `workflow/dbit_taps_test.json`: 参数配置文件，参数文件命名方式为`<方法>_<样本名>`
 
 ## 环境固定（pixi + uv）
 
@@ -97,6 +97,11 @@ pixi run make-cmd-dry-run
 - linker_edit_distance: linker1/linker2/tn5 的模糊匹配编辑距离上限（默认 `1`）
 - barcode_hamming_distance: barcode whitelist 纠错的汉明距离上限（默认 `1`）
 - gzip_level: demux 输出 FASTQ 的 gzip 压缩等级（`0-9`，默认 `6`）
+- bwa_index: `bwa mem` 使用的索引前缀（align 阶段必填）
+- bwa_threads: align 阶段 `bwa mem -t` 线程数（默认 `2`）
+- bwa_bin / sinto_bin: align 阶段可执行程序名或路径（默认 `bwa` / `sinto`）
+- samtools_bin: spike-in 对齐输出 BAM 使用的 `samtools` 程序（默认 `samtools`）
+- spike_in_index: spike-in 参考配置，可写成对象（如 `{ "lambda": "...", "puc19": "..." }`）或 `["lambda=...", "puc19=..."]`
 
 ## 核心处理流程
 
@@ -154,11 +159,36 @@ pixi run python scripts/extract_bc.py \
 - whitelist 匹配顺序为：精确匹配 -> 汉明距离退化匹配（需唯一最优）。
 
 3. alignment
+
+software: `bwa`, `sinto`, `samtools`
+
+spike-in 可以有多个参考基因组（例如 lambda、pUC19），
+建议每个参考单独比对并按 `<chunk>.<spike_name>.bam` 命名输出。
+在 `scripts/align.py` 中执行顺序固定为：先对每个 spike-in 参考比对，再对 host genome 比对并生成 `.cb.bam`。
+
+bwa mem -t 2 \
+$bwa_index_host_genome \
+$work_path/demux/0001.R1.demux.fq.gz \
+$work_path/demux/0001.R2.demux.fq.gz |\
+sinto nametotag -b - -O b -o $work_path/align_shards/0001.cb.bam
+
+bwa mem -t 2 \
+$bwa_index_lambda \
+$work_path/demux/0001.R1.spike-in.fq.gz \
+$work_path/demux/0001.R2.spike-in.fq.gz |\
+samtools view -b -o $work_path/align_shards/0001.lambda.bam -
+
+bwa mem -t 2 \
+$bwa_index_puc19 \
+$work_path/demux/0001.R1.spike-in.fq.gz \
+$work_path/demux/0001.R2.spike-in.fq.gz |\
+samtools view -b -o $work_path/align_shards/0001.puc19.bam -
+
 4. pool
 5. split bam by spots
 6. call CpG methylation rates
 
-## 快速开始（命令生成）
+## 生成 fastp 命令
 
 1) 使用 workflow 配置生成命令（推荐先 dry-run）
 
@@ -210,3 +240,24 @@ pixi run python scripts/make_cmd.py \
 当 `--runner local` 时，demux 执行会显示按 chunk 的进度条。
 
 当 `--runner slurm` 且 `--stage demux_extract_bc` 时，会为每个 chunk 生成一个独立 sbatch 脚本（例如 `02_demux_extract_bc_0001.sbatch`），`--submit` 会逐个提交这些任务。
+
+## 生成 align 命令
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage align \
+  --dry-run
+```
+
+生成并立刻提交
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage align \
+  --submit
+```
+
+执行时会扫描 `"$work_path/demux/"*.R1.demux.fq.gz`，并要求存在对应的 `*.R2.demux.fq.gz`。
+当 `--runner local` 时，生成 `03_align.sh`，内部按 chunk 顺序运行 `scripts/align.py`；每个 chunk 会在同一条执行链中先跑全部 spike-in，再跑 host。
+当 `--runner slurm` 且 `--stage align` 时，会为每个 chunk 生成一个独立 sbatch 脚本（例如 `03_align_0001.sbatch`）；单个 sbatch 内绑定该 chunk 的 spike-in + host 对齐顺序执行，`--submit` 会逐个提交这些任务。
