@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import time
 from itertools import zip_longest
 from pathlib import Path
 from typing import Iterator, TextIO
@@ -57,6 +58,18 @@ def parse_args() -> argparse.Namespace:
         default="CATCGGCGTACGACTAGATGTGTATAAGAGACAG",
         help="Expected Tn5 mosaic end sequence on R1.",
     )
+    parser.add_argument(
+        "--progress-interval-seconds",
+        type=float,
+        default=1.0,
+        help="Report processing speed every N seconds. Set 0 to disable.",
+    )
+    parser.add_argument(
+        "--gzip-level",
+        type=int,
+        default=6,
+        help="gzip compress level for output FASTQ files (0-9). Default: 6.",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +117,8 @@ def annotate_header(header: str, bc1: str, bc2: str) -> str:
 
 def main() -> int:
     args = parse_args()
+    if args.gzip_level < 0 or args.gzip_level > 9:
+        raise ValueError("--gzip-level must be between 0 and 9")
     linker1 = args.linker1.upper()
     linker2 = args.linker2.upper()
     tn5 = args.tn5.upper()
@@ -136,12 +151,37 @@ def main() -> int:
     }
 
     prefix_len = bc2_len + len(linker2) + bc1_len + len(linker1) + len(tn5)
+    t0 = time.monotonic()
+    t_last = t0
+    reads_last = 0
+
+    def report_progress(force: bool = False) -> None:
+        nonlocal t_last, reads_last
+        if args.progress_interval_seconds <= 0:
+            return
+        now = time.monotonic()
+        if not force and (now - t_last) < args.progress_interval_seconds:
+            return
+        dt = now - t_last
+        if dt <= 0:
+            return
+        reads_now = total - reads_last
+        rate = reads_now / dt
+        print(
+            f"[extract_bc] progress reads={total} kept={kept} speed={rate:.0f} reads/s"
+        )
+        t_last = now
+        reads_last = total
 
     with open_text(args.r1, "r") as r1_in, open_text(args.r2, "r") as r2_in:
-        with gzip.open(out_r1_demux, "wt", encoding="utf-8") as r1_demux_out, gzip.open(
-            out_r1_spike, "wt", encoding="utf-8"
-        ) as r1_spike_out, gzip.open(out_r2_demux, "wt", encoding="utf-8") as r2_demux_out, gzip.open(
-            out_r2_spike, "wt", encoding="utf-8"
+        with gzip.open(
+            out_r1_demux, "wt", encoding="utf-8", compresslevel=args.gzip_level
+        ) as r1_demux_out, gzip.open(
+            out_r1_spike, "wt", encoding="utf-8", compresslevel=args.gzip_level
+        ) as r1_spike_out, gzip.open(
+            out_r2_demux, "wt", encoding="utf-8", compresslevel=args.gzip_level
+        ) as r2_demux_out, gzip.open(
+            out_r2_spike, "wt", encoding="utf-8", compresslevel=args.gzip_level
         ) as r2_spike_out:
             for rec1, rec2 in zip_longest(fastq_iter(r1_in), fastq_iter(r2_in)):
                 if rec1 is None or rec2 is None:
@@ -155,6 +195,7 @@ def main() -> int:
                     reject_counts["short_r1"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
                     continue
 
                 barcode2 = s1_u[:bc2_len]
@@ -170,16 +211,19 @@ def main() -> int:
                     reject_counts["structure_mismatch"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
                     continue
                 if barcode1 not in bc1_allow:
                     reject_counts["barcode1_not_in_whitelist"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
                     continue
                 if barcode2 not in bc2_allow:
                     reject_counts["barcode2_not_in_whitelist"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
+                    report_progress()
                     continue
 
                 kept += 1
@@ -189,6 +233,9 @@ def main() -> int:
                 trimmed_q1 = q1[prefix_len:]
                 r1_demux_out.write(f"{annotated_h1}\n{trimmed_s1}\n{p1}\n{trimmed_q1}\n")
                 r2_demux_out.write(f"{annotated_h2}\n{s2}\n{p2}\n{q2}\n")
+                report_progress()
+
+            report_progress(force=True)
 
     stats = {
         "input_r1": args.r1,
@@ -212,7 +259,11 @@ def main() -> int:
     print(f"[extract_bc] output_r2_demux={out_r2_demux}")
     print(f"[extract_bc] output_r2_spike_in={out_r2_spike}")
     print(f"[extract_bc] stats={out_stats}")
-    print(f"[extract_bc] kept={kept}/{total} spike_in={total - kept}")
+    elapsed = max(time.monotonic() - t0, 1e-9)
+    print(
+        f"[extract_bc] kept={kept}/{total} spike_in={total - kept} "
+        f"avg_speed={total / elapsed:.1f} reads/s"
+    )
     return 0
 
 

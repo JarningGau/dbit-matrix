@@ -59,6 +59,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--linker2", help="Linker2 sequence for demux stage.")
     parser.add_argument("--tn5", help="Tn5 sequence for demux stage.")
     parser.add_argument(
+        "--gzip-level",
+        type=int,
+        help="gzip compress level (0-9) for demux output FASTQ.",
+    )
+    parser.add_argument(
         "--submit",
         action="store_true",
         help="Submit immediately after generating command file.",
@@ -125,6 +130,8 @@ def build_demux_chunk_command(
             args.linker2,
             "--tn5",
             args.tn5,
+            "--gzip-level",
+            str(args.gzip_level),
         ]
     )
 
@@ -136,21 +143,44 @@ def build_demux_local_batch_command(args: argparse.Namespace, sample_work: Path)
     demux_dir_q = shlex.quote(str(demux_dir))
     py = quoted([sys.executable, "scripts/extract_bc.py"])
     return (
-        f"mkdir -p {demux_dir_q}\n"
-        f"for r1 in {chunk_dir_q}/*.R1.fq.gz; do\n"
-        '  [ -e "$r1" ] || { echo "[demux] no chunk found under shard_fastq"; exit 1; }\n'
+        f"chunk_dir={chunk_dir_q}\n"
+        f"demux_dir={demux_dir_q}\n"
+        "bar_width=30\n"
+        "\n"
+        "mkdir -p \"$demux_dir\"\n"
+        "shopt -s nullglob\n"
+        "r1_files=(\"$chunk_dir\"/*.R1.fq.gz)\n"
+        "total=${#r1_files[@]}\n"
+        "if [ \"$total\" -eq 0 ]; then\n"
+        '  echo "[demux] no chunk found under shard_fastq"\n'
+        "  exit 1\n"
+        "fi\n"
+        "\n"
+        "idx=0\n"
+        "for r1 in \"${r1_files[@]}\"; do\n"
+        "  idx=$((idx + 1))\n"
+        "  percent=$((idx * 100 / total))\n"
+        "  filled=$((idx * bar_width / total))\n"
+        "  empty=$((bar_width - filled))\n"
+        "  bar_filled=$(printf '%*s' \"$filled\" '' | tr ' ' '#')\n"
+        "  bar_empty=$(printf '%*s' \"$empty\" '')\n"
         '  chunk="$(basename "$r1" .R1.fq.gz)"\n'
-        f"  r2={chunk_dir_q}/${{chunk}}.R2.fq.gz\n"
+        "  r2=\"$chunk_dir/${chunk}.R2.fq.gz\"\n"
+        "  printf '[demux] [%s%s] %3d%% (%d/%d) %s\\n' "
+        "\"$bar_filled\" \"$bar_empty\" \"$percent\" \"$idx\" \"$total\" \"$chunk\"\n"
         '  [ -f "$r2" ] || { echo "[demux] missing pair for $r1: $r2"; exit 1; }\n'
         f"  {py} "
         '"$r1" "$r2" '
         f"-b1 {shlex.quote(args.barcode1_whitelist)} "
         f"-b2 {shlex.quote(args.barcode2_whitelist)} "
-        f"-o {demux_dir_q}/${{chunk}} "
+        f"-o \"$demux_dir\"/${{chunk}} "
         f"--linker1 {shlex.quote(args.linker1)} "
         f"--linker2 {shlex.quote(args.linker2)} "
-        f"--tn5 {shlex.quote(args.tn5)}\n"
-        "done"
+        f"--tn5 {shlex.quote(args.tn5)} "
+        f"--gzip-level {int(args.gzip_level)}\n"
+        "done\n"
+        "\n"
+        'echo "[demux] done"'
     )
 
 
@@ -231,6 +261,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "linker1": pick(args.linker1, cfg.get("linker1")),
         "linker2": pick(args.linker2, cfg.get("linker2")),
         "tn5": pick(args.tn5, cfg.get("tn5")),
+        "gzip_level": pick(args.gzip_level, cfg.get("gzip_level")),
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
         "slurm_cpus_per_task": pick(
@@ -262,6 +293,11 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         settings["linker2"] or "ATCCACGTGCTTGAGAGGCCAGAGCATTCG"
     )
     settings["tn5"] = settings["tn5"] or "CATCGGCGTACGACTAGATGTGTATAAGAGACAG"
+    settings["gzip_level"] = (
+        int(settings["gzip_level"]) if settings["gzip_level"] is not None else 6
+    )
+    if settings["gzip_level"] < 0 or settings["gzip_level"] > 9:
+        raise ValueError("gzip_level must be between 0 and 9")
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -376,6 +412,7 @@ def main() -> int:
             linker1=settings["linker1"],
             linker2=settings["linker2"],
             tn5=settings["tn5"],
+            gzip_level=settings["gzip_level"],
         )
         if settings["runner"] == "local":
             script_path = command_dir / "02_demux_extract_bc.sh"

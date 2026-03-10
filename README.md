@@ -94,6 +94,7 @@ pixi run make-cmd-dry-run
 - linker1: `GTGGCCGATGTTTCG`
 - linker2: `ATCCACGTGCTTGAGAGGCCAGAGCATTCG`
 - tn5: `CATCGGCGTACGACTAGATGTGTATAAGAGACAG`
+- gzip_level: demux 输出 FASTQ 的 gzip 压缩等级（`0-9`，默认 `6`）
 
 ## 核心处理流程
 
@@ -133,6 +134,9 @@ python scripts/extract_bc.py \
 - `"$work_path/demux/0001.stats.json"`
 
 匹配到的 reads name 会改为：`@barcodesA+barcodesB:original_reads_name`
+运行 `extract_bc.py` 时会周期性输出处理速度（`xx reads/s`），默认每秒刷新一次；
+可用 `--progress-interval-seconds` 调整刷新间隔（设为 `0` 可关闭）。
+可用 `--gzip-level` 调整输出压缩等级（`0-9`，等级越低通常越快）。
 
 3. alignment
 4. pool
@@ -188,5 +192,6 @@ pixi run python scripts/make_cmd.py \
 ```
 
 执行时会扫描 `"$work_path/shard_fastq/"*.R1.fq.gz`，并按 chunk 调用 `scripts/extract_bc.py`。
+当 `--runner local` 时，demux 执行会显示按 chunk 的进度条。
 
 当 `--runner slurm` 且 `--stage demux_extract_bc` 时，会为每个 chunk 生成一个独立 sbatch 脚本（例如 `02_demux_extract_bc_0001.sbatch`），`--submit` 会逐个提交这些任务。
