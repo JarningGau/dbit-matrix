@@ -187,7 +187,20 @@ pixi run python scripts/make_cmd.py \
   --stage mbias \
   --runner slurm \
   --dry-run
+
+# 可选：显式分析 host + spike
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage mbias \
+  --mbias-mode all \
+  --dry-run
 ```
+
+检查输出（非 dry-run）：
+
+- `work/<sample>/qc/mbias/*.mbias.tsv`
+- `work/<sample>/qc/mbias/*.mbias.png`
+- `mbias` 结果应与 `call` 方向一致：`lambda` 接近低甲基化，`puc19` 保持高甲基化
 
 可选：验证 `call.py` 主机位点并行 dry-run：
 

@@ -36,7 +36,7 @@ pixi run python scripts/make_cmd.py \
 | `align` | 已完成 | 支持 host 与多 spike-in |
 | `pool` | 已完成 | 支持 host/spike-in 汇总与排序 |
 | `split` | 已完成 | 支持按 spot 拆分、smoke、后续并行排序 |
-| `mbias` | 已完成（MVP） | 支持 host 抽样 + sort/index 与 spike-in 全量 M-bias QC |
+| `mbias` | 已完成（MVP） | 支持 host 抽样 + sort/index 与 spike-in 全量、基于真实 CpG 位点的 M-bias QC |
 | `call` | 已完成（MVP） | 支持 host spots 并行 calling 与 spike-in calling |
 
 ## 里程碑

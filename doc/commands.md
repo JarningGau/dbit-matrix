@@ -106,9 +106,13 @@ pixi run python scripts/make_cmd.py \
 
 说明：
 
-- host: 从 `pooled/pooled.byCB.bam` 固定比例抽样（固定 seed）后 `sort + index + mbias`
+- `mbias` 默认 `mode=spike`（只分析 spike-in）
+- host: 从 `pooled/pooled.byCB.bam` 固定比例抽样（内部固定 seed）后 `sort + index + mbias`
+- host: `R1` 按右对齐 cycle 统计（适配 demux 的 left trimming）
 - spike-in: 使用全量 `pooled/pooled.<spike_name>.sorted.bam` 直接做 mbias
-- 输出到 `qc/mbias/`
+- host 使用 `call_reference_file`，spike-in 使用 `spike_in_index`
+- 甲基化率只在参考序列真实 `CpG` 位点上统计：`(TG+CA)/(TG+CA+CG)`
+- 输出到 `qc/mbias/`，每个样本同时产出 `*.mbias.tsv` 与 `*.mbias.png`
 
 Slurm 下：
 

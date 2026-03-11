@@ -146,9 +146,9 @@ def parse_args() -> argparse.Namespace:
         help="Host subsampling fraction for mbias stage. Default: 0.1.",
     )
     parser.add_argument(
-        "--mbias-host-subsample-seed",
-        type=int,
-        help="Host subsampling seed for mbias stage. Default: 11.",
+        "--mbias-mode",
+        choices=["all", "host", "spike"],
+        help="Mode for mbias stage. Default: spike.",
     )
     parser.add_argument(
         "--mbias-max-cycle",
@@ -530,13 +530,16 @@ def build_mbias_command(
         str(args.samtools_threads),
         "--host-subsample-fraction",
         str(args.mbias_host_subsample_fraction),
-        "--host-subsample-seed",
-        str(args.mbias_host_subsample_seed),
         "--max-cycle",
         str(args.mbias_max_cycle),
         "--min-mapping-quality",
         str(args.mbias_min_mapping_quality),
     ]
+    if mode in ("all", "host"):
+        command.extend(["--reference-file", args.call_reference_file])
+    if mode in ("all", "spike"):
+        for item in args.spike_in_index:
+            command.extend(["--spike-reference", item])
     if spike_name:
         command.extend(["--spike-in-name", spike_name])
     return quoted(command)
@@ -762,9 +765,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "mbias_host_subsample_fraction": pick(
             args.mbias_host_subsample_fraction, cfg.get("mbias_host_subsample_fraction")
         ),
-        "mbias_host_subsample_seed": pick(
-            args.mbias_host_subsample_seed, cfg.get("mbias_host_subsample_seed")
-        ),
+        "mbias_mode": pick(args.mbias_mode, cfg.get("mbias_mode")),
         "mbias_max_cycle": pick(args.mbias_max_cycle, cfg.get("mbias_max_cycle")),
         "mbias_min_mapping_quality": pick(
             args.mbias_min_mapping_quality, cfg.get("mbias_min_mapping_quality")
@@ -980,13 +981,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         or settings["mbias_host_subsample_fraction"] > 1
     ):
         raise ValueError("mbias_host_subsample_fraction must be in (0, 1]")
-    settings["mbias_host_subsample_seed"] = (
-        int(settings["mbias_host_subsample_seed"])
-        if settings["mbias_host_subsample_seed"] is not None
-        else 11
-    )
-    if settings["mbias_host_subsample_seed"] < 0:
-        raise ValueError("mbias_host_subsample_seed must be >= 0")
+    settings["mbias_mode"] = settings["mbias_mode"] or "spike"
+    if settings["mbias_mode"] not in {"all", "host", "spike"}:
+        raise ValueError("mbias_mode must be one of: all, host, spike")
     settings["mbias_max_cycle"] = (
         int(settings["mbias_max_cycle"]) if settings["mbias_max_cycle"] is not None else 150
     )
@@ -1526,14 +1523,19 @@ def main() -> int:
             samtools_bin=settings["samtools_bin"],
             samtools_threads=settings["samtools_threads"],
             mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
-            mbias_host_subsample_seed=settings["mbias_host_subsample_seed"],
             mbias_max_cycle=settings["mbias_max_cycle"],
             mbias_min_mapping_quality=settings["mbias_min_mapping_quality"],
             mbias_script=settings["mbias_script"],
+            call_reference_file=settings["call_reference_file"],
+            spike_in_index=settings["spike_in_index"],
         )
         if settings["runner"] == "local":
             script_path = command_dir / "06_mbias.sh"
-            command = build_mbias_command(command_args, sample_work, "all")
+            command = build_mbias_command(
+                command_args,
+                sample_work,
+                settings["mbias_mode"],
+            )
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
@@ -1544,65 +1546,70 @@ def main() -> int:
             generate_local_script(command, script_path)
             generated_scripts.append(script_path)
         else:
+            mbias_mode = settings["mbias_mode"]
+            include_host = mbias_mode in ("all", "host")
+            include_spike = mbias_mode in ("all", "spike")
             host_script_path = command_dir / "06_mbias_host.sbatch"
             host_command = build_mbias_command(command_args, sample_work, "host")
-            spike_names = discover_call_spike_names(sample_work)
-            discovered_from_cfg = parse_spike_names(settings["spike_in_index"])
-            if discovered_from_cfg:
-                spike_names = [name for name in discovered_from_cfg if name in spike_names]
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
-            print(f"[make_cmd] script={host_script_path}")
-            print(f"[make_cmd] command={host_command}")
-            if not settings["dry_run"]:
-                host_output = settings["mbias_host_slurm_output"].replace(
-                    "%x", f"dbit_mbias_host_{settings['sample_id']}"
-                )
-                host_error = settings["mbias_host_slurm_error"].replace(
-                    "%x", f"dbit_mbias_host_{settings['sample_id']}"
-                )
-                host_slurm_args = argparse.Namespace(
-                    job_name=f"dbit_mbias_host_{settings['sample_id']}",
-                    slurm_partition=settings["mbias_host_slurm_partition"],
-                    slurm_mem=settings["mbias_host_slurm_mem"],
-                    slurm_cpus_per_task=settings["mbias_host_slurm_cpus_per_task"],
-                    slurm_output=host_output,
-                    slurm_error=host_error,
-                    module_line="",
-                )
-                generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
-            generated_scripts.append(host_script_path)
-            for spike_name in spike_names:
-                spike_script_path = command_dir / f"06_mbias_spike_{spike_name}.sbatch"
-                spike_command = build_mbias_command(
-                    command_args,
-                    sample_work,
-                    "spike",
-                    spike_name=spike_name,
-                )
-                print(f"[make_cmd] script={spike_script_path}")
-                print(f"[make_cmd] command={spike_command}")
+            if include_host:
+                print(f"[make_cmd] script={host_script_path}")
+                print(f"[make_cmd] command={host_command}")
                 if not settings["dry_run"]:
-                    spike_output = settings["mbias_spike_slurm_output"].replace(
-                        "%x", f"dbit_mbias_spike_{settings['sample_id']}_{spike_name}"
+                    host_output = settings["mbias_host_slurm_output"].replace(
+                        "%x", f"dbit_mbias_host_{settings['sample_id']}"
                     )
-                    spike_error = settings["mbias_spike_slurm_error"].replace(
-                        "%x", f"dbit_mbias_spike_{settings['sample_id']}_{spike_name}"
+                    host_error = settings["mbias_host_slurm_error"].replace(
+                        "%x", f"dbit_mbias_host_{settings['sample_id']}"
                     )
-                    spike_slurm_args = argparse.Namespace(
-                        job_name=f"dbit_mbias_spike_{settings['sample_id']}_{spike_name}",
-                        slurm_partition=settings["mbias_spike_slurm_partition"],
-                        slurm_mem=settings["mbias_spike_slurm_mem"],
-                        slurm_cpus_per_task=settings["mbias_spike_slurm_cpus_per_task"],
-                        slurm_output=spike_output,
-                        slurm_error=spike_error,
+                    host_slurm_args = argparse.Namespace(
+                        job_name=f"dbit_mbias_host_{settings['sample_id']}",
+                        slurm_partition=settings["mbias_host_slurm_partition"],
+                        slurm_mem=settings["mbias_host_slurm_mem"],
+                        slurm_cpus_per_task=settings["mbias_host_slurm_cpus_per_task"],
+                        slurm_output=host_output,
+                        slurm_error=host_error,
                         module_line="",
                     )
-                    generate_slurm_script(
-                        spike_command, spike_script_path, log_dir, spike_slurm_args
+                    generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
+                generated_scripts.append(host_script_path)
+            if include_spike:
+                spike_names = discover_call_spike_names(sample_work)
+                discovered_from_cfg = parse_spike_names(settings["spike_in_index"])
+                if discovered_from_cfg:
+                    spike_names = [name for name in discovered_from_cfg if name in spike_names]
+                for spike_name in spike_names:
+                    spike_script_path = command_dir / f"06_mbias_spike_{spike_name}.sbatch"
+                    spike_command = build_mbias_command(
+                        command_args,
+                        sample_work,
+                        "spike",
+                        spike_name=spike_name,
                     )
-                generated_scripts.append(spike_script_path)
+                    print(f"[make_cmd] script={spike_script_path}")
+                    print(f"[make_cmd] command={spike_command}")
+                    if not settings["dry_run"]:
+                        spike_output = settings["mbias_spike_slurm_output"].replace(
+                            "%x", f"dbit_mbias_spike_{settings['sample_id']}_{spike_name}"
+                        )
+                        spike_error = settings["mbias_spike_slurm_error"].replace(
+                            "%x", f"dbit_mbias_spike_{settings['sample_id']}_{spike_name}"
+                        )
+                        spike_slurm_args = argparse.Namespace(
+                            job_name=f"dbit_mbias_spike_{settings['sample_id']}_{spike_name}",
+                            slurm_partition=settings["mbias_spike_slurm_partition"],
+                            slurm_mem=settings["mbias_spike_slurm_mem"],
+                            slurm_cpus_per_task=settings["mbias_spike_slurm_cpus_per_task"],
+                            slurm_output=spike_output,
+                            slurm_error=spike_error,
+                            module_line="",
+                        )
+                        generate_slurm_script(
+                            spike_command, spike_script_path, log_dir, spike_slurm_args
+                        )
+                    generated_scripts.append(spike_script_path)
     elif settings["stage"] == "call":
         command_args = argparse.Namespace(
             call_reference_file=settings["call_reference_file"],

@@ -118,18 +118,26 @@
 
 - host: `pooled/pooled.byCB.bam`
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
+- host reference: `call_reference_file`
+- spike reference: `spike_in_index`
 
 输出：
 
 - `qc/mbias/host.subsampled.sorted.bam`
 - `qc/mbias/host.subsampled.sorted.bam.bai`
 - `qc/mbias/host.mbias.tsv`
+- `qc/mbias/host.mbias.png`
 - `qc/mbias/<spike_name>.mbias.tsv`
+- `qc/mbias/<spike_name>.mbias.png`
 
 说明：
 
-- host 从 `pooled.byCB.bam` 固定比例抽样（固定 seed），随后 `sort + index` 再做 mbias
+- `mode` 默认仅分析 `spike`；可显式切到 `host` 或 `all`
+- host 从 `pooled.byCB.bam` 固定比例抽样（内部固定 seed），随后 `sort + index` 再做 mbias
+- host 统计时对 `R1` 使用右对齐 cycle（适配 demux 的 left trimming）
 - spike-in 直接使用全量 `pooled.<spike_name>.sorted.bam` 做 mbias
+- 只在参考序列真实 `CpG` 位点上计算甲基化率：`(TG+CA)/(TG+CA+CG)`
+- 每个 tsv 同步输出一张 PNG 曲线图（matplotlib），便于肉眼检查末端偏倚是否合理
 - 仅输出 QC 结果，不自动修改 trimming/calling 参数
 
 ## 8. `call`
