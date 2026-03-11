@@ -112,11 +112,22 @@
 
 状态：
 
-- 尚未实现
+- 已实现（MVP）
 
-待确定：
+输入：
 
-- 输入契约
-- 输出契约
-- 本地 / Slurm 命令生成方式
-- 最小回归命令
+- host by spots: `split_bams/**/*.sorted.bam`
+- spike-in: `pooled/pooled.<spike_name>.sorted.bam`
+
+输出：
+
+- `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
+- `coverage/host_mito/<X_index>/<X_index>_<Y_index>.CG.cov`
+- `coverage/lambda.CG.cov`
+- `coverage/puc19.CG.cov`
+
+说明：
+
+- host 按 spot 输出；每个 spot 额外输出一份线粒体位点结果
+- 本地模式：单脚本内并行 spots，spike-in 顺序执行
+- Slurm 模式：host 只生成一个 sbatch，在作业内并行处理 spots；spike-in 每个 reference 一个 sbatch

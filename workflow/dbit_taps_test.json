@@ -29,6 +29,15 @@
     "split_threads_write": 1,
     "split_smoke": true,
     "split_sort_jobs": 8,
+    "call_reference_file": "/mnt/e/LiLab_HL/resource/bwa/mm10/genome.fa",
+    "call_chromosomes": "chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chrX",
+    "call_mito_chromosomes": "chrM",
+    "call_jobs": 8,
+    "call_min_base_quality": 30,
+    "call_min_mapping_quality": 1,
+    "call_max_depth": 250,
+    "call_batch_size": 10000000,
+    "call_caller_script": "scripts/methy_caller.py",
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
         "puc19": "/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa"
@@ -64,6 +73,18 @@
                 "partition": "amd-ep2,intel-sc3",
                 "mem": "8G",
                 "cpus_per_task": 8
+            }
+        },
+        "call": {
+            "host": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "64G",
+                "cpus_per_task": 16
+            },
+            "spike": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "16G",
+                "cpus_per_task": 4
             }
         }
     }

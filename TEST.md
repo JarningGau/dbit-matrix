@@ -2,8 +2,8 @@
 
 ## 当前测试覆盖
 
-- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`
-- 当前未覆盖完整实现：`call`
+- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`、`call`
+- 当前未覆盖完整实现：`split -> call` 端到端验收
 - 建议提交前至少执行：CLI `--help` 检查 + `scripts/make_cmd.py --dry-run` 回归
 
 ## 基础 smoke
@@ -153,7 +153,38 @@ pixi run python scripts/bam_sort_parallel.py \
   --dry-run
 ```
 
+## Call 回归
+
+```bash
+pixi run python scripts/methy_caller.py --help
+
+pixi run python scripts/call.py --help
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage call \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage call \
+  --runner slurm \
+  --dry-run
+```
+
+可选：验证 `call.py` 主机位点并行 dry-run：
+
+```bash
+pixi run python scripts/call.py \
+  --work-path work/test-DNAme-TAPS \
+  --mode host \
+  --reference-file /mnt/e/LiLab_HL/resource/bwa/mm10/genome.fa \
+  --chromosomes chr1,chr2,chr3 \
+  --mito-chromosomes chrM \
+  --jobs 4 \
+  --dry-run
+```
+
 ## 下一里程碑
 
-- 补充 `call` 阶段的最小 CLI 与 workflow dry-run 回归
 - 在 `split -> call` 之间补齐端到端验收命令

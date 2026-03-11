@@ -94,3 +94,24 @@ Slurm 下：
 - 生成 `05_split_bams.sbatch`
 - 生成 `05_split_sort.sbatch`
 - `sort` 通过 `afterok` 依赖 `split_bams`
+
+## `call`
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage call \
+  --dry-run
+```
+
+说明：
+
+- 扫描 `split_bams/**/*.sorted.bam` 与 `pooled/pooled.<spike_name>.sorted.bam`
+- 本地模式调用 `scripts/call.py`，在单脚本中并行 host spots
+- host 结果输出到 `coverage/host/` 与 `coverage/host_mito/`
+- spike-in 结果输出到 `coverage/<spike_name>.CG.cov`
+
+Slurm 下：
+
+- 生成 `06_call_host.sbatch`（单作业内并行处理 spots）
+- 生成 `06_call_spike_<spike_name>.sbatch`（每个 spike-in 一个 sbatch）
