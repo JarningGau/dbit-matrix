@@ -1,0 +1,122 @@
+# Stages
+
+## 1. `fastp_split`
+
+输入：
+
+- 原始 `R1/R2 FASTQ`
+
+输出：
+
+- `work/<sample>/shard_fastq/*.R1.fq.gz`
+- `work/<sample>/shard_fastq/*.R2.fq.gz`
+- `fastp.html`
+- `fastp.json`
+
+说明：
+
+- 用 `fastp --split` 将原始 FASTQ 切成 chunk
+- 当前支持本地与 Slurm
+
+## 2. `demux_extract_bc`
+
+输入：
+
+- `shard_fastq/*.R1.fq.gz`
+- `shard_fastq/*.R2.fq.gz`
+
+输出：
+
+- `demux/<chunk>.R1.demux.fq.gz`
+- `demux/<chunk>.R2.demux.fq.gz`
+- `demux/<chunk>.R1.spike-in.fq.gz`
+- `demux/<chunk>.R2.spike-in.fq.gz`
+- `demux/<chunk>.stats.json`
+
+说明：
+
+- matched 与 spike-in 必须分流
+- reads name 会改写为 `@barcodeA+barcodeB:original_name`
+- stats 需反映保留率与拒绝原因
+
+## 3. `align`
+
+输入：
+
+- host: `demux/*.R1/2.demux.fq.gz`
+- spike-in: `demux/*.R1/2.spike-in.fq.gz`
+
+输出：
+
+- host: `align_shards/<chunk>.cb.bam`
+- spike-in: `align_shards/<chunk>.<spike_name>.bam`
+
+说明：
+
+- 执行顺序固定：先 spike-in，再 host
+- 支持 0/1/N 个 spike-in
+- Slurm 下每个 chunk 一个 sbatch
+
+## 4. `pool`
+
+输入：
+
+- host: `align_shards/*.cb.bam`
+- spike-in: `align_shards/*.<spike_name>.bam`
+
+输出：
+
+- host: `pooled/pooled.byCB.bam`
+- spike-in: `pooled/pooled.<spike_name>.sorted.bam` 及索引
+
+说明：
+
+- 本地模式：先 spike-in，再 host
+- Slurm 模式：拆成 `spike` 与 `host` 两个 job
+
+## 5. `split`
+
+输入：
+
+- `pooled/pooled.byCB.bam`
+
+输出：
+
+- `split_bams/<X_index>/<X_index>_<Y_index>.bam`
+- `split_bams/per_spot_read_counts.tsv`
+
+说明：
+
+- 当前 `CB` 格式：`CB:Z:<x>+<y>`
+- `+` 左侧为 X barcode，右侧为 Y barcode
+- `--smoke` 仅随机输出最多 16 个非空 spot BAM
+
+## 6. `sort`（split 后处理）
+
+输入：
+
+- `split_bams/**/*.bam`
+
+输出：
+
+- `split_bams/**/*.sorted.bam`
+- `split_bams/**/*.sorted.bam.bai`
+
+说明：
+
+- 执行 `sort + index + remove raw bam`
+- 默认跳过已排序 BAM
+- Slurm 下与 `split_bams` 分成不同资源配置
+
+## 7. `call`
+
+状态：
+
+- 尚未实现
+
+待确定：
+
+- 输入契约
+- 输出契约
+- 本地 / Slurm 命令生成方式
+- 最小回归命令

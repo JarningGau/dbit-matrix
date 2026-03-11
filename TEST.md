@@ -1,9 +1,26 @@
+# TEST
+
+## 当前测试覆盖
+
+- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`
+- 当前未覆盖完整实现：`call`
+- 建议提交前至少执行：CLI `--help` 检查 + `scripts/make_cmd.py --dry-run` 回归
+
+## 基础 smoke
+
+```bash
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage demux_extract_bc \
   --runner local \
   --dry-run
+```
 
+## Demux 回归
+
+最小功能回归：
+
+```bash
 pixi run python scripts/extract_bc.py \
   work/test-DNAme-TAPS/shard_fastq/0001.R1.fq.gz \
   work/test-DNAme-TAPS/shard_fastq/0001.R2.fq.gz \
@@ -13,10 +30,17 @@ pixi run python scripts/extract_bc.py \
   --linker-edit-distance 1 \
   --barcode-hamming-distance 1 \
   --gzip-level 1
+```
 
+参考输出摘要：
+
+```text
 [extract_bc] kept=346137/487575 spike_in=141438 avg_speed=41021.6 reads/s
+```
 
-# 可选：严格基线（仅精确匹配）用于速度/结果对照
+可选：严格基线（仅精确匹配）用于速度/结果对照：
+
+```bash
 pixi run python scripts/extract_bc.py \
   work/test-DNAme-TAPS/shard_fastq/0001.R1.fq.gz \
   work/test-DNAme-TAPS/shard_fastq/0001.R2.fq.gz \
@@ -26,10 +50,19 @@ pixi run python scripts/extract_bc.py \
   --linker-edit-distance 0 \
   --barcode-hamming-distance 0 \
   --gzip-level 1
+```
 
+参考输出摘要：
+
+```text
 [extract_bc] kept=275554/487575 spike_in=212021 avg_speed=64884.6 reads/s
+```
 
-# align CLI 帮助与命令生成回归
+## Align 回归
+
+CLI 帮助与命令生成：
+
+```bash
 pixi run python scripts/align.py --help
 
 pixi run python scripts/make_cmd.py \
@@ -43,8 +76,11 @@ pixi run python scripts/make_cmd.py \
   --stage align \
   --runner slurm \
   --dry-run
+```
 
-# 可选：验证多 spike-in 顺序（先 spike-in 再 host）
+可选：验证多 spike-in 顺序（先 spike-in 再 host）：
+
+```bash
 pixi run python scripts/align.py \
   --work-path work/test-DNAme-TAPS \
   --chunk 0001 \
@@ -52,8 +88,11 @@ pixi run python scripts/align.py \
   --spike-in-index lambda=/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa \
   --spike-in-index puc19=/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa \
   --dry-run
+```
 
-# pool CLI 帮助与命令生成回归
+## Pool 回归
+
+```bash
 pixi run python scripts/pool.py --help
 
 pixi run python scripts/pool.py \
@@ -74,11 +113,13 @@ pixi run python scripts/make_cmd.py \
   --stage pool \
   --runner slurm \
   --dry-run
+```
 
-# split_bams CLI 帮助
+## Split 回归
+
+```bash
 pixi run python scripts/split_bams.py --help
 
-# split stage 命令生成回归
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage split \
@@ -89,19 +130,30 @@ pixi run python scripts/make_cmd.py \
   --stage split \
   --runner slurm \
   --dry-run
+```
 
-# 可选：split_bams smoke 模式，仅随机输出 16 个非空 spot BAM
+可选：`split_bams` smoke 模式，仅随机输出 16 个非空 spot BAM：
+
+```bash
 pixi run python scripts/split_bams.py \
   --in-bam work/test-DNAme-TAPS/pooled/pooled.byCB.bam \
   --barcodes configs/barcodes_50a.tsv \
   --out-dir work/test-DNAme-TAPS/split_bams.smoke \
   --smoke
+```
 
-# bam_sort_parallel CLI 帮助
+可选：spot BAM 并行排序 dry-run：
+
+```bash
 pixi run python scripts/bam_sort_parallel.py --help
 
-# 可选：spot BAM 并行排序 dry-run
 pixi run python scripts/bam_sort_parallel.py \
   --bam-dir work/test-DNAme-TAPS/split_bams.smoke \
   --jobs 4 \
   --dry-run
+```
+
+## 下一里程碑
+
+- 补充 `call` 阶段的最小 CLI 与 workflow dry-run 回归
+- 在 `split -> call` 之间补齐端到端验收命令
