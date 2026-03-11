@@ -108,7 +108,31 @@
 - 默认跳过已排序 BAM
 - Slurm 下与 `split_bams` 分成不同资源配置
 
-## 7. `call`
+## 7. `mbias`
+
+状态：
+
+- 已实现（MVP）
+
+输入：
+
+- host: `pooled/pooled.byCB.bam`
+- spike-in: `pooled/pooled.<spike_name>.sorted.bam`
+
+输出：
+
+- `qc/mbias/host.subsampled.sorted.bam`
+- `qc/mbias/host.subsampled.sorted.bam.bai`
+- `qc/mbias/host.mbias.tsv`
+- `qc/mbias/<spike_name>.mbias.tsv`
+
+说明：
+
+- host 从 `pooled.byCB.bam` 固定比例抽样（固定 seed），随后 `sort + index` 再做 mbias
+- spike-in 直接使用全量 `pooled.<spike_name>.sorted.bam` 做 mbias
+- 仅输出 QC 结果，不自动修改 trimming/calling 参数
+
+## 8. `call`
 
 状态：
 

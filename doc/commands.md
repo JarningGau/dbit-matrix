@@ -95,6 +95,26 @@ Slurm 下：
 - 生成 `05_split_sort.sbatch`
 - `sort` 通过 `afterok` 依赖 `split_bams`
 
+## `mbias`
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage mbias \
+  --dry-run
+```
+
+说明：
+
+- host: 从 `pooled/pooled.byCB.bam` 固定比例抽样（固定 seed）后 `sort + index + mbias`
+- spike-in: 使用全量 `pooled/pooled.<spike_name>.sorted.bam` 直接做 mbias
+- 输出到 `qc/mbias/`
+
+Slurm 下：
+
+- 生成 `06_mbias_host.sbatch`
+- 生成 `06_mbias_spike_<spike_name>.sbatch`
+
 ## `call`
 
 ```bash
@@ -113,5 +133,5 @@ pixi run python scripts/make_cmd.py \
 
 Slurm 下：
 
-- 生成 `06_call_host.sbatch`（单作业内并行处理 spots）
-- 生成 `06_call_spike_<spike_name>.sbatch`（每个 spike-in 一个 sbatch）
+- 生成 `07_call_host.sbatch`（单作业内并行处理 spots）
+- 生成 `07_call_spike_<spike_name>.sbatch`（每个 spike-in 一个 sbatch）

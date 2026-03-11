@@ -2,8 +2,8 @@
 
 ## 当前测试覆盖
 
-- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`、`call`
-- 当前未覆盖完整实现：`split -> call` 端到端验收
+- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`
+- 当前未覆盖完整实现：`split -> mbias -> call` 端到端验收
 - 建议提交前至少执行：CLI `--help` 检查 + `scripts/make_cmd.py --dry-run` 回归
 
 ## 基础 smoke
@@ -172,6 +172,23 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
+## Mbias 回归
+
+```bash
+pixi run python scripts/mbias.py --help
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage mbias \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage mbias \
+  --runner slurm \
+  --dry-run
+```
+
 可选：验证 `call.py` 主机位点并行 dry-run：
 
 ```bash
@@ -187,4 +204,4 @@ pixi run python scripts/call.py \
 
 ## 下一里程碑
 
-- 在 `split -> call` 之间补齐端到端验收命令
+- 在 `split -> mbias -> call` 之间补齐端到端验收命令

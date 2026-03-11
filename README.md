@@ -7,8 +7,8 @@
 ## 当前范围
 
 - 当前重点记录：`DBiT-DNAme-TAPS`
-- 已闭环阶段：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call`
-- 下一主里程碑：`split -> call` 端到端最小验收
+- 已闭环阶段：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call`
+- 下一主里程碑：`split -> mbias -> call` 端到端最小验收
 
 ## 快速开始
 
@@ -36,6 +36,7 @@ pixi run python scripts/make_cmd.py \
 | `align` | 已完成 | 支持 host 与多 spike-in |
 | `pool` | 已完成 | 支持 host/spike-in 汇总与排序 |
 | `split` | 已完成 | 支持按 spot 拆分、smoke、后续并行排序 |
+| `mbias` | 已完成（MVP） | 支持 host 抽样 + sort/index 与 spike-in 全量 M-bias QC |
 | `call` | 已完成（MVP） | 支持 host spots 并行 calling 与 spike-in calling |
 
 ## 里程碑
@@ -45,7 +46,8 @@ pixi run python scripts/make_cmd.py \
 - M3: `pool`
 - M4: `split`
 - M5: `call` MVP（已完成）
-- M6: `split -> call` 端到端最小闭环验收
+- M6: `mbias` MVP（已完成，位于 `call` 前）
+- M7: `split -> mbias -> call` 端到端最小闭环验收
 
 ## 文档导航
 

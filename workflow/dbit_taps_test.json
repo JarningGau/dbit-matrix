@@ -29,6 +29,11 @@
     "split_threads_write": 1,
     "split_smoke": true,
     "split_sort_jobs": 8,
+    "mbias_host_subsample_fraction": 0.1,
+    "mbias_host_subsample_seed": 11,
+    "mbias_max_cycle": 150,
+    "mbias_min_mapping_quality": 10,
+    "mbias_script": "scripts/mbias.py",
     "call_reference_file": "/mnt/e/LiLab_HL/resource/bwa/mm10/genome.fa",
     "call_chromosomes": "chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chrX",
     "call_mito_chromosomes": "chrM",
@@ -73,6 +78,18 @@
                 "partition": "amd-ep2,intel-sc3",
                 "mem": "8G",
                 "cpus_per_task": 8
+            }
+        },
+        "mbias": {
+            "host": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "16G",
+                "cpus_per_task": 4
+            },
+            "spike": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "8G",
+                "cpus_per_task": 2
             }
         },
         "call": {
