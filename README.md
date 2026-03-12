@@ -1,10 +1,11 @@
 # DBiT-Matrix
 
-`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的 1.1.0 工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级、sample 级汇总结果和 summary heatmap。
+`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级、sample 级汇总结果和 summary heatmap。
 
-1.1.0 版本在稳定主流程基础上补齐了 summary heatmap 交付物，README 仍只保留用户使用路径，不展开实验性分支。
+- 当前版本：`1.1.1`
+- 历史版本：`doc/log.md`
 
-## 1.1.0 支持范围
+## 1.1.1 支持范围
 
 - 当前协议：`DBiT-DNAme-TAPS`
 - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
@@ -15,7 +16,7 @@
 
 ## 你会得到什么
 
-对大多数用户，1.1.0 版本最重要的交付物是：
+对大多数用户，1.1.1 版本最重要的交付物是：
 
 - `work/<sample>/summary/per_spot_summary.tsv`
 - `work/<sample>/summary/sample_summary.tsv`
@@ -34,7 +35,7 @@
 
 ## 输入要求
 
-运行 1.1.0 工作流前，通常需要准备：
+运行 1.1.1 工作流前，通常需要准备：
 
 - 原始双端测序数据：`R1 FASTQ`、`R2 FASTQ`
 - barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
@@ -170,13 +171,14 @@ pixi run python scripts/make_cmd.py --help
 - `doc/setup.md`：环境、测试数据、样例配置
 - `doc/stages.md`：各 stage 的输入输出契约
 - `doc/commands.md`：`make_cmd.py` 的常用命令
+- `doc/log.md`：版本变化记录
 - `TEST.md`：最小回归与 smoke 检查
 
 ## 说明
 
 - 文档示例统一使用 `pixi run ...`
 - 如需新增依赖，请同步更新 `pixi.lock`
-- 1.1.0 README 只保留用户使用路径；实现细节与开发约束不再放在首页
+- README 只保留当前版本号；版本变化统一记录到 `doc/log.md`
 
 ## Summary 可视化
 

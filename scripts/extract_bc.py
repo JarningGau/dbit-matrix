@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--progress-interval-seconds",
         type=float,
-        default=1.0,
+        default=60,
         help="Report processing speed every N seconds. Set 0 to disable.",
     )
     parser.add_argument(
