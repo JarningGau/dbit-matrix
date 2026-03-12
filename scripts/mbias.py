@@ -168,7 +168,9 @@ def resolve_cycle(
     right_align_r1: bool,
 ) -> int:
     if right_align_r1 and record.is_read1:
-        return max_cycle - read_len + query_pos
+        # Right-align R1 to the requested cycle window while keeping
+        # the first aligned base at cycle 1 for full-length reads.
+        return max_cycle - read_len + query_pos + 1
     if record.is_reverse:
         return read_len - query_pos
     return query_pos + 1
