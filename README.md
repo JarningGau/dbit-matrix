@@ -5,7 +5,7 @@
 - 当前版本：`1.1.2`
 - 历史版本：`doc/log.md`
 
-## 1.1.2 支持范围
+## 支持范围
 
 - 当前协议：`DBiT-DNAme-TAPS`
 - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
@@ -16,10 +16,13 @@
 
 ## 你会得到什么
 
-对大多数用户，1.1.2 版本最重要的交付物是：
+对大多数用户，最重要的交付物是：
 
 - `work/<sample>/summary/per_spot_summary.tsv`
 - `work/<sample>/summary/sample_summary.tsv`
+- `work/<sample>/coverage/host/**/*.CG.cov`
+- `work/<sample>/coverage/host_mito.CG.cov`
+- `work/<sample>/coverage/<spike_name>.CG.cov`
 - `work/<sample>/summary/reads_heatmap.png`
 - `work/<sample>/summary/cpg_site_count_heatmap.png`
 - `work/<sample>/summary/mean_methylation_heatmap.png`
@@ -30,6 +33,7 @@
 
 - `per_spot_summary.tsv` 给出每个 spot 的平均甲基化、CpG 位点数和 reads
 - `sample_summary.tsv` 给出样本级 host、mito 和 spike-in 的汇总结果
+- `coverage/*.CG.cov` 是 `call` stage 的主结果，分别保存 host per-spot、host mito 聚合和 spike-in 聚合的甲基化 calling 输出
 - `summary/*.heatmap.png` 给出基于 `per_spot_summary.tsv` 的 spot 空间热图
 - `mbias` 结果用于检查末端偏倚，不会自动修改 calling 参数
 
