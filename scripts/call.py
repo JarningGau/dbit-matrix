@@ -110,6 +110,30 @@ def parse_args() -> argparse.Namespace:
         help="Forwarded to methy_caller batch_size. Default: 10,000,000.",
     )
     parser.add_argument(
+        "--r1-left-trimming",
+        type=int,
+        default=0,
+        help="Forwarded to methy_caller R1 left trimming. Default: 0.",
+    )
+    parser.add_argument(
+        "--r1-right-trimming",
+        type=int,
+        default=0,
+        help="Forwarded to methy_caller R1 right trimming. Default: 0.",
+    )
+    parser.add_argument(
+        "--r2-left-trimming",
+        type=int,
+        default=0,
+        help="Forwarded to methy_caller R2 left trimming. Default: 0.",
+    )
+    parser.add_argument(
+        "--r2-right-trimming",
+        type=int,
+        default=0,
+        help="Forwarded to methy_caller R2 right trimming. Default: 0.",
+    )
+    parser.add_argument(
         "--caller-script",
         default="scripts/methy_caller.py",
         help="Path to methy_caller script. Default: scripts/methy_caller.py.",
@@ -170,6 +194,14 @@ def build_caller_command(
         str(args.max_depth),
         "--batch-size",
         str(args.batch_size),
+        "--r1-left-trimming",
+        str(args.r1_left_trimming),
+        "--r1-right-trimming",
+        str(args.r1_right_trimming),
+        "--r2-left-trimming",
+        str(args.r2_left_trimming),
+        "--r2-right-trimming",
+        str(args.r2_right_trimming),
     ]
     if args.sample_size is not None:
         command.extend(["--sample-size", str(args.sample_size)])
@@ -364,6 +396,14 @@ def main() -> int:
         raise ValueError("batch-size must be > 0")
     if args.sample_size is not None and args.sample_size <= 0:
         raise ValueError("sample-size must be > 0 when provided")
+    if args.r1_left_trimming < 0:
+        raise ValueError("r1-left-trimming must be >= 0")
+    if args.r1_right_trimming < 0:
+        raise ValueError("r1-right-trimming must be >= 0")
+    if args.r2_left_trimming < 0:
+        raise ValueError("r2-left-trimming must be >= 0")
+    if args.r2_right_trimming < 0:
+        raise ValueError("r2-right-trimming must be >= 0")
 
     work_path = Path(args.work_path)
     print(f"[call] mode={args.mode}")

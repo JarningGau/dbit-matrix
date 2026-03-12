@@ -163,12 +163,36 @@ pixi run python scripts/call.py --help
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage call \
+  --call-mode all \
+  --call-r1-left-trimming 0 \
+  --call-r1-right-trimming 0 \
+  --call-r2-left-trimming 0 \
+  --call-r2-right-trimming 0 \
   --dry-run
 
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage call \
   --runner slurm \
+  --call-mode all \
+  --call-r1-left-trimming 0 \
+  --call-r1-right-trimming 0 \
+  --call-r2-left-trimming 0 \
+  --call-r2-right-trimming 0 \
+  --dry-run
+
+# 可选：只生成 host calling 命令
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage call \
+  --call-mode host \
+  --dry-run
+
+# 可选：只生成 spike calling 命令
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage call \
+  --call-mode spike \
   --dry-run
 ```
 
@@ -212,6 +236,10 @@ pixi run python scripts/call.py \
   --chromosomes chr1,chr2,chr3 \
   --mito-chromosomes chrM \
   --jobs 4 \
+  --r1-left-trimming 5 \
+  --r1-right-trimming 5 \
+  --r2-left-trimming 5 \
+  --r2-right-trimming 5 \
   --dry-run
 ```
 

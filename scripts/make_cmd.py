@@ -207,6 +207,31 @@ def parse_args() -> argparse.Namespace:
         help="batch_size passed to methy_caller in call stage. Default: 10000000.",
     )
     parser.add_argument(
+        "--call-mode",
+        choices=["all", "host", "spike"],
+        help="Mode for call stage. Default: all.",
+    )
+    parser.add_argument(
+        "--call-r1-left-trimming",
+        type=int,
+        help="R1 left-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-r1-right-trimming",
+        type=int,
+        help="R1 right-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-r2-left-trimming",
+        type=int,
+        help="R2 left-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-r2-right-trimming",
+        type=int,
+        help="R2 right-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
         "--call-caller-script",
         help="Path to methy_caller script for call stage. Default: scripts/methy_caller.py.",
     )
@@ -497,6 +522,14 @@ def build_call_command(
         str(args.call_max_depth),
         "--batch-size",
         str(args.call_batch_size),
+        "--r1-left-trimming",
+        str(args.call_r1_left_trimming),
+        "--r1-right-trimming",
+        str(args.call_r1_right_trimming),
+        "--r2-left-trimming",
+        str(args.call_r2_left_trimming),
+        "--r2-right-trimming",
+        str(args.call_r2_right_trimming),
         "--caller-script",
         args.call_caller_script,
     ]
@@ -789,6 +822,19 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "call_sample_size": pick(args.call_sample_size, cfg.get("call_sample_size")),
         "call_max_depth": pick(args.call_max_depth, cfg.get("call_max_depth")),
         "call_batch_size": pick(args.call_batch_size, cfg.get("call_batch_size")),
+        "call_mode": pick(args.call_mode, cfg.get("call_mode")),
+        "call_r1_left_trimming": pick(
+            args.call_r1_left_trimming, cfg.get("call_r1_left_trimming")
+        ),
+        "call_r1_right_trimming": pick(
+            args.call_r1_right_trimming, cfg.get("call_r1_right_trimming")
+        ),
+        "call_r2_left_trimming": pick(
+            args.call_r2_left_trimming, cfg.get("call_r2_left_trimming")
+        ),
+        "call_r2_right_trimming": pick(
+            args.call_r2_right_trimming, cfg.get("call_r2_right_trimming")
+        ),
         "call_caller_script": pick(args.call_caller_script, cfg.get("call_caller_script")),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
@@ -1033,6 +1079,37 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["call_batch_size"] <= 0:
         raise ValueError("call_batch_size must be > 0")
+    settings["call_mode"] = settings["call_mode"] or "all"
+    if settings["call_mode"] not in {"all", "host", "spike"}:
+        raise ValueError("call_mode must be one of: all, host, spike")
+    settings["call_r1_left_trimming"] = (
+        int(settings["call_r1_left_trimming"])
+        if settings["call_r1_left_trimming"] is not None
+        else 0
+    )
+    if settings["call_r1_left_trimming"] < 0:
+        raise ValueError("call_r1_left_trimming must be >= 0")
+    settings["call_r1_right_trimming"] = (
+        int(settings["call_r1_right_trimming"])
+        if settings["call_r1_right_trimming"] is not None
+        else 0
+    )
+    if settings["call_r1_right_trimming"] < 0:
+        raise ValueError("call_r1_right_trimming must be >= 0")
+    settings["call_r2_left_trimming"] = (
+        int(settings["call_r2_left_trimming"])
+        if settings["call_r2_left_trimming"] is not None
+        else 0
+    )
+    if settings["call_r2_left_trimming"] < 0:
+        raise ValueError("call_r2_left_trimming must be >= 0")
+    settings["call_r2_right_trimming"] = (
+        int(settings["call_r2_right_trimming"])
+        if settings["call_r2_right_trimming"] is not None
+        else 0
+    )
+    if settings["call_r2_right_trimming"] < 0:
+        raise ValueError("call_r2_right_trimming must be >= 0")
     settings["call_caller_script"] = (
         settings["call_caller_script"] or "scripts/methy_caller.py"
     )
@@ -1621,12 +1698,16 @@ def main() -> int:
             call_sample_size=settings["call_sample_size"],
             call_max_depth=settings["call_max_depth"],
             call_batch_size=settings["call_batch_size"],
+            call_r1_left_trimming=settings["call_r1_left_trimming"],
+            call_r1_right_trimming=settings["call_r1_right_trimming"],
+            call_r2_left_trimming=settings["call_r2_left_trimming"],
+            call_r2_right_trimming=settings["call_r2_right_trimming"],
             call_caller_script=settings["call_caller_script"],
             spike_in_index=settings["spike_in_index"],
         )
         if settings["runner"] == "local":
             script_path = command_dir / "07_call.sh"
-            command = build_call_command(command_args, sample_work, "all")
+            command = build_call_command(command_args, sample_work, settings["call_mode"])
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
@@ -1637,80 +1718,88 @@ def main() -> int:
             generate_local_script(command, script_path)
             generated_scripts.append(script_path)
         else:
-            host_bams = discover_call_host_bams(sample_work)
-            if not host_bams:
-                if settings["dry_run"]:
-                    print(f"[make_cmd] runner={settings['runner']}")
-                    print(f"[make_cmd] stage={settings['stage']}")
-                    print(f"[make_cmd] sample_id={settings['sample_id']}")
-                    print(
-                        f"[make_cmd] no host spot bams found: "
-                        f"{sample_work / 'split_bams'}/**/*.sorted.bam"
+            call_mode = settings["call_mode"]
+            include_host = call_mode in ("all", "host")
+            include_spike = call_mode in ("all", "spike")
+            host_bams: list[Path] = []
+            if include_host:
+                host_bams = discover_call_host_bams(sample_work)
+                if not host_bams:
+                    if settings["dry_run"]:
+                        print(f"[make_cmd] runner={settings['runner']}")
+                        print(f"[make_cmd] stage={settings['stage']}")
+                        print(f"[make_cmd] sample_id={settings['sample_id']}")
+                        print(
+                            f"[make_cmd] no host spot bams found: "
+                            f"{sample_work / 'split_bams'}/**/*.sorted.bam"
+                        )
+                        return 0
+                    raise ValueError(
+                        f"no host spot bams found under: {sample_work / 'split_bams'}/**/*.sorted.bam"
                     )
-                    return 0
-                raise ValueError(
-                    f"no host spot bams found under: {sample_work / 'split_bams'}/**/*.sorted.bam"
-                )
             host_script_path = command_dir / "07_call_host.sbatch"
             host_command = build_call_command(command_args, sample_work, "host")
-            spike_names = discover_call_spike_names(sample_work)
-            discovered_from_cfg = parse_spike_names(settings["spike_in_index"])
-            if discovered_from_cfg:
-                spike_names = [name for name in discovered_from_cfg if name in spike_names]
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
-            print(f"[make_cmd] host_spot_count={len(host_bams)}")
-            print(f"[make_cmd] script={host_script_path}")
-            print(f"[make_cmd] command={host_command}")
-            if not settings["dry_run"]:
-                host_output = settings["call_host_slurm_output"].replace(
-                    "%x", f"dbit_call_host_{settings['sample_id']}"
-                )
-                host_error = settings["call_host_slurm_error"].replace(
-                    "%x", f"dbit_call_host_{settings['sample_id']}"
-                )
-                host_slurm_args = argparse.Namespace(
-                    job_name=f"dbit_call_host_{settings['sample_id']}",
-                    slurm_partition=settings["call_host_slurm_partition"],
-                    slurm_mem=settings["call_host_slurm_mem"],
-                    slurm_cpus_per_task=settings["call_host_slurm_cpus_per_task"],
-                    slurm_output=host_output,
-                    slurm_error=host_error,
-                    module_line="",
-                )
-                generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
-            generated_scripts.append(host_script_path)
-            for spike_name in spike_names:
-                spike_script_path = command_dir / f"07_call_spike_{spike_name}.sbatch"
-                spike_command = build_call_command(
-                    command_args,
-                    sample_work,
-                    "spike",
-                    spike_name=spike_name,
-                )
-                print(f"[make_cmd] script={spike_script_path}")
-                print(f"[make_cmd] command={spike_command}")
+            if include_host:
+                print(f"[make_cmd] host_spot_count={len(host_bams)}")
+                print(f"[make_cmd] script={host_script_path}")
+                print(f"[make_cmd] command={host_command}")
                 if not settings["dry_run"]:
-                    spike_output = settings["call_spike_slurm_output"].replace(
-                        "%x", f"dbit_call_spike_{settings['sample_id']}_{spike_name}"
+                    host_output = settings["call_host_slurm_output"].replace(
+                        "%x", f"dbit_call_host_{settings['sample_id']}"
                     )
-                    spike_error = settings["call_spike_slurm_error"].replace(
-                        "%x", f"dbit_call_spike_{settings['sample_id']}_{spike_name}"
+                    host_error = settings["call_host_slurm_error"].replace(
+                        "%x", f"dbit_call_host_{settings['sample_id']}"
                     )
-                    spike_slurm_args = argparse.Namespace(
-                        job_name=f"dbit_call_spike_{settings['sample_id']}_{spike_name}",
-                        slurm_partition=settings["call_spike_slurm_partition"],
-                        slurm_mem=settings["call_spike_slurm_mem"],
-                        slurm_cpus_per_task=settings["call_spike_slurm_cpus_per_task"],
-                        slurm_output=spike_output,
-                        slurm_error=spike_error,
+                    host_slurm_args = argparse.Namespace(
+                        job_name=f"dbit_call_host_{settings['sample_id']}",
+                        slurm_partition=settings["call_host_slurm_partition"],
+                        slurm_mem=settings["call_host_slurm_mem"],
+                        slurm_cpus_per_task=settings["call_host_slurm_cpus_per_task"],
+                        slurm_output=host_output,
+                        slurm_error=host_error,
                         module_line="",
                     )
-                    generate_slurm_script(
-                        spike_command, spike_script_path, log_dir, spike_slurm_args
+                    generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
+                generated_scripts.append(host_script_path)
+
+            if include_spike:
+                spike_names = discover_call_spike_names(sample_work)
+                discovered_from_cfg = parse_spike_names(settings["spike_in_index"])
+                if discovered_from_cfg:
+                    spike_names = [name for name in discovered_from_cfg if name in spike_names]
+                for spike_name in spike_names:
+                    spike_script_path = command_dir / f"07_call_spike_{spike_name}.sbatch"
+                    spike_command = build_call_command(
+                        command_args,
+                        sample_work,
+                        "spike",
+                        spike_name=spike_name,
                     )
-                generated_scripts.append(spike_script_path)
+                    print(f"[make_cmd] script={spike_script_path}")
+                    print(f"[make_cmd] command={spike_command}")
+                    if not settings["dry_run"]:
+                        spike_output = settings["call_spike_slurm_output"].replace(
+                            "%x", f"dbit_call_spike_{settings['sample_id']}_{spike_name}"
+                        )
+                        spike_error = settings["call_spike_slurm_error"].replace(
+                            "%x", f"dbit_call_spike_{settings['sample_id']}_{spike_name}"
+                        )
+                        spike_slurm_args = argparse.Namespace(
+                            job_name=f"dbit_call_spike_{settings['sample_id']}_{spike_name}",
+                            slurm_partition=settings["call_spike_slurm_partition"],
+                            slurm_mem=settings["call_spike_slurm_mem"],
+                            slurm_cpus_per_task=settings["call_spike_slurm_cpus_per_task"],
+                            slurm_output=spike_output,
+                            slurm_error=spike_error,
+                            module_line="",
+                        )
+                        generate_slurm_script(
+                            spike_command, spike_script_path, log_dir, spike_slurm_args
+                        )
+                    generated_scripts.append(spike_script_path)
     else:
         raise ValueError(f"unsupported stage: {settings['stage']}")
 

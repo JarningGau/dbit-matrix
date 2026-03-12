@@ -42,6 +42,11 @@
     "call_min_mapping_quality": 1,
     "call_max_depth": 250,
     "call_batch_size": 10000000,
+    "call_mode": "spike",
+    "call_r1_left_trimming": 0,
+    "call_r1_right_trimming": 0,
+    "call_r2_left_trimming": 0,
+    "call_r2_right_trimming": 0,
     "call_caller_script": "scripts/methy_caller.py",
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",

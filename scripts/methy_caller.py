@@ -69,6 +69,30 @@ def parse_args() -> argparse.Namespace:
         help="Batch size in bp for grouping CpG positions. Default: 10,000,000.",
     )
     parser.add_argument(
+        "--r1-left-trimming",
+        type=int,
+        default=0,
+        help="R1 left-end trimming in read coordinates. Default: 0.",
+    )
+    parser.add_argument(
+        "--r1-right-trimming",
+        type=int,
+        default=0,
+        help="R1 right-end trimming in read coordinates. Default: 0.",
+    )
+    parser.add_argument(
+        "--r2-left-trimming",
+        type=int,
+        default=0,
+        help="R2 left-end trimming in read coordinates. Default: 0.",
+    )
+    parser.add_argument(
+        "--r2-right-trimming",
+        type=int,
+        default=0,
+        help="R2 right-end trimming in read coordinates. Default: 0.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logs.",
@@ -111,6 +135,10 @@ def process_pileup_column(
     pileup_column,
     chromosome: str,
     target_flags: set[int],
+    r1_left_trimming: int,
+    r1_right_trimming: int,
+    r2_left_trimming: int,
+    r2_right_trimming: int,
 ) -> dict[str, object]:
     tg_count = 0
     ca_count = 0
@@ -124,11 +152,38 @@ def process_pileup_column(
             continue
         if pileup_read.query_position is None:
             continue
-        read_seq = pileup_read.alignment.query_sequence
-        base = read_seq[pileup_read.query_position]
-        next_pos = pileup_read.query_position + 1
-        if next_pos >= len(read_seq):
+        record = pileup_read.alignment
+        read_seq = record.query_sequence
+        if not read_seq:
             continue
+        read_len = len(read_seq)
+        if read_len < 2:
+            continue
+        query_pos = pileup_read.query_position
+        next_pos = query_pos + 1
+        if next_pos >= read_len:
+            continue
+        if is_trimmed_read_position(
+            record=record,
+            query_pos=query_pos,
+            read_len=read_len,
+            r1_left_trimming=r1_left_trimming,
+            r1_right_trimming=r1_right_trimming,
+            r2_left_trimming=r2_left_trimming,
+            r2_right_trimming=r2_right_trimming,
+        ):
+            continue
+        if is_trimmed_read_position(
+            record=record,
+            query_pos=next_pos,
+            read_len=read_len,
+            r1_left_trimming=r1_left_trimming,
+            r1_right_trimming=r1_right_trimming,
+            r2_left_trimming=r2_left_trimming,
+            r2_right_trimming=r2_right_trimming,
+        ):
+            continue
+        base = read_seq[query_pos]
         dinucleotide = (base + read_seq[next_pos]).upper()
         if dinucleotide == "TG":
             tg_count += 1
@@ -162,6 +217,10 @@ def process_cpg_batch(
     min_mapping_quality: int,
     target_flags: set[int],
     max_depth: int,
+    r1_left_trimming: int,
+    r1_right_trimming: int,
+    r2_left_trimming: int,
+    r2_right_trimming: int,
 ) -> list[dict[str, object]]:
     if not cpg_batch:
         return []
@@ -184,7 +243,17 @@ def process_cpg_batch(
     )
     for pileup_column in pileups:
         if pileup_column.pos in target_positions:
-            results.append(process_pileup_column(pileup_column, chromosome, target_flags))
+            results.append(
+                process_pileup_column(
+                    pileup_column,
+                    chromosome,
+                    target_flags,
+                    r1_left_trimming,
+                    r1_right_trimming,
+                    r2_left_trimming,
+                    r2_right_trimming,
+                )
+            )
     return results
 
 
@@ -196,6 +265,10 @@ def process_all_cpg_positions(
     min_mapping_quality: int,
     max_depth: int,
     batch_size: int,
+    r1_left_trimming: int,
+    r1_right_trimming: int,
+    r2_left_trimming: int,
+    r2_right_trimming: int,
 ) -> list[dict[str, object]]:
     target_flags = {99, 147, 83, 163}
     results: list[dict[str, object]] = []
@@ -210,6 +283,10 @@ def process_all_cpg_positions(
                 min_mapping_quality,
                 target_flags,
                 max_depth,
+                r1_left_trimming,
+                r1_right_trimming,
+                r2_left_trimming,
+                r2_right_trimming,
             )
         )
     return results
@@ -272,6 +349,10 @@ def methylation_caller(
     sample_size: int | None,
     max_depth: int,
     batch_size: int,
+    r1_left_trimming: int,
+    r1_right_trimming: int,
+    r2_left_trimming: int,
+    r2_right_trimming: int,
     verbose: bool,
 ) -> list[dict[str, object]]:
     chromosomes = parse_chromosome_csv(chromosome)
@@ -291,12 +372,38 @@ def methylation_caller(
                 min_mapping_quality=min_mapping_quality,
                 max_depth=max_depth,
                 batch_size=batch_size,
+                r1_left_trimming=r1_left_trimming,
+                r1_right_trimming=r1_right_trimming,
+                r2_left_trimming=r2_left_trimming,
+                r2_right_trimming=r2_right_trimming,
             )
             all_results.extend(chrom_results)
         write_results_to_file(all_results, output_file)
         return all_results
     finally:
         inbam.close()
+
+
+def is_trimmed_read_position(
+    record: pysam.AlignedSegment,
+    query_pos: int,
+    read_len: int,
+    r1_left_trimming: int,
+    r1_right_trimming: int,
+    r2_left_trimming: int,
+    r2_right_trimming: int,
+) -> bool:
+    if record.is_read1:
+        left_trim = r1_left_trimming
+        right_trim = r1_right_trimming
+    elif record.is_read2:
+        left_trim = r2_left_trimming
+        right_trim = r2_right_trimming
+    else:
+        return False
+    left_cycle = query_pos + 1
+    right_cycle = read_len - query_pos
+    return left_cycle <= left_trim or right_cycle <= right_trim
 
 
 def main() -> int:
@@ -311,6 +418,14 @@ def main() -> int:
         raise ValueError("batch-size must be > 0")
     if args.sample_size is not None and args.sample_size <= 0:
         raise ValueError("sample-size must be > 0 when provided")
+    if args.r1_left_trimming < 0:
+        raise ValueError("r1-left-trimming must be >= 0")
+    if args.r1_right_trimming < 0:
+        raise ValueError("r1-right-trimming must be >= 0")
+    if args.r2_left_trimming < 0:
+        raise ValueError("r2-left-trimming must be >= 0")
+    if args.r2_right_trimming < 0:
+        raise ValueError("r2-right-trimming must be >= 0")
     chromosomes = parse_chromosome_csv(args.chromosome)
     validate_chromosomes_in_reference(args.reference_file, chromosomes)
 
@@ -320,6 +435,10 @@ def main() -> int:
     print(f"[methy_caller] output={args.output}")
     if args.sample_size is not None:
         print(f"[methy_caller] sample_size={args.sample_size}")
+    print(f"[methy_caller] r1_left_trimming={args.r1_left_trimming}")
+    print(f"[methy_caller] r1_right_trimming={args.r1_right_trimming}")
+    print(f"[methy_caller] r2_left_trimming={args.r2_left_trimming}")
+    print(f"[methy_caller] r2_right_trimming={args.r2_right_trimming}")
 
     if args.dry_run:
         print("[methy_caller] dry_run=1")
@@ -335,6 +454,10 @@ def main() -> int:
         sample_size=args.sample_size,
         max_depth=args.max_depth,
         batch_size=args.batch_size,
+        r1_left_trimming=args.r1_left_trimming,
+        r1_right_trimming=args.r1_right_trimming,
+        r2_left_trimming=args.r2_left_trimming,
+        r2_right_trimming=args.r2_right_trimming,
         verbose=args.verbose,
     )
     covered_sites = len([result for result in results if int(result["coverage"]) > 0])

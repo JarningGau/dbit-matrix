@@ -294,8 +294,8 @@ def write_mbias_png(
         grouped[key].sort(key=lambda item: item[0])
 
     palette = {
-        ("R1", "CG"): "#2ca02c",
-        ("R2", "CG"): "#17becf",
+        ("R1", "CG"): "#FEA830",
+        ("R2", "CG"): "#65EAFB",
     }
     fig, axis = plt.subplots(figsize=(12, 6.4), dpi=120)
     for read_label in ("R1", "R2"):
