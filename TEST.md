@@ -224,6 +224,7 @@ pixi run python scripts/make_cmd.py \
 
 - `work/<sample>/qc/mbias/*.mbias.tsv`
 - `work/<sample>/qc/mbias/*.mbias.png`
+- `work/<sample>/qc/mbias/host.subsampled.sorted.bam`（host/all 模式时）
 - `mbias` 结果应与 `call` 方向一致：`lambda` 接近低甲基化，`puc19` 保持高甲基化
 
 可选：验证 `call.py` 主机位点并行 dry-run：
@@ -235,6 +236,9 @@ pixi run python scripts/call.py \
   --reference-file /mnt/e/LiLab_HL/resource/bwa/mm10/genome.fa \
   --chromosomes chr1,chr2,chr3 \
   --mito-chromosomes chrM \
+  --samtools-bin samtools \
+  --samtools-threads 4 \
+  --host-subsample-fraction 0.1 \
   --jobs 4 \
   --r1-left-trimming 5 \
   --r1-right-trimming 5 \
@@ -242,6 +246,11 @@ pixi run python scripts/call.py \
   --r2-right-trimming 5 \
   --dry-run
 ```
+
+`call --mode host` 行为检查：
+
+- 若存在 `work/<sample>/qc/mbias/host.subsampled.sorted.bam`，`host_mito` 直接复用该 BAM
+- 若不存在该 BAM，`call.py` 会先执行抽样 + sort/index，再输出聚合 `coverage/host_mito.CG.cov`
 
 ## 下一里程碑
 

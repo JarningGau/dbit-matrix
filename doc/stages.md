@@ -134,6 +134,7 @@
 
 - `mode` 默认仅分析 `spike`；可显式切到 `host` 或 `all`
 - host 从 `pooled.byCB.bam` 固定比例抽样（内部固定 seed），随后 `sort + index` 再做 mbias
+- host 抽样 BAM 路径固定为 `qc/mbias/host.subsampled.sorted.bam`，供 `call` 的聚合 `host_mito` 结果复用
 - host 统计时对 `R1` 使用右对齐 cycle（适配 demux 的 left trimming）
 - spike-in 直接使用全量 `pooled.<spike_name>.sorted.bam` 做 mbias
 - 只在参考序列真实 `CpG` 位点上计算甲基化率：`(TG+CA)/(TG+CA+CG)`
@@ -149,17 +150,19 @@
 输入：
 
 - host by spots: `split_bams/**/*.sorted.bam`
+- host mito aggregate: `qc/mbias/host.subsampled.sorted.bam`
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
 
 输出：
 
 - `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
-- `coverage/host_mito/<X_index>/<X_index>_<Y_index>.CG.cov`
+- `coverage/host_mito.CG.cov`
 - `coverage/lambda.CG.cov`
 - `coverage/puc19.CG.cov`
 
 说明：
 
-- host 按 spot 输出；每个 spot 额外输出一份线粒体位点结果
+- host 主结果按 spot 输出；`host_mito` 输出为单个聚合结果
+- `host_mito` 优先复用 `qc/mbias/host.subsampled.sorted.bam`，若不存在则从 `pooled/pooled.byCB.bam` 按 mbias 相同抽样规则生成并排序后再调用
 - 本地模式：单脚本内并行 spots，spike-in 顺序执行
 - Slurm 模式：host 只生成一个 sbatch，在作业内并行处理 spots；spike-in 每个 reference 一个 sbatch

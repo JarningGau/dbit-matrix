@@ -108,6 +108,7 @@ pixi run python scripts/make_cmd.py \
 
 - `mbias` 默认 `mode=spike`（只分析 spike-in）
 - host: 从 `pooled/pooled.byCB.bam` 固定比例抽样（内部固定 seed）后 `sort + index + mbias`
+- host: 抽样 BAM 固定输出到 `qc/mbias/host.subsampled.sorted.bam`，可被 `call` 聚合 `host_mito` 复用
 - host: `R1` 按右对齐 cycle 统计（适配 demux 的 left trimming）
 - spike-in: 使用全量 `pooled/pooled.<spike_name>.sorted.bam` 直接做 mbias
 - host 使用 `call_reference_file`，spike-in 使用 `spike_in_index`
@@ -132,7 +133,9 @@ pixi run python scripts/make_cmd.py \
 
 - 扫描 `split_bams/**/*.sorted.bam` 与 `pooled/pooled.<spike_name>.sorted.bam`
 - 本地模式调用 `scripts/call.py`，在单脚本中并行 host spots
-- host 结果输出到 `coverage/host/` 与 `coverage/host_mito/`
+- host spot 结果输出到 `coverage/host/`
+- `host_mito` 输出为单个聚合文件 `coverage/host_mito.CG.cov`
+- `host_mito` 优先复用 `qc/mbias/host.subsampled.sorted.bam`，缺失时自动从 `pooled/pooled.byCB.bam` 抽样并排序
 - spike-in 结果输出到 `coverage/<spike_name>.CG.cov`
 
 Slurm 下：

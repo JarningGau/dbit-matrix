@@ -532,6 +532,12 @@ def build_call_command(
         str(args.call_r2_right_trimming),
         "--caller-script",
         args.call_caller_script,
+        "--samtools-bin",
+        args.samtools_bin,
+        "--samtools-threads",
+        str(args.samtools_threads),
+        "--host-subsample-fraction",
+        str(args.mbias_host_subsample_fraction),
     ]
     if args.call_sample_size is not None:
         command.extend(["--sample-size", str(args.call_sample_size)])
@@ -1703,6 +1709,9 @@ def main() -> int:
             call_r2_left_trimming=settings["call_r2_left_trimming"],
             call_r2_right_trimming=settings["call_r2_right_trimming"],
             call_caller_script=settings["call_caller_script"],
+            samtools_bin=settings["samtools_bin"],
+            samtools_threads=settings["samtools_threads"],
+            mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
             spike_in_index=settings["spike_in_index"],
         )
         if settings["runner"] == "local":

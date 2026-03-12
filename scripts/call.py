@@ -12,6 +12,15 @@ from pathlib import Path
 
 import pysam
 
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from scripts.host_subsample_bam import (
+    HOST_SUBSAMPLE_SEED,
+    build_prepare_host_subsample_commands,
+    get_host_subsample_paths,
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -23,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--work-path",
         required=True,
-        help="Sample work directory containing split_bams/ and pooled/.",
+        help="Sample work directory containing split_bams/, pooled/, and qc/mbias/.",
     )
     parser.add_argument(
         "--mode",
@@ -71,7 +80,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mito-chromosomes",
         default="chrM",
-        help="Comma-separated chromosome list used for per-spot host_mito outputs.",
+        help="Comma-separated chromosome list used for aggregate host_mito output.",
     )
     parser.add_argument(
         "--jobs",
@@ -137,6 +146,29 @@ def parse_args() -> argparse.Namespace:
         "--caller-script",
         default="scripts/methy_caller.py",
         help="Path to methy_caller script. Default: scripts/methy_caller.py.",
+    )
+    parser.add_argument(
+        "--samtools-bin",
+        default="samtools",
+        help="samtools executable path or command name. Default: samtools.",
+    )
+    parser.add_argument(
+        "--samtools-threads",
+        type=int,
+        default=4,
+        help="Threads for samtools view/sort while preparing mito BAM. Default: 4.",
+    )
+    parser.add_argument(
+        "--host-subsample-fraction",
+        type=float,
+        default=0.1,
+        help="Host subsampling fraction in (0, 1] for mito BAM fallback. Default: 0.1.",
+    )
+    parser.add_argument(
+        "--host-subsample-seed",
+        type=int,
+        default=HOST_SUBSAMPLE_SEED,
+        help=f"Host subsampling seed for mito BAM fallback. Default: {HOST_SUBSAMPLE_SEED}.",
     )
     parser.add_argument(
         "--dry-run",
@@ -258,16 +290,12 @@ def run_host_spot(
     args: argparse.Namespace,
     work_path: Path,
     host_bam: Path,
-) -> tuple[Path, Path]:
+) -> Path:
     split_root = work_path / "split_bams"
     relative = host_bam.relative_to(split_root)
     base_name = relative.name[: -len(".sorted.bam")]
     host_out = work_path / "coverage" / "host" / relative.parent / f"{base_name}.CG.cov"
-    mito_out = (
-        work_path / "coverage" / "host_mito" / relative.parent / f"{base_name}.CG.cov"
-    )
     host_out.parent.mkdir(parents=True, exist_ok=True)
-    mito_out.parent.mkdir(parents=True, exist_ok=True)
 
     host_cmd = build_caller_command(
         args,
@@ -276,16 +304,56 @@ def run_host_spot(
         args.chromosomes,
         args.reference_file,
     )
+    run_or_skip(host_cmd, host_out, args.dry_run)
+    return host_out
+
+
+def ensure_host_mito_bam(args: argparse.Namespace, work_path: Path) -> Path:
+    mbias_dir = work_path / "qc" / "mbias"
+    host_paths = get_host_subsample_paths(mbias_dir)
+    host_sorted = host_paths.sorted_bam
+    host_index = host_paths.sorted_bam_index
+    if host_sorted.exists():
+        print(f"[call] reuse_host_mito_bam={host_sorted}")
+        if not host_index.exists():
+            index_cmd = [args.samtools_bin, "index", str(host_sorted)]
+            run_or_skip(index_cmd, host_index, args.dry_run)
+        return host_sorted
+
+    pooled_host = work_path / "pooled" / "pooled.byCB.bam"
+    if not pooled_host.exists():
+        raise ValueError(
+            "missing host mito BAM fallback inputs. expected one of:\n"
+            f"  - existing: {host_sorted}\n"
+            f"  - fallback source: {pooled_host}"
+        )
+    print(f"[call] prepare_host_mito_bam_from={pooled_host}")
+    mbias_dir.mkdir(parents=True, exist_ok=True)
+    for command, output_path in build_prepare_host_subsample_commands(
+        pooled_host_bam=pooled_host,
+        paths=host_paths,
+        samtools_bin=args.samtools_bin,
+        samtools_threads=args.samtools_threads,
+        host_subsample_fraction=args.host_subsample_fraction,
+        host_subsample_seed=args.host_subsample_seed,
+    ):
+        run_or_skip(command, output_path, args.dry_run)
+    return host_sorted
+
+
+def run_host_mito_aggregate(args: argparse.Namespace, work_path: Path) -> Path:
+    host_mito_bam = ensure_host_mito_bam(args, work_path)
+    mito_out = work_path / "coverage" / "host_mito.CG.cov"
+    mito_out.parent.mkdir(parents=True, exist_ok=True)
     mito_cmd = build_caller_command(
         args,
-        host_bam,
+        host_mito_bam,
         mito_out,
         args.mito_chromosomes,
         args.reference_file,
     )
-    run_or_skip(host_cmd, host_out, args.dry_run)
     run_or_skip(mito_cmd, mito_out, args.dry_run)
-    return host_out, mito_out
+    return mito_out
 
 
 def run_host_mode(args: argparse.Namespace, work_path: Path) -> None:
@@ -303,10 +371,11 @@ def run_host_mode(args: argparse.Namespace, work_path: Path) -> None:
         }
         for future in as_completed(futures):
             host_bam = futures[future]
-            host_out, mito_out = future.result()
+            host_out = future.result()
             print(f"[call] host_bam={host_bam}")
             print(f"[call] output_host={host_out}")
-            print(f"[call] output_host_mito={mito_out}")
+    mito_out = run_host_mito_aggregate(args, work_path)
+    print(f"[call] output_host_mito={mito_out}")
 
 
 def run_spike_mode(args: argparse.Namespace, work_path: Path) -> None:
@@ -386,6 +455,12 @@ def main() -> int:
     args = parse_args()
     if args.jobs <= 0:
         raise ValueError("jobs must be > 0")
+    if args.samtools_threads <= 0:
+        raise ValueError("samtools-threads must be > 0")
+    if args.host_subsample_seed < 0:
+        raise ValueError("host-subsample-seed must be >= 0")
+    if args.host_subsample_fraction <= 0 or args.host_subsample_fraction > 1:
+        raise ValueError("host-subsample-fraction must be in (0, 1]")
     if args.min_base_quality < 0:
         raise ValueError("min-base-quality must be >= 0")
     if args.min_mapping_quality < 0:
@@ -411,6 +486,10 @@ def main() -> int:
     print(f"[call] host_reference={args.reference_file}")
     print(f"[call] chromosomes={args.chromosomes}")
     print(f"[call] mito_chromosomes={args.mito_chromosomes}")
+    print(f"[call] samtools_bin={args.samtools_bin}")
+    print(f"[call] samtools_threads={args.samtools_threads}")
+    print(f"[call] host_subsample_fraction={args.host_subsample_fraction}")
+    print(f"[call] host_subsample_seed={args.host_subsample_seed}")
     validate_chromosomes_in_reference(args.reference_file, args.chromosomes, "host")
     validate_chromosomes_in_reference(
         args.reference_file,

@@ -7,16 +7,24 @@ import argparse
 import csv
 import shlex
 import subprocess
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
 import pysam
 
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from scripts.host_subsample_bam import (
+    HOST_SUBSAMPLE_SEED,
+    build_prepare_host_subsample_commands,
+    get_host_subsample_paths,
+)
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-HOST_SUBSAMPLE_SEED = 11
 
 
 def parse_args() -> argparse.Namespace:
@@ -132,17 +140,6 @@ def discover_spike_bams(pooled_dir: Path) -> dict[str, Path]:
         if spike_name:
             spikes[spike_name] = bam_path
     return spikes
-
-
-def build_subsample_fraction(seed: int, fraction: float) -> str:
-    if fraction <= 0 or fraction > 1:
-        raise ValueError("host-subsample-fraction must be in (0, 1]")
-    if fraction == 1:
-        return ""
-    decimal_part = f"{fraction:.8f}".split(".", 1)[1].rstrip("0")
-    if not decimal_part:
-        decimal_part = "0"
-    return f"{seed}.{decimal_part}"
 
 
 def parse_spike_references(items: list[str]) -> dict[str, str]:
@@ -332,53 +329,22 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
         raise ValueError(f"missing host pooled BAM: {pooled_host}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    host_subsampled = output_dir / "host.subsampled.bam"
-    host_sorted = output_dir / "host.subsampled.sorted.bam"
-    host_index = output_dir / "host.subsampled.sorted.bam.bai"
+    host_paths = get_host_subsample_paths(output_dir)
+    host_subsampled = host_paths.subsampled_bam
+    host_sorted = host_paths.sorted_bam
+    host_index = host_paths.sorted_bam_index
     host_tsv = output_dir / "host.mbias.tsv"
     host_png = output_dir / "host.mbias.png"
 
-    subsample_arg = build_subsample_fraction(
-        HOST_SUBSAMPLE_SEED, args.host_subsample_fraction
-    )
-    if subsample_arg:
-        subsample_cmd = [
-            args.samtools_bin,
-            "view",
-            "-@",
-            str(args.samtools_threads),
-            "-s",
-            subsample_arg,
-            "-b",
-            "-o",
-            str(host_subsampled),
-            str(pooled_host),
-        ]
-    else:
-        subsample_cmd = [
-            args.samtools_bin,
-            "view",
-            "-@",
-            str(args.samtools_threads),
-            "-b",
-            "-o",
-            str(host_subsampled),
-            str(pooled_host),
-        ]
-    sort_cmd = [
-        args.samtools_bin,
-        "sort",
-        "-@",
-        str(args.samtools_threads),
-        "-o",
-        str(host_sorted),
-        str(host_subsampled),
-    ]
-    index_cmd = [args.samtools_bin, "index", str(host_sorted)]
-
-    run_or_skip(subsample_cmd, host_subsampled, args.dry_run)
-    run_or_skip(sort_cmd, host_sorted, args.dry_run)
-    run_or_skip(index_cmd, host_index, args.dry_run)
+    for command, output_path in build_prepare_host_subsample_commands(
+        pooled_host_bam=pooled_host,
+        paths=host_paths,
+        samtools_bin=args.samtools_bin,
+        samtools_threads=args.samtools_threads,
+        host_subsample_fraction=args.host_subsample_fraction,
+        host_subsample_seed=HOST_SUBSAMPLE_SEED,
+    ):
+        run_or_skip(command, output_path, args.dry_run)
 
     if host_tsv.exists() and host_png.exists():
         print(f"[mbias] skip_existing_output={host_tsv}")
