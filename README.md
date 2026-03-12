@@ -1,10 +1,10 @@
 # DBiT-Matrix
 
-`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的 1.0 工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级与 sample 级汇总结果。
+`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的 1.1.0 工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级、sample 级汇总结果和 summary heatmap。
 
-1.0 版本只聚焦一条可复现、可运行、可交付结果的主流程，不再在 README 中展开开发里程碑或实验性分支。
+1.1.0 版本在稳定主流程基础上补齐了 summary heatmap 交付物，README 仍只保留用户使用路径，不展开实验性分支。
 
-## 1.0 支持范围
+## 1.1.0 支持范围
 
 - 当前协议：`DBiT-DNAme-TAPS`
 - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
@@ -15,10 +15,13 @@
 
 ## 你会得到什么
 
-对大多数用户，1.0 版本最重要的交付物是：
+对大多数用户，1.1.0 版本最重要的交付物是：
 
 - `work/<sample>/summary/per_spot_summary.tsv`
 - `work/<sample>/summary/sample_summary.tsv`
+- `work/<sample>/summary/reads_heatmap.png`
+- `work/<sample>/summary/cpg_site_count_heatmap.png`
+- `work/<sample>/summary/mean_methylation_heatmap.png`
 - `work/<sample>/qc/mbias/*.mbias.tsv`
 - `work/<sample>/qc/mbias/*.mbias.png`
 
@@ -26,11 +29,12 @@
 
 - `per_spot_summary.tsv` 给出每个 spot 的平均甲基化、CpG 位点数和 reads
 - `sample_summary.tsv` 给出样本级 host、mito 和 spike-in 的汇总结果
+- `summary/*.heatmap.png` 给出基于 `per_spot_summary.tsv` 的 spot 空间热图
 - `mbias` 结果用于检查末端偏倚，不会自动修改 calling 参数
 
 ## 输入要求
 
-运行 1.0 工作流前，通常需要准备：
+运行 1.1.0 工作流前，通常需要准备：
 
 - 原始双端测序数据：`R1 FASTQ`、`R2 FASTQ`
 - barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
@@ -105,7 +109,7 @@ pixi run python scripts/make_cmd.py \
 | `split` | 按 `CB:Z:<x>+<y>` 将 host BAM 拆成 spot BAM 并排序 | `split_bams/**/*.sorted.bam` |
 | `mbias` | 生成 host/spike-in 的 M-bias QC 结果 | `qc/mbias/*` |
 | `call` | 进行 host per-spot、host mito 和 spike-in 甲基化 calling | `coverage/*.CG.cov` |
-| `summary` | 汇总为 spot 级与 sample 级结果 | `summary/per_spot_summary.tsv`、`summary/sample_summary.tsv` |
+| `summary` | 汇总为 spot 级结果、sample 级结果和 spot heatmap | `summary/per_spot_summary.tsv`、`summary/sample_summary.tsv`、`summary/*heatmap.png` |
 
 ## 配置建议
 
@@ -172,4 +176,12 @@ pixi run python scripts/make_cmd.py --help
 
 - 文档示例统一使用 `pixi run ...`
 - 如需新增依赖，请同步更新 `pixi.lock`
-- 1.0 README 只保留用户使用路径；实现细节与开发约束不再放在首页
+- 1.1.0 README 只保留用户使用路径；实现细节与开发约束不再放在首页
+
+## Summary 可视化
+
+`summary` stage 在写出 `per_spot_summary.tsv` 后，会继续生成 3 张基于 spot 坐标的 heatmap：
+
+- `summary/reads_heatmap.png`：`(X, Y, reads)`
+- `summary/cpg_site_count_heatmap.png`：`(X, Y, CpGs)`
+- `summary/mean_methylation_heatmap.png`：`(X, Y, beta)`

@@ -1,6 +1,6 @@
 # Commands
 
-本页面向 1.0 用户，只保留 `scripts/make_cmd.py` 的常用命令。默认推荐先 `--dry-run`，确认输入路径、stage 展开顺序和 runner 设置都正确。
+本页面向 1.1.0 用户，只保留 `scripts/make_cmd.py` 的常用命令。默认推荐先 `--dry-run`，确认输入路径、stage 展开顺序和 runner 设置都正确。
 
 ## 最常用
 
@@ -186,6 +186,9 @@ pixi run python scripts/make_cmd.py \
 - 读取 `coverage/` 和 `split_bams/per_spot_read_counts.tsv`
 - 输出 `summary/per_spot_summary.tsv`
 - 输出 `summary/sample_summary.tsv`
+- 输出 `summary/reads_heatmap.png`
+- 输出 `summary/cpg_site_count_heatmap.png`
+- 输出 `summary/mean_methylation_heatmap.png`
 
 ## 常见组合
 

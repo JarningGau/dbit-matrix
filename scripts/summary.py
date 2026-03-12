@@ -1,17 +1,55 @@
 #!/usr/bin/env python3
-"""Summarize per-spot and sample-level methylation outputs after call step."""
+"""Summarize per-spot outputs and render summary heatmaps."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+HEATMAP_SPECS = (
+    {
+        "field": "reads",
+        "output_name": "reads_heatmap.png",
+        "title": "Reads per Spot",
+        "colorbar_label": "Reads",
+        "cmap": "viridis",
+        "vmin": 0.0,
+        "vmax": None,
+    },
+    {
+        "field": "cpg_site_count",
+        "output_name": "cpg_site_count_heatmap.png",
+        "title": "CpG Sites per Spot",
+        "colorbar_label": "CpG sites",
+        "cmap": "magma",
+        "vmin": 0.0,
+        "vmax": None,
+    },
+    {
+        "field": "mean_methylation",
+        "output_name": "mean_methylation_heatmap.png",
+        "title": "Mean Methylation per Spot",
+        "colorbar_label": "Mean methylation (%)",
+        "cmap": "coolwarm",
+        "vmin": 0.0,
+        "vmax": 100.0,
+    },
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate summary TSVs from call outputs under a sample work directory."
+            "Generate summary TSVs and per-spot heatmaps from call outputs "
+            "under a sample work directory."
         )
     )
     parser.add_argument(
@@ -95,6 +133,29 @@ def format_float(value: float | None) -> str:
     if value is None:
         return "NA"
     return f"{value:.6f}"
+
+
+def parse_optional_float(text: str | None) -> float | None:
+    value = (text or "").strip()
+    if not value or value == "NA":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def parse_optional_index(text: str | None) -> int | None:
+    value = (text or "").strip()
+    if not value or value == "NA":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
 
 
 def summarize_per_spot(
@@ -181,6 +242,13 @@ def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> 
             writer.writerow(row)
 
 
+def read_tsv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
 def discover_spike_names(coverage_dir: Path) -> list[str]:
     names: list[str] = []
     for cov_path in sorted(coverage_dir.glob("*.CG.cov")):
@@ -194,6 +262,113 @@ def discover_spike_names(coverage_dir: Path) -> list[str]:
     return names
 
 
+def compute_tick_values(max_index: int) -> list[int]:
+    if max_index <= 0:
+        return []
+    if max_index <= 10:
+        return list(range(1, max_index + 1))
+    step = max(1, math.ceil(max_index / 10))
+    ticks = list(range(1, max_index + 1, step))
+    if ticks[-1] != max_index:
+        ticks.append(max_index)
+    return ticks
+
+
+def write_empty_heatmap(output_path: Path, title: str) -> None:
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.axis("off")
+    ax.text(0.5, 0.5, "No valid data", ha="center", va="center", fontsize=12)
+    ax.set_title(title)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+
+def write_heatmap_from_rows(
+    rows: list[dict[str, str]],
+    field: str,
+    output_path: Path,
+    title: str,
+    colorbar_label: str,
+    cmap_name: str,
+    vmin: float | None,
+    vmax: float | None,
+) -> None:
+    points: list[tuple[int, int, float]] = []
+    max_x = 0
+    max_y = 0
+    for row in rows:
+        x_index = parse_optional_index(row.get("X_index"))
+        y_index = parse_optional_index(row.get("Y_index"))
+        value = parse_optional_float(row.get(field))
+        if x_index is None or y_index is None or value is None:
+            continue
+        points.append((x_index, y_index, value))
+        max_x = max(max_x, x_index)
+        max_y = max(max_y, y_index)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not points:
+        write_empty_heatmap(output_path, title)
+        return
+
+    matrix = [[math.nan for _ in range(max_x)] for _ in range(max_y)]
+    for x_index, y_index, value in points:
+        matrix[y_index - 1][x_index - 1] = value
+
+    cmap = plt.get_cmap(cmap_name).copy()
+    cmap.set_bad("#f2f2f2")
+
+    fig_width = min(max(6.0, max_x * 0.22), 12.0)
+    fig_height = min(max(5.0, max_y * 0.22), 12.0)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    image = ax.imshow(
+        matrix,
+        origin="lower",
+        interpolation="nearest",
+        cmap=cmap,
+        aspect="equal",
+        extent=(0.5, max_x + 0.5, 0.5, max_y + 0.5),
+        vmin=vmin,
+        vmax=vmax,
+    )
+    ax.set_title(title)
+    ax.set_xlabel("X index")
+    ax.set_ylabel("Y index")
+
+    x_ticks = compute_tick_values(max_x)
+    y_ticks = compute_tick_values(max_y)
+    ax.set_xticks(x_ticks)
+    ax.set_yticks(y_ticks)
+    ax.set_xlim(0.5, max_x + 0.5)
+    ax.set_ylim(0.5, max_y + 0.5)
+
+    colorbar = fig.colorbar(image, ax=ax, shrink=0.9)
+    colorbar.set_label(colorbar_label)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+
+def write_summary_heatmaps(per_spot_summary_path: Path, summary_dir: Path) -> list[Path]:
+    rows = read_tsv_rows(per_spot_summary_path)
+    outputs: list[Path] = []
+    for spec in HEATMAP_SPECS:
+        output_path = summary_dir / spec["output_name"]
+        write_heatmap_from_rows(
+            rows=rows,
+            field=spec["field"],
+            output_path=output_path,
+            title=spec["title"],
+            colorbar_label=spec["colorbar_label"],
+            cmap_name=spec["cmap"],
+            vmin=spec["vmin"],
+            vmax=spec["vmax"],
+        )
+        outputs.append(output_path)
+    return outputs
+
+
 def main() -> int:
     args = parse_args()
     work_path = Path(args.work_path)
@@ -204,6 +379,7 @@ def main() -> int:
     summary_dir = work_path / "summary"
     per_spot_out = summary_dir / "per_spot_summary.tsv"
     sample_out = summary_dir / "sample_summary.tsv"
+    heatmap_outputs = [summary_dir / spec["output_name"] for spec in HEATMAP_SPECS]
 
     requested_spikes = [item.strip() for item in args.spike_in_name if item.strip()]
     if requested_spikes:
@@ -226,6 +402,8 @@ def main() -> int:
         print(f"[summary] spike_cov[{spike_name}]={spike_cov_path}")
     print(f"[summary] output_per_spot={per_spot_out}")
     print(f"[summary] output_sample={sample_out}")
+    for heatmap_path in heatmap_outputs:
+        print(f"[summary] output_heatmap={heatmap_path}")
 
     if args.dry_run:
         print("[summary] dry_run=1")
@@ -246,6 +424,7 @@ def main() -> int:
     sample_row = build_sample_summary_row(per_spot_rows, host_mito_cov_path, spike_cov_paths)
     sample_fields = list(sample_row.keys())
     write_tsv(sample_out, sample_fields, [sample_row])
+    write_summary_heatmaps(per_spot_out, summary_dir)
     print(f"[summary] per_spot_rows={len(per_spot_rows)}")
     print("[summary] done")
     return 0

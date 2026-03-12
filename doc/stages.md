@@ -1,6 +1,6 @@
 # Stages
 
-本页描述 1.0 主流程中各个 stage 的输入输出契约。建议把它理解为用户侧的“结果约定”文档：你需要知道每一步读什么、写什么，以及哪些行为是固定的。
+本页描述 1.1.0 主流程中各个 stage 的输入输出契约。建议把它理解为用户侧的“结果约定”文档：你需要知道每一步读什么、写什么，以及哪些行为是固定的。
 
 固定主流程：
 
@@ -223,11 +223,18 @@
 
 - `summary/per_spot_summary.tsv`
 - `summary/sample_summary.tsv`
+- `summary/reads_heatmap.png`
+- `summary/cpg_site_count_heatmap.png`
+- `summary/mean_methylation_heatmap.png`
 
 关键约定：
 
 - `per_spot_summary.tsv` 每个 spot 一行
 - 固定包含：`X_index`、`Y_index`、`spot`、`mean_methylation`、`cpg_site_count`、`reads`
+- heatmap 固定基于 `per_spot_summary.tsv` 生成
+- `reads_heatmap.png` 使用 `(X_index, Y_index, reads)`
+- `cpg_site_count_heatmap.png` 使用 `(X_index, Y_index, cpg_site_count)`
+- `mean_methylation_heatmap.png` 使用 `(X_index, Y_index, mean_methylation)`
 - `sample_summary.tsv` 每个样本一行
 - 包含 host、host_mito 和各 spike-in 的汇总甲基化结果
 - host spots 平均甲基化按 `cpg_site_count` 加权

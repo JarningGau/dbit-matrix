@@ -1,8 +1,8 @@
 # TEST
 
-本页记录 1.0 版本的最小验收和常用回归检查。目标不是覆盖所有内部实现细节，而是快速确认工作流入口、关键 stage 和最终产物是否符合预期。
+本页记录 1.1.0 版本的最小验收和常用回归检查。目标不是覆盖所有内部实现细节，而是快速确认工作流入口、关键 stage 和最终产物是否符合预期。
 
-## 1.0 最小验收
+## 1.1.0 最小验收
 
 建议在提交前至少执行以下 3 步：
 
@@ -292,4 +292,8 @@ pixi run python scripts/make_cmd.py \
 
 - `work/<sample>/summary/per_spot_summary.tsv`
 - `work/<sample>/summary/sample_summary.tsv`
+- `work/<sample>/summary/reads_heatmap.png`
+- `work/<sample>/summary/cpg_site_count_heatmap.png`
+- `work/<sample>/summary/mean_methylation_heatmap.png`
 - `sample_summary.tsv` 应保持固定列，缺失输入写 `NA`
+- 3 张 heatmap 应来自 `per_spot_summary.tsv` 中的 `X_index`、`Y_index` 和对应指标列
