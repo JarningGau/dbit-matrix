@@ -142,3 +142,22 @@ Slurm 下：
 
 - 生成 `07_call_host.sbatch`（单作业内并行处理 spots）
 - 生成 `07_call_spike_<spike_name>.sbatch`（每个 spike-in 一个 sbatch）
+
+## `summary`
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage summary \
+  --dry-run
+```
+
+说明：
+
+- 读取 `coverage/` 与 `split_bams/per_spot_read_counts.tsv`
+- 输出 `summary/per_spot_summary.tsv` 与 `summary/sample_summary.tsv`
+- 缺失输入保持固定 summary 列并写 `NA`
+
+Slurm 下：
+
+- 生成 `08_summary.sbatch`

@@ -166,3 +166,29 @@
 - `host_mito` 优先复用 `qc/mbias/host.subsampled.sorted.bam`，若不存在则从 `pooled/pooled.byCB.bam` 按 mbias 相同抽样规则生成并排序后再调用
 - 本地模式：单脚本内并行 spots，spike-in 顺序执行
 - Slurm 模式：host 只生成一个 sbatch，在作业内并行处理 spots；spike-in 每个 reference 一个 sbatch
+
+## 9. `summary`
+
+状态：
+
+- 已实现（MVP）
+
+输入：
+
+- host per-spot calling: `coverage/host/**/*.CG.cov`
+- host mito aggregate: `coverage/host_mito.CG.cov`
+- spike aggregate calling: `coverage/<spike_name>.CG.cov`
+- split reads 统计：`split_bams/per_spot_read_counts.tsv`
+
+输出：
+
+- `summary/per_spot_summary.tsv`
+- `summary/sample_summary.tsv`
+
+说明：
+
+- `per_spot_summary.tsv` 每个 spot 一行，包含：`X_index`、`Y_index`、`spot`、`mean_methylation`、`cpg_site_count`、`reads`
+- spot 平均甲基化使用对应 `.CG.cov` 第 4 列按位点简单平均；`cpg_site_count` 为 `.CG.cov` 行数
+- `sample_summary.tsv` 单样本单行，包含 host spots 加权平均甲基化、host_mito 平均甲基化和各 spike 平均甲基化
+- host spots 平均甲基化按 spot 的 `cpg_site_count` 加权
+- 缺失输入保持固定列并写 `NA`（例如当前未生成 spike `.cov`）

@@ -34,6 +34,7 @@ def parse_args() -> argparse.Namespace:
             "split",
             "mbias",
             "call",
+            "summary",
         ],
         help="Workflow stage to generate command script for. Default: fastp_split.",
     )
@@ -234,6 +235,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--call-caller-script",
         help="Path to methy_caller script for call stage. Default: scripts/methy_caller.py.",
+    )
+    parser.add_argument(
+        "--summary-script",
+        help="Path to summary script. Default: scripts/summary.py.",
     )
     parser.add_argument(
         "--spike-in-index",
@@ -584,6 +589,19 @@ def build_mbias_command(
     return quoted(command)
 
 
+def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.summary_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+    ]
+    for spike_name in parse_spike_names(args.spike_in_index):
+        command.extend(["--spike-in-name", spike_name])
+    return quoted(command)
+
+
 def discover_demux_chunks(sample_work: Path) -> list[tuple[str, Path, Path, Path]]:
     chunk_dir = sample_work / "shard_fastq"
     demux_dir = sample_work / "demux"
@@ -712,6 +730,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             "split",
             "mbias",
             "call",
+            "summary",
         )
     ):
         stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
@@ -842,6 +861,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_r2_right_trimming, cfg.get("call_r2_right_trimming")
         ),
         "call_caller_script": pick(args.call_caller_script, cfg.get("call_caller_script")),
+        "summary_script": pick(args.summary_script, cfg.get("summary_script")),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
@@ -949,6 +969,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         pass
     elif stage == "call":
         required.extend(["call_reference_file", "call_chromosomes"])
+    elif stage == "summary":
+        pass
     else:
         raise ValueError(f"unsupported stage: {stage}")
 
@@ -1119,6 +1141,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["call_caller_script"] = (
         settings["call_caller_script"] or "scripts/methy_caller.py"
     )
+    settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -1809,6 +1832,46 @@ def main() -> int:
                             spike_command, spike_script_path, log_dir, spike_slurm_args
                         )
                     generated_scripts.append(spike_script_path)
+    elif settings["stage"] == "summary":
+        command_args = argparse.Namespace(
+            summary_script=settings["summary_script"],
+            spike_in_index=settings["spike_in_index"],
+        )
+        command = build_summary_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "08_summary.sh"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            script_path = command_dir / "08_summary.sbatch"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if not settings["dry_run"]:
+                slurm_args = argparse.Namespace(
+                    job_name=f"dbit_summary_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=settings["slurm_output"].replace(
+                        "%x", f"dbit_summary_{settings['sample_id']}"
+                    ),
+                    slurm_error=settings["slurm_error"].replace(
+                        "%x", f"dbit_summary_{settings['sample_id']}"
+                    ),
+                    module_line="",
+                )
+                generate_slurm_script(command, script_path, log_dir, slurm_args)
+            generated_scripts.append(script_path)
     else:
         raise ValueError(f"unsupported stage: {settings['stage']}")
 

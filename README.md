@@ -7,8 +7,8 @@
 ## 当前范围
 
 - 当前重点记录：`DBiT-DNAme-TAPS`
-- 已闭环阶段：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call`
-- 下一主里程碑：`split -> mbias -> call` 端到端最小验收
+- 已闭环阶段：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- 下一主里程碑：`split -> mbias -> call -> summary` 端到端最小验收
 
 ## 快速开始
 
@@ -38,6 +38,7 @@ pixi run python scripts/make_cmd.py \
 | `split` | 已完成 | 支持按 spot 拆分、smoke、后续并行排序 |
 | `mbias` | 已完成（MVP） | 支持 host 抽样 + sort/index 与 spike-in 全量、基于真实 CpG 位点的 M-bias QC；host 抽样 BAM 可被 `call` 复用 |
 | `call` | 已完成（MVP） | 支持 `call_mode=all/host/spike`、host spots 并行 calling、spike-in calling，以及聚合 `host_mito` 调用（优先复用 `qc/mbias/host.subsampled.sorted.bam`） |
+| `summary` | 已完成（MVP） | 汇总 host per-spot 甲基化/位点数/reads，并输出 sample-level host/mito/spike 平均甲基化结果（缺失项写 `NA`） |
 
 ## 里程碑
 
@@ -47,7 +48,7 @@ pixi run python scripts/make_cmd.py \
 - M4: `split`
 - M5: `call` MVP（已完成）
 - M6: `mbias` MVP（已完成，位于 `call` 前）
-- M7: `split -> mbias -> call` 端到端最小闭环验收
+- M7: `split -> mbias -> call -> summary` 端到端最小闭环验收
 
 ## 文档导航
 

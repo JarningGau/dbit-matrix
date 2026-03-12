@@ -2,8 +2,8 @@
 
 ## 当前测试覆盖
 
-- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`
-- 当前未覆盖完整实现：`split -> mbias -> call` 端到端验收
+- 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`summary`
+- 当前未覆盖完整实现：`split -> mbias -> call -> summary` 端到端验收
 - 建议提交前至少执行：CLI `--help` 检查 + `scripts/make_cmd.py --dry-run` 回归
 
 ## 基础 smoke
@@ -252,6 +252,23 @@ pixi run python scripts/call.py \
 - 若存在 `work/<sample>/qc/mbias/host.subsampled.sorted.bam`，`host_mito` 直接复用该 BAM
 - 若不存在该 BAM，`call.py` 会先执行抽样 + sort/index，再输出聚合 `coverage/host_mito.CG.cov`
 
+## Summary 回归
+
+```bash
+pixi run python scripts/summary.py --help
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage summary \
+  --dry-run
+```
+
+检查输出（非 dry-run）：
+
+- `work/<sample>/summary/per_spot_summary.tsv`
+- `work/<sample>/summary/sample_summary.tsv`
+- `sample_summary.tsv` 应固定包含 host/mito/spike 列；缺失输入对应值为 `NA`
+
 ## 下一里程碑
 
-- 在 `split -> mbias -> call` 之间补齐端到端验收命令
+- 在 `split -> mbias -> call -> summary` 之间补齐端到端验收命令
