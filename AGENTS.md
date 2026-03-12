@@ -5,9 +5,9 @@
 
 ## 当前阶段
 
-- 主线固定：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call`
-- 当前已闭环：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`
-- 当前主里程碑：`call`
+- 主线固定：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call`
+- 当前已闭环：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`（MVP）
+- 当前主里程碑：`split -> mbias -> call` 端到端最小闭环验收
 
 ## 必须遵守
 
