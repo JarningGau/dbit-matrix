@@ -27,6 +27,38 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
+一键生成全流程（`all`）脚本：
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner local
+```
+
+一键提交全流程（`all`）：
+
+```bash
+# local: 生成各 stage 脚本 + run.sh，提交 run.sh
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner local \
+  --submit
+
+# slurm: 生成各 stage .sbatch + run.sbatch，提交 run.sbatch
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner slurm \
+  --submit
+```
+
+说明：
+
+- 未显式传 `--stage` 时，优先读取 `workflow/*.json` 中的 `stage`，否则默认 `fastp_split`
+- `--stage all` 覆盖：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+
 ## 当前进度
 
 | 阶段 | 状态 | 说明 |

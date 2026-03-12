@@ -29,6 +29,37 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
+提示：
+
+- 不显式传 `--stage` 时，按 `workflow/*.json` 中的 `stage` 执行（若缺省则是 `fastp_split`）
+- 需要 workflow 一键入口时，请显式传 `--stage all`
+
+## `all`
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner local \
+  --dry-run
+```
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner slurm \
+  --dry-run
+```
+
+说明：
+
+- 展开顺序固定：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- local 下会生成每个 stage 的 `.sh`，并额外生成 `run.sh`
+- local + `--submit`：提交 `run.sh`
+- slurm 下会生成每个 stage 的 `.sbatch`，并额外生成 `run.sbatch`
+- slurm + `--submit`：提交 `run.sbatch`；由 `run.sbatch` 调用 `sbatch --dependency=afterok:...` 管理阶段依赖
+
 ## `demux_extract_bc`
 
 ```bash

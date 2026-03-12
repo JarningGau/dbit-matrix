@@ -10,6 +10,28 @@ import subprocess
 import sys
 from pathlib import Path
 
+STAGE_SEQUENCE = [
+    "fastp_split",
+    "demux_extract_bc",
+    "align",
+    "pool",
+    "split",
+    "mbias",
+    "call",
+    "summary",
+]
+STAGE_CHOICES = [*STAGE_SEQUENCE, "all"]
+STAGE_REQUIRED_FIELDS = {
+    "fastp_split": ["r1", "r2", "number_of_split_parts"],
+    "demux_extract_bc": ["barcode1_whitelist", "barcode2_whitelist"],
+    "align": ["bwa_index"],
+    "pool": [],
+    "split": ["split_barcodes"],
+    "mbias": [],
+    "call": ["call_reference_file", "call_chromosomes"],
+    "summary": [],
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -26,16 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        choices=[
-            "fastp_split",
-            "demux_extract_bc",
-            "align",
-            "pool",
-            "split",
-            "mbias",
-            "call",
-            "summary",
-        ],
+        choices=STAGE_CHOICES,
         help="Workflow stage to generate command script for. Default: fastp_split.",
     )
     parser.add_argument("--sample-id", help="Sample identifier.")
@@ -688,6 +701,215 @@ def pick(cli_value, cfg_value):
     return cli_value if cli_value is not None else cfg_value
 
 
+def validate_required_for_stage(stage: str, settings: dict) -> None:
+    required = ["runner", "sample_id", *STAGE_REQUIRED_FIELDS[stage]]
+    missing = [key for key in required if settings.get(key) in (None, "")]
+    if missing:
+        raise ValueError(f"missing required settings: {', '.join(missing)}")
+
+
+def select_stage_slurm_cfg(slurm_cfg_raw: dict, stage: str) -> dict:
+    if any(key in slurm_cfg_raw for key in STAGE_SEQUENCE):
+        stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
+    else:
+        # Backward compatibility: legacy flat slurm config.
+        stage_slurm_cfg = slurm_cfg_raw
+    if stage_slurm_cfg is None:
+        stage_slurm_cfg = {}
+    if not isinstance(stage_slurm_cfg, dict):
+        raise ValueError("selected slurm config must be an object")
+    return stage_slurm_cfg
+
+
+def apply_stage_slurm_settings(
+    settings: dict, args: argparse.Namespace, stage: str
+) -> dict:
+    stage_settings = dict(settings)
+    stage_settings["stage"] = stage
+    stage_slurm_cfg = select_stage_slurm_cfg(settings["slurm_cfg_raw"], stage)
+    split_bams_slurm_cfg = resolve_step_slurm_cfg(
+        stage_slurm_cfg,
+        "split_bams",
+        {"split_bams", "sort"},
+    )
+    split_sort_slurm_cfg = resolve_step_slurm_cfg(
+        stage_slurm_cfg,
+        "sort",
+        {"split_bams", "sort"},
+    )
+    call_host_slurm_cfg = resolve_step_slurm_cfg(
+        stage_slurm_cfg,
+        "host",
+        {"host", "spike"},
+    )
+    call_spike_slurm_cfg = resolve_step_slurm_cfg(
+        stage_slurm_cfg,
+        "spike",
+        {"host", "spike"},
+    )
+    mbias_host_slurm_cfg = resolve_step_slurm_cfg(
+        stage_slurm_cfg,
+        "host",
+        {"host", "spike"},
+    )
+    mbias_spike_slurm_cfg = resolve_step_slurm_cfg(
+        stage_slurm_cfg,
+        "spike",
+        {"host", "spike"},
+    )
+
+    stage_settings["slurm_partition"] = (
+        pick(args.slurm_partition, stage_slurm_cfg.get("partition"))
+        or settings["slurm_partition"]
+    )
+    stage_settings["slurm_mem"] = (
+        pick(args.slurm_mem, stage_slurm_cfg.get("mem")) or settings["slurm_mem"]
+    )
+    stage_settings["slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, stage_slurm_cfg.get("cpus_per_task"))
+        or settings["slurm_cpus_per_task"]
+    )
+    default_output = str(
+        Path(settings["work_root"]) / settings["sample_id"] / "logs" / f"{stage}_%x_%j.out"
+    )
+    default_error = str(
+        Path(settings["work_root"]) / settings["sample_id"] / "logs" / f"{stage}_%x_%j.err"
+    )
+    stage_settings["slurm_output"] = (
+        pick(args.slurm_output, stage_slurm_cfg.get("output"))
+        or stage_settings.get("slurm_output")
+        or default_output
+    )
+    stage_settings["slurm_error"] = (
+        pick(args.slurm_error, stage_slurm_cfg.get("error"))
+        or stage_settings.get("slurm_error")
+        or default_error
+    )
+
+    stage_settings["split_bams_slurm_partition"] = (
+        pick(args.slurm_partition, split_bams_slurm_cfg.get("partition"))
+        or stage_settings["slurm_partition"]
+    )
+    stage_settings["split_bams_slurm_mem"] = (
+        pick(args.slurm_mem, split_bams_slurm_cfg.get("mem"))
+        or stage_settings["slurm_mem"]
+    )
+    stage_settings["split_bams_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, split_bams_slurm_cfg.get("cpus_per_task"))
+        or stage_settings["slurm_cpus_per_task"]
+    )
+    stage_settings["split_bams_slurm_output"] = (
+        pick(args.slurm_output, split_bams_slurm_cfg.get("output"))
+        or stage_settings["slurm_output"]
+    )
+    stage_settings["split_bams_slurm_error"] = (
+        pick(args.slurm_error, split_bams_slurm_cfg.get("error"))
+        or stage_settings["slurm_error"]
+    )
+    stage_settings["split_sort_slurm_partition"] = (
+        pick(args.slurm_partition, split_sort_slurm_cfg.get("partition"))
+        or stage_settings["slurm_partition"]
+    )
+    stage_settings["split_sort_slurm_mem"] = (
+        pick(args.slurm_mem, split_sort_slurm_cfg.get("mem"))
+        or stage_settings["slurm_mem"]
+    )
+    stage_settings["split_sort_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, split_sort_slurm_cfg.get("cpus_per_task"))
+        or stage_settings["slurm_cpus_per_task"]
+    )
+    stage_settings["split_sort_slurm_output"] = (
+        pick(args.slurm_output, split_sort_slurm_cfg.get("output"))
+        or stage_settings["slurm_output"]
+    )
+    stage_settings["split_sort_slurm_error"] = (
+        pick(args.slurm_error, split_sort_slurm_cfg.get("error"))
+        or stage_settings["slurm_error"]
+    )
+
+    stage_settings["call_host_slurm_partition"] = (
+        pick(args.slurm_partition, call_host_slurm_cfg.get("partition"))
+        or stage_settings["slurm_partition"]
+    )
+    stage_settings["call_host_slurm_mem"] = (
+        pick(args.slurm_mem, call_host_slurm_cfg.get("mem"))
+        or stage_settings["slurm_mem"]
+    )
+    stage_settings["call_host_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, call_host_slurm_cfg.get("cpus_per_task"))
+        or stage_settings["slurm_cpus_per_task"]
+    )
+    stage_settings["call_host_slurm_output"] = (
+        pick(args.slurm_output, call_host_slurm_cfg.get("output"))
+        or stage_settings["slurm_output"]
+    )
+    stage_settings["call_host_slurm_error"] = (
+        pick(args.slurm_error, call_host_slurm_cfg.get("error"))
+        or stage_settings["slurm_error"]
+    )
+    stage_settings["call_spike_slurm_partition"] = (
+        pick(args.slurm_partition, call_spike_slurm_cfg.get("partition"))
+        or stage_settings["slurm_partition"]
+    )
+    stage_settings["call_spike_slurm_mem"] = (
+        pick(args.slurm_mem, call_spike_slurm_cfg.get("mem"))
+        or stage_settings["slurm_mem"]
+    )
+    stage_settings["call_spike_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, call_spike_slurm_cfg.get("cpus_per_task"))
+        or stage_settings["slurm_cpus_per_task"]
+    )
+    stage_settings["call_spike_slurm_output"] = (
+        pick(args.slurm_output, call_spike_slurm_cfg.get("output"))
+        or stage_settings["slurm_output"]
+    )
+    stage_settings["call_spike_slurm_error"] = (
+        pick(args.slurm_error, call_spike_slurm_cfg.get("error"))
+        or stage_settings["slurm_error"]
+    )
+    stage_settings["mbias_host_slurm_partition"] = (
+        pick(args.slurm_partition, mbias_host_slurm_cfg.get("partition"))
+        or stage_settings["slurm_partition"]
+    )
+    stage_settings["mbias_host_slurm_mem"] = (
+        pick(args.slurm_mem, mbias_host_slurm_cfg.get("mem"))
+        or stage_settings["slurm_mem"]
+    )
+    stage_settings["mbias_host_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, mbias_host_slurm_cfg.get("cpus_per_task"))
+        or stage_settings["slurm_cpus_per_task"]
+    )
+    stage_settings["mbias_host_slurm_output"] = (
+        pick(args.slurm_output, mbias_host_slurm_cfg.get("output"))
+        or stage_settings["slurm_output"]
+    )
+    stage_settings["mbias_host_slurm_error"] = (
+        pick(args.slurm_error, mbias_host_slurm_cfg.get("error"))
+        or stage_settings["slurm_error"]
+    )
+    stage_settings["mbias_spike_slurm_partition"] = (
+        pick(args.slurm_partition, mbias_spike_slurm_cfg.get("partition"))
+        or stage_settings["slurm_partition"]
+    )
+    stage_settings["mbias_spike_slurm_mem"] = (
+        pick(args.slurm_mem, mbias_spike_slurm_cfg.get("mem"))
+        or stage_settings["slurm_mem"]
+    )
+    stage_settings["mbias_spike_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, mbias_spike_slurm_cfg.get("cpus_per_task"))
+        or stage_settings["slurm_cpus_per_task"]
+    )
+    stage_settings["mbias_spike_slurm_output"] = (
+        pick(args.slurm_output, mbias_spike_slurm_cfg.get("output"))
+        or stage_settings["slurm_output"]
+    )
+    stage_settings["mbias_spike_slurm_error"] = (
+        pick(args.slurm_error, mbias_spike_slurm_cfg.get("error"))
+        or stage_settings["slurm_error"]
+    )
+    return stage_settings
+
+
 def resolve_step_slurm_cfg(
     stage_slurm_cfg: dict,
     step_name: str,
@@ -719,28 +941,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if not isinstance(slurm_cfg_raw, dict):
         raise ValueError("workflow config key 'slurm' must be an object")
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
-
-    if any(
-        key in slurm_cfg_raw
-        for key in (
-            "fastp_split",
-            "demux_extract_bc",
-            "align",
-            "pool",
-            "split",
-            "mbias",
-            "call",
-            "summary",
-        )
-    ):
-        stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
-    else:
-        # Backward compatibility: legacy flat slurm config.
-        stage_slurm_cfg = slurm_cfg_raw
-    if stage_slurm_cfg is None:
-        stage_slurm_cfg = {}
-    if not isinstance(stage_slurm_cfg, dict):
-        raise ValueError("selected slurm config must be an object")
+    stage_slurm_cfg = select_stage_slurm_cfg(
+        slurm_cfg_raw,
+        stage if stage in STAGE_SEQUENCE else STAGE_SEQUENCE[0],
+    )
     split_bams_slurm_cfg = resolve_step_slurm_cfg(
         stage_slurm_cfg,
         "split_bams",
@@ -865,6 +1069,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
+        "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
         "slurm_cpus_per_task": pick(
@@ -954,29 +1159,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "dry_run": args.dry_run,
     }
 
-    required = ["runner", "sample_id"]
-    if stage == "fastp_split":
-        required.extend(["r1", "r2", "number_of_split_parts"])
-    elif stage == "demux_extract_bc":
-        required.extend(["barcode1_whitelist", "barcode2_whitelist"])
-    elif stage == "align":
-        required.extend(["bwa_index"])
-    elif stage == "pool":
-        pass
-    elif stage == "split":
-        required.extend(["split_barcodes"])
-    elif stage == "mbias":
-        pass
-    elif stage == "call":
-        required.extend(["call_reference_file", "call_chromosomes"])
-    elif stage == "summary":
-        pass
-    else:
+    if stage not in STAGE_CHOICES:
         raise ValueError(f"unsupported stage: {stage}")
-
-    missing = [key for key in required if settings.get(key) in (None, "")]
-    if missing:
-        raise ValueError(f"missing required settings: {', '.join(missing)}")
 
     settings["work_root"] = settings["work_root"] or "work"
     settings["fastp_threads"] = settings["fastp_threads"] or 8
@@ -1248,6 +1432,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         settings["mbias_spike_slurm_error"] or settings["slurm_error"]
     )
 
+    if stage == "all":
+        for stage_name in STAGE_SEQUENCE:
+            validate_required_for_stage(stage_name, settings)
+    else:
+        validate_required_for_stage(stage, settings)
+
     return settings
 
 
@@ -1308,14 +1498,202 @@ def submit_slurm_script(path: Path, dependency_job_id: str | None = None) -> str
     return tokens[-1]
 
 
+def parse_generated_paths(command_output: str) -> list[Path]:
+    generated: list[Path] = []
+    for line in command_output.splitlines():
+        prefix = "[make_cmd] generated="
+        if line.startswith(prefix):
+            generated.append(Path(line[len(prefix) :].strip()))
+    return generated
+
+
+def build_stage_passthrough_args(argv: list[str]) -> list[str]:
+    passthrough: list[str] = []
+    flags_without_value = {"--split-smoke", "--submit", "--dry-run"}
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in {"--stage", "--runner"}:
+            index += 2
+            continue
+        if token.startswith("--stage=") or token.startswith("--runner="):
+            index += 1
+            continue
+        if token in {"--submit", "--dry-run"}:
+            index += 1
+            continue
+        if token in flags_without_value:
+            passthrough.append(token)
+            index += 1
+            continue
+        if token.startswith("--"):
+            passthrough.append(token)
+            if index + 1 < len(argv):
+                passthrough.append(argv[index + 1])
+            index += 2
+            continue
+        passthrough.append(token)
+        index += 1
+    return passthrough
+
+
+def generate_local_driver_script(stage_scripts: list[tuple[str, list[Path]]], output_path: Path) -> None:
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        "",
+    ]
+    for _, scripts in stage_scripts:
+        for script_path in scripts:
+            lines.append(f'bash "$SCRIPT_DIR/{script_path.name}"')
+    lines.append("")
+    write_text(output_path, "\n".join(lines))
+    output_path.chmod(0o755)
+
+
+def generate_slurm_driver_script(
+    stage_scripts: list[tuple[str, list[Path]]],
+    output_path: Path,
+    log_dir: Path,
+    settings: dict,
+) -> None:
+    lines = [
+        "submit_with_dep() {",
+        '  local script_path="$1"',
+        '  local dep_chain="$2"',
+        "  local out",
+        '  if [[ -n "$dep_chain" ]]; then',
+        '    out="$(sbatch --dependency=afterok:${dep_chain} "$script_path")"',
+        "  else",
+        '    out="$(sbatch "$script_path")"',
+        "  fi",
+        '  echo "$out" >&2',
+        '  echo "${out##* }"',
+        "}",
+        "",
+        "join_deps() {",
+        "  local joined=''",
+        '  for item in "$@"; do',
+        '    if [[ -z "$item" ]]; then',
+        "      continue",
+        "    fi",
+        '    if [[ -z "$joined" ]]; then',
+        '      joined="$item"',
+        "    else",
+        '      joined="${joined}:$item"',
+        "    fi",
+        "  done",
+        '  echo "$joined"',
+        "}",
+        "",
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'prev_stage_deps=""',
+        "",
+    ]
+    for stage_name, scripts in stage_scripts:
+        if not scripts:
+            continue
+        lines.append(f'echo "[run.sbatch] stage={stage_name}"')
+        if stage_name == "split":
+            lines.append(
+                f'jid_split_bams="$(submit_with_dep "$SCRIPT_DIR/{scripts[0].name}" "$prev_stage_deps")"'
+            )
+            if len(scripts) > 1:
+                lines.append(
+                    f'jid_split_sort="$(submit_with_dep "$SCRIPT_DIR/{scripts[1].name}" "$jid_split_bams")"'
+                )
+                lines.append('prev_stage_deps="$jid_split_sort"')
+            else:
+                lines.append('prev_stage_deps="$jid_split_bams"')
+        else:
+            job_vars: list[str] = []
+            for index, script_path in enumerate(scripts):
+                var_name = f"jid_{stage_name}_{index}".replace("-", "_")
+                lines.append(
+                    f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
+                )
+                job_vars.append(var_name)
+            deps_join = " ".join(f"${var_name}" for var_name in job_vars)
+            lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
+        lines.append("")
+    lines.append('echo "[run.sbatch] done final_dep=${prev_stage_deps}"')
+    driver_command = "\n".join(lines)
+    slurm_args = argparse.Namespace(
+        job_name=f"dbit_all_driver_{settings['sample_id']}",
+        slurm_partition=settings["slurm_partition"],
+        slurm_mem=settings["slurm_mem"],
+        slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+        slurm_output=settings["slurm_output"].replace(
+            "%x", f"dbit_all_driver_{settings['sample_id']}"
+        ),
+        slurm_error=settings["slurm_error"].replace(
+            "%x", f"dbit_all_driver_{settings['sample_id']}"
+        ),
+        module_line="",
+    )
+    generate_slurm_script(driver_command, output_path, log_dir, slurm_args)
+
+
 def main() -> int:
     args = parse_args()
     settings = resolve_settings(args)
     sample_work = Path(settings["work_root"]) / settings["sample_id"]
     command_dir = sample_work / "commands"
     log_dir = sample_work / "logs"
-    generated_scripts: list[Path] = []
 
+    if settings["stage"] == "all":
+        passthrough_args = build_stage_passthrough_args(sys.argv[1:])
+        stage_scripts: list[tuple[str, list[Path]]] = []
+        for stage_name in STAGE_SEQUENCE:
+            stage_argv = [
+                sys.executable,
+                __file__,
+                *passthrough_args,
+                "--runner",
+                settings["runner"],
+                "--stage",
+                stage_name,
+            ]
+            if settings["dry_run"]:
+                stage_argv.append("--dry-run")
+            completed = subprocess.run(
+                stage_argv, check=True, capture_output=True, text=True
+            )
+            if completed.stdout:
+                print(completed.stdout, end="")
+            if completed.stderr:
+                print(completed.stderr, end="", file=sys.stderr)
+            stage_scripts.append((stage_name, parse_generated_paths(completed.stdout)))
+
+        driver_path: Path
+        if settings["runner"] == "local":
+            driver_path = command_dir / "run.sh"
+            print(f"[make_cmd] script={driver_path}")
+            if not settings["dry_run"]:
+                generate_local_driver_script(stage_scripts, driver_path)
+        else:
+            driver_path = command_dir / "run.sbatch"
+            print(f"[make_cmd] script={driver_path}")
+            if not settings["dry_run"]:
+                driver_settings = apply_stage_slurm_settings(
+                    settings, args, STAGE_SEQUENCE[-1]
+                )
+                generate_slurm_driver_script(
+                    stage_scripts, driver_path, log_dir, driver_settings
+                )
+
+        if not settings["dry_run"] and driver_path.exists():
+            print(f"[make_cmd] generated={driver_path}")
+        if settings["submit"] and not settings["dry_run"]:
+            submit_script(driver_path, settings["runner"])
+            print("[make_cmd] submitted_driver=1")
+
+        print("[make_cmd] stage=all helper generation complete")
+        return 0
+
+    generated_scripts: list[Path] = []
     if settings["stage"] == "fastp_split":
         base_name = "01_fastp_split"
         command_args = argparse.Namespace(

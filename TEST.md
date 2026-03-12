@@ -3,8 +3,36 @@
 ## 当前测试覆盖
 
 - 已覆盖阶段：`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`summary`
-- 当前未覆盖完整实现：`split -> mbias -> call -> summary` 端到端验收
+- 当前 workflow 入口：支持 `--stage all` 一键生成/提交（到 `summary`）
 - 建议提交前至少执行：CLI `--help` 检查 + `scripts/make_cmd.py --dry-run` 回归
+
+## Workflow `all` 回归
+
+CLI 检查：
+
+```bash
+pixi run python scripts/make_cmd.py --help
+```
+
+local dry-run：
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner local \
+  --dry-run
+```
+
+slurm dry-run：
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner slurm \
+  --dry-run
+```
 
 ## 基础 smoke
 
