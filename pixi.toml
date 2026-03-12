@@ -1,6 +1,9 @@
 [workspace]
 name = "dbit-matrix"
-channels = ["conda-forge", "bioconda"]
+channels = [
+  "https://mirrors.westlake.edu.cn/ANACONDA/cloud/conda-forge",
+  "https://mirrors.westlake.edu.cn/ANACONDA/cloud/bioconda"
+]
 platforms = ["linux-64"]
 
 [dependencies]

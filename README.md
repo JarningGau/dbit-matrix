@@ -2,10 +2,10 @@
 
 `DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级、sample 级汇总结果和 summary heatmap。
 
-- 当前版本：`1.1.1`
+- 当前版本：`1.1.2`
 - 历史版本：`doc/log.md`
 
-## 1.1.1 支持范围
+## 1.1.2 支持范围
 
 - 当前协议：`DBiT-DNAme-TAPS`
 - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
@@ -16,7 +16,7 @@
 
 ## 你会得到什么
 
-对大多数用户，1.1.1 版本最重要的交付物是：
+对大多数用户，1.1.2 版本最重要的交付物是：
 
 - `work/<sample>/summary/per_spot_summary.tsv`
 - `work/<sample>/summary/sample_summary.tsv`
@@ -35,7 +35,7 @@
 
 ## 输入要求
 
-运行 1.1.1 工作流前，通常需要准备：
+运行 1.1.2 工作流前，通常需要准备：
 
 - 原始双端测序数据：`R1 FASTQ`、`R2 FASTQ`
 - barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
@@ -98,6 +98,7 @@ pixi run python scripts/make_cmd.py \
 - 未显式传 `--stage` 时，优先读取 `workflow/*.json` 中的 `stage`
 - 推荐在完整流程中显式使用 `--stage all`
 - `all` 会依次展开：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- `slurm` 生成脚本默认优先解析当前 `pixi` 环境内的 `fastp`、`bwa`、`sinto`、`samtools` 绝对路径，不依赖 `module load`
 
 ## 主流程说明
 

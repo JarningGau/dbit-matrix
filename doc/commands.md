@@ -1,6 +1,6 @@
 # Commands
 
-本页面向 1.1.1 用户，只保留 `scripts/make_cmd.py` 的常用命令。默认推荐先 `--dry-run`，确认输入路径、stage 展开顺序和 runner 设置都正确。
+本页面向 1.1.2 用户，只保留 `scripts/make_cmd.py` 的常用命令。默认推荐先 `--dry-run`，确认输入路径、stage 展开顺序和 runner 设置都正确。
 
 ## 最常用
 

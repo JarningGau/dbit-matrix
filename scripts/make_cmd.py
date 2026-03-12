@@ -33,6 +33,19 @@ STAGE_REQUIRED_FIELDS = {
 }
 
 
+def resolve_env_executable(name: str) -> str:
+    candidate = Path(sys.executable).resolve().parent / name
+    if candidate.is_file():
+        return str(candidate)
+    return name
+
+
+def normalize_executable_setting(value: str | None, default_name: str) -> str:
+    if not value or value == default_name:
+        return resolve_env_executable(default_name)
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate executable command scripts for DBiT workflow."
@@ -67,7 +80,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--fastp-bin",
-        help="fastp executable path or command name. Default: fastp.",
+        help=(
+            "fastp executable path or command name. "
+            "Default: fastp from current Python env if available, else fastp."
+        ),
     )
     parser.add_argument(
         "--barcode1-whitelist",
@@ -106,15 +122,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--bwa-bin",
-        help="bwa executable path or command name. Default: bwa.",
+        help=(
+            "bwa executable path or command name. "
+            "Default: bwa from current Python env if available, else bwa."
+        ),
     )
     parser.add_argument(
         "--sinto-bin",
-        help="sinto executable path or command name. Default: sinto.",
+        help=(
+            "sinto executable path or command name. "
+            "Default: sinto from current Python env if available, else sinto."
+        ),
     )
     parser.add_argument(
         "--samtools-bin",
-        help="samtools executable path or command name. Default: samtools.",
+        help=(
+            "samtools executable path or command name. "
+            "Default: samtools from current Python env if available, else samtools."
+        ),
     )
     parser.add_argument(
         "--samtools-threads",
@@ -1164,7 +1189,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     settings["work_root"] = settings["work_root"] or "work"
     settings["fastp_threads"] = settings["fastp_threads"] or 8
-    settings["fastp_bin"] = settings["fastp_bin"] or "fastp"
+    settings["fastp_bin"] = normalize_executable_setting(
+        settings["fastp_bin"], "fastp"
+    )
     settings["linker1"] = settings["linker1"] or "GTGGCCGATGTTTCG"
     settings["linker2"] = (
         settings["linker2"] or "ATCCACGTGCTTGAGAGGCCAGAGCATTCG"
@@ -1194,9 +1221,13 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["bwa_threads"] <= 0:
         raise ValueError("bwa_threads must be > 0")
-    settings["bwa_bin"] = settings["bwa_bin"] or "bwa"
-    settings["sinto_bin"] = settings["sinto_bin"] or "sinto"
-    settings["samtools_bin"] = settings["samtools_bin"] or "samtools"
+    settings["bwa_bin"] = normalize_executable_setting(settings["bwa_bin"], "bwa")
+    settings["sinto_bin"] = normalize_executable_setting(
+        settings["sinto_bin"], "sinto"
+    )
+    settings["samtools_bin"] = normalize_executable_setting(
+        settings["samtools_bin"], "samtools"
+    )
     settings["samtools_threads"] = (
         int(settings["samtools_threads"])
         if settings["samtools_threads"] is not None
@@ -1728,7 +1759,7 @@ def main() -> int:
                 slurm_cpus_per_task=settings["slurm_cpus_per_task"],
                 slurm_output=settings["slurm_output"],
                 slurm_error=settings["slurm_error"],
-                module_line="module load fastp",
+                module_line="",
             )
             generate_slurm_script(command, script_path, log_dir, slurm_args)
         generated_scripts.append(script_path)
