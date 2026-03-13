@@ -2,6 +2,13 @@
 
 本页记录面向用户可见的版本变化。`README.md` 只保留当前版本号，具体变化统一写在这里。
 
+## 1.2.0
+
+- `all + slurm + submit` 改为由客户端一次性提交完整依赖 DAG，不再依赖计算节点内的 nested `sbatch` 提交
+- `demux_extract_bc` / `align` 在 `slurm` 生成时改为基于 `number_of_split_parts` 预推导 chunk 作业，降低对上游中间文件存在性的耦合
+- `mbias` / `call` 的 spike 侧脚本改为以 `spike_in_index` 为权威来源；host `call` 脚本改为保留运行时输入发现
+- 更新 `README.md` 与 `TEST.md`，补充无 nested submit 的提交方式与回归检查
+
 ## 1.1.3
 
 - README、`doc/stages.md` 与 `doc/commands.md` 进一步明确 `call` 的用户侧主交付物，强调 `coverage/*.CG.cov` 与 summary 结果一样属于一等输出

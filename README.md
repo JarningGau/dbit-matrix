@@ -2,7 +2,7 @@
 
 `DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级、sample 级汇总结果和 summary heatmap。
 
-- 当前版本：`1.1.3`
+- 当前版本：`1.2.0`
 - 历史版本：`doc/log.md`
 
 ## 支持范围
@@ -39,7 +39,7 @@
 
 ## 输入要求
 
-运行 1.1.3 工作流前，通常需要准备：
+运行 1.2.0 工作流前，通常需要准备：
 
 - 原始双端测序数据：`R1 FASTQ`、`R2 FASTQ`
 - barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
