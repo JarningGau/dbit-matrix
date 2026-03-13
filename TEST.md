@@ -58,7 +58,24 @@ pixi run python scripts/make_cmd.py \
 
 - 空 `work/` 下也能成功生成，不要求预先存在 `shard_fastq`、`demux`、`split_bams` 等下游输入
 - 会写出 `work/<sample>/commands/run.sbatch`
-- 会额外写出一组按 stage 串联的 launcher sbatch，用于在上游 stage 完成后再生成并提交下游作业
+- 会直接写出各 stage/chunk 的 sbatch（例如 `02_demux_extract_bc_0001.sbatch`、`03_align_0001.sbatch`），不依赖 `run_02_*.sbatch` launcher 链
+
+`slurm` 一次提交回归（无 nested submit）：
+
+```bash
+rm -rf work
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner slurm \
+  --submit
+```
+
+通过标准：
+
+- 提交流程由客户端一次完成（日志包含 `submit_mode=client_side_sbatch_dag`）
+- 不会创建 `dbit_all_launcher_*` 类型的 launcher 作业
 
 ## 基础 Smoke
 

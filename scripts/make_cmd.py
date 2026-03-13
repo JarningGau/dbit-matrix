@@ -23,8 +23,12 @@ STAGE_SEQUENCE = [
 STAGE_CHOICES = [*STAGE_SEQUENCE, "all"]
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
-    "demux_extract_bc": ["barcode1_whitelist", "barcode2_whitelist"],
-    "align": ["bwa_index"],
+    "demux_extract_bc": [
+        "barcode1_whitelist",
+        "barcode2_whitelist",
+        "number_of_split_parts",
+    ],
+    "align": ["bwa_index", "number_of_split_parts"],
     "pool": [],
     "split": ["split_barcodes"],
     "mbias": [],
@@ -640,50 +644,41 @@ def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
     return quoted(command)
 
 
-def discover_demux_chunks(sample_work: Path) -> list[tuple[str, Path, Path, Path]]:
+def build_chunk_names(number_of_split_parts: int) -> list[str]:
+    if number_of_split_parts <= 0:
+        raise ValueError("number_of_split_parts must be > 0")
+    width = max(4, len(str(number_of_split_parts)))
+    return [f"{index:0{width}d}" for index in range(1, number_of_split_parts + 1)]
+
+
+def build_demux_chunks_from_config(
+    sample_work: Path, number_of_split_parts: int
+) -> list[tuple[str, Path, Path, Path]]:
     chunk_dir = sample_work / "shard_fastq"
     demux_dir = sample_work / "demux"
-    chunks: list[tuple[str, Path, Path, Path]] = []
-    for r1 in sorted(chunk_dir.glob("*.R1.fq.gz")):
-        chunk = r1.name[: -len(".R1.fq.gz")]
-        r2 = chunk_dir / f"{chunk}.R2.fq.gz"
-        if not r2.exists():
-            raise ValueError(f"missing paired R2 for chunk '{chunk}': {r2}")
-        out_prefix = demux_dir / chunk
-        chunks.append((chunk, r1, r2, out_prefix))
-    return chunks
+    return [
+        (
+            chunk,
+            chunk_dir / f"{chunk}.R1.fq.gz",
+            chunk_dir / f"{chunk}.R2.fq.gz",
+            demux_dir / chunk,
+        )
+        for chunk in build_chunk_names(number_of_split_parts)
+    ]
 
 
-def discover_align_chunks(sample_work: Path) -> list[tuple[str, Path, Path]]:
+def build_align_chunks_from_config(
+    sample_work: Path, number_of_split_parts: int
+) -> list[tuple[str, Path, Path]]:
     demux_dir = sample_work / "demux"
-    chunks: list[tuple[str, Path, Path]] = []
-    for r1 in sorted(demux_dir.glob("*.R1.demux.fq.gz")):
-        chunk = r1.name[: -len(".R1.demux.fq.gz")]
-        r2 = demux_dir / f"{chunk}.R2.demux.fq.gz"
-        if not r2.exists():
-            raise ValueError(f"missing paired R2 for chunk '{chunk}': {r2}")
-        chunks.append((chunk, r1, r2))
-    return chunks
-
-
-def discover_call_host_bams(sample_work: Path) -> list[Path]:
-    split_dir = sample_work / "split_bams"
-    return sorted(split_dir.rglob("*.sorted.bam"))
-
-
-def discover_call_spike_names(sample_work: Path) -> list[str]:
-    pooled_dir = sample_work / "pooled"
-    names: list[str] = []
-    for bam_path in sorted(pooled_dir.glob("pooled.*.sorted.bam")):
-        stem = bam_path.name[: -len(".sorted.bam")]
-        if stem == "pooled.byCB":
-            continue
-        if not stem.startswith("pooled."):
-            continue
-        spike_name = stem.split(".", 1)[1].strip()
-        if spike_name and spike_name not in names:
-            names.append(spike_name)
-    return names
+    return [
+        (
+            chunk,
+            demux_dir / f"{chunk}.R1.demux.fq.gz",
+            demux_dir / f"{chunk}.R2.demux.fq.gz",
+        )
+        for chunk in build_chunk_names(number_of_split_parts)
+    ]
 
 
 def normalize_spike_in_index(raw) -> list[str]:
@@ -1189,6 +1184,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     settings["work_root"] = settings["work_root"] or "work"
     settings["fastp_threads"] = settings["fastp_threads"] or 8
+    if settings["number_of_split_parts"] is not None:
+        settings["number_of_split_parts"] = int(settings["number_of_split_parts"])
+        if settings["number_of_split_parts"] <= 0:
+            raise ValueError("number_of_split_parts must be > 0")
     settings["fastp_bin"] = normalize_executable_setting(
         settings["fastp_bin"], "fastp"
     )
@@ -1542,23 +1541,6 @@ def join_dependency_ids(job_ids: list[str]) -> str:
     return ":".join(job_id for job_id in job_ids if job_id)
 
 
-def build_stage_make_cmd_command(
-    passthrough_args: list[str], runner: str, stage: str, *, submit: bool = False
-) -> str:
-    command = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        *passthrough_args,
-        "--runner",
-        runner,
-        "--stage",
-        stage,
-    ]
-    if submit:
-        command.append("--submit")
-    return quoted(command)
-
-
 def build_stage_passthrough_args(argv: list[str]) -> list[str]:
     passthrough: list[str] = []
     flags_without_value = {"--split-smoke", "--submit", "--dry-run"}
@@ -1714,72 +1696,6 @@ def generate_slurm_driver_script(
     generate_slurm_script(driver_command, output_path, log_dir, slurm_args)
 
 
-def generate_runtime_slurm_launcher_scripts(
-    output_path: Path,
-    command_dir: Path,
-    log_dir: Path,
-    settings: dict,
-    args: argparse.Namespace,
-    passthrough_args: list[str],
-) -> list[Path]:
-    launcher_paths = [output_path]
-    for index, stage_name in enumerate(STAGE_SEQUENCE[1:], start=2):
-        launcher_paths.append(command_dir / f"run_{index:02d}_{stage_name}.sbatch")
-
-    for index, stage_name in enumerate(STAGE_SEQUENCE):
-        launcher_path = launcher_paths[index]
-        next_launcher = launcher_paths[index + 1] if index + 1 < len(launcher_paths) else None
-        next_launcher_name = next_launcher.name if next_launcher else ""
-        stage_command = build_stage_make_cmd_command(
-            passthrough_args, "slurm", stage_name, submit=True
-        )
-        lines = [
-            'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-            f'echo "[run.sbatch] stage={stage_name}"',
-            "",
-            f'if ! stage_output="$({stage_command} 2>&1)"; then',
-            '  printf "%s\\n" "$stage_output"',
-            "  exit 1",
-            "fi",
-            'printf "%s\\n" "$stage_output"',
-            'final_dep="$(printf "%s\\n" "$stage_output" | sed -n '
-            '\'s/^\\[make_cmd\\] final_slurm_dependency=//p\' | tail -n 1)"',
-            'if [[ -z "$final_dep" ]]; then',
-            f'  echo "[run.sbatch] missing final_slurm_dependency stage={stage_name}" >&2',
-            "  exit 1",
-            "fi",
-        ]
-        if next_launcher_name:
-            lines.extend(
-                [
-                    f'next_out="$(sbatch --dependency=afterok:${{final_dep}} "$SCRIPT_DIR/{next_launcher_name}")"',
-                    'echo "$next_out"',
-                    (
-                        f'echo "[run.sbatch] queued_next={next_launcher_name} '
-                        'afterok=${final_dep}"'
-                    ),
-                ]
-            )
-        else:
-            lines.append('echo "[run.sbatch] done final_dep=${final_dep}"')
-        launcher_command = "\n".join(lines)
-        launcher_settings = apply_stage_slurm_settings(settings, args, stage_name)
-        job_name = f"dbit_all_launcher_{settings['sample_id']}_{stage_name}".replace(
-            "-", "_"
-        )
-        slurm_args = argparse.Namespace(
-            job_name=job_name,
-            slurm_partition=launcher_settings["slurm_partition"],
-            slurm_mem=launcher_settings["slurm_mem"],
-            slurm_cpus_per_task=launcher_settings["slurm_cpus_per_task"],
-            slurm_output=launcher_settings["slurm_output"].replace("%x", job_name),
-            slurm_error=launcher_settings["slurm_error"].replace("%x", job_name),
-            module_line="",
-        )
-        generate_slurm_script(launcher_command, launcher_path, log_dir, slurm_args)
-    return launcher_paths
-
-
 def submit_generated_stage_scripts(
     generated_scripts: list[Path],
     runner: str,
@@ -1811,27 +1727,6 @@ def main() -> int:
 
     if settings["stage"] == "all":
         passthrough_args = build_stage_passthrough_args(sys.argv[1:])
-        if settings["runner"] == "slurm" and not settings["dry_run"]:
-            print(f"[make_cmd] runner={settings['runner']}")
-            print(f"[make_cmd] stage={settings['stage']}")
-            print(f"[make_cmd] sample_id={settings['sample_id']}")
-            driver_path = command_dir / "run.sbatch"
-            launcher_paths = generate_runtime_slurm_launcher_scripts(
-                driver_path,
-                command_dir,
-                log_dir,
-                settings,
-                args,
-                passthrough_args,
-            )
-            print("[make_cmd] driver_mode=runtime_stage_launchers")
-            for launcher_path in launcher_paths:
-                print(f"[make_cmd] generated={launcher_path}")
-            if settings["submit"]:
-                submit_script(driver_path, settings["runner"])
-                print("[make_cmd] submitted_driver=1")
-            print("[make_cmd] stage=all helper generation complete")
-            return 0
         stage_scripts: list[tuple[str, list[Path]]] = []
         for stage_name in STAGE_SEQUENCE:
             stage_argv = [
@@ -1874,8 +1769,13 @@ def main() -> int:
         if not settings["dry_run"] and driver_path.exists():
             print(f"[make_cmd] generated={driver_path}")
         if settings["submit"] and not settings["dry_run"]:
-            submit_script(driver_path, settings["runner"])
-            print("[make_cmd] submitted_driver=1")
+            if settings["runner"] == "slurm":
+                subprocess.run(["bash", str(driver_path)], check=True)
+                print("[make_cmd] submitted_driver=1")
+                print("[make_cmd] submit_mode=client_side_sbatch_dag")
+            else:
+                submit_script(driver_path, settings["runner"])
+                print("[make_cmd] submitted_driver=1")
 
         print("[make_cmd] stage=all helper generation complete")
         return 0
@@ -1943,19 +1843,9 @@ def main() -> int:
             generate_local_script(command, script_path)
             generated_scripts.append(script_path)
         else:
-            chunks = discover_demux_chunks(sample_work)
-            if not chunks:
-                if settings["dry_run"]:
-                    print(f"[make_cmd] runner={settings['runner']}")
-                    print(f"[make_cmd] stage={settings['stage']}")
-                    print(f"[make_cmd] sample_id={settings['sample_id']}")
-                    print(
-                        f"[make_cmd] no chunks found: {sample_work / 'shard_fastq'}/*.R1.fq.gz"
-                    )
-                    return 0
-                raise ValueError(
-                    f"no chunks found under: {sample_work / 'shard_fastq'}/*.R1.fq.gz"
-                )
+            chunks = build_demux_chunks_from_config(
+                sample_work, settings["number_of_split_parts"]
+            )
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
@@ -2008,19 +1898,9 @@ def main() -> int:
             generate_local_script(command, script_path)
             generated_scripts.append(script_path)
         else:
-            chunks = discover_align_chunks(sample_work)
-            if not chunks:
-                if settings["dry_run"]:
-                    print(f"[make_cmd] runner={settings['runner']}")
-                    print(f"[make_cmd] stage={settings['stage']}")
-                    print(f"[make_cmd] sample_id={settings['sample_id']}")
-                    print(
-                        f"[make_cmd] no chunks found: {sample_work / 'demux'}/*.R1.demux.fq.gz"
-                    )
-                    return 0
-                raise ValueError(
-                    f"no chunks found under: {sample_work / 'demux'}/*.R1.demux.fq.gz"
-                )
+            chunks = build_align_chunks_from_config(
+                sample_work, settings["number_of_split_parts"]
+            )
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
@@ -2252,10 +2132,7 @@ def main() -> int:
                     generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
                 generated_scripts.append(host_script_path)
             if include_spike:
-                spike_names = discover_call_spike_names(sample_work)
-                discovered_from_cfg = parse_spike_names(settings["spike_in_index"])
-                if discovered_from_cfg:
-                    spike_names = [name for name in discovered_from_cfg if name in spike_names]
+                spike_names = parse_spike_names(settings["spike_in_index"])
                 for spike_name in spike_names:
                     spike_script_path = command_dir / f"06_mbias_spike_{spike_name}.sbatch"
                     spike_command = build_mbias_command(
@@ -2323,29 +2200,13 @@ def main() -> int:
             call_mode = settings["call_mode"]
             include_host = call_mode in ("all", "host")
             include_spike = call_mode in ("all", "spike")
-            host_bams: list[Path] = []
-            if include_host:
-                host_bams = discover_call_host_bams(sample_work)
-                if not host_bams:
-                    if settings["dry_run"]:
-                        print(f"[make_cmd] runner={settings['runner']}")
-                        print(f"[make_cmd] stage={settings['stage']}")
-                        print(f"[make_cmd] sample_id={settings['sample_id']}")
-                        print(
-                            f"[make_cmd] no host spot bams found: "
-                            f"{sample_work / 'split_bams'}/**/*.sorted.bam"
-                        )
-                        return 0
-                    raise ValueError(
-                        f"no host spot bams found under: {sample_work / 'split_bams'}/**/*.sorted.bam"
-                    )
             host_script_path = command_dir / "07_call_host.sbatch"
             host_command = build_call_command(command_args, sample_work, "host")
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
             if include_host:
-                print(f"[make_cmd] host_spot_count={len(host_bams)}")
+                print("[make_cmd] host_spot_count=runtime_discovery")
                 print(f"[make_cmd] script={host_script_path}")
                 print(f"[make_cmd] command={host_command}")
                 if not settings["dry_run"]:
@@ -2368,10 +2229,7 @@ def main() -> int:
                 generated_scripts.append(host_script_path)
 
             if include_spike:
-                spike_names = discover_call_spike_names(sample_work)
-                discovered_from_cfg = parse_spike_names(settings["spike_in_index"])
-                if discovered_from_cfg:
-                    spike_names = [name for name in discovered_from_cfg if name in spike_names]
+                spike_names = parse_spike_names(settings["spike_in_index"])
                 for spike_name in spike_names:
                     spike_script_path = command_dir / f"07_call_spike_{spike_name}.sbatch"
                     spike_command = build_call_command(
