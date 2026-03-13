@@ -22,7 +22,7 @@
     "sinto_bin": "sinto",
     "samtools_bin": "samtools",
     "samtools_threads": 4,
-    "host_sort_mem": "16G",
+    "host_sort_mem": "12G",
     "split_barcodes": "configs/barcodes_50a.tsv",
     "split_cb_tag": "CB",
     "split_threads_read": 1,
