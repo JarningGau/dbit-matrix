@@ -67,7 +67,7 @@
         "align": {
             "partition": "amd-ep2,intel-sc3",
             "mem": "64G",
-            "cpus_per_task": 4
+            "cpus_per_task": 8
         },
         "pool": {
             "partition": "amd-ep2,intel-sc3",
