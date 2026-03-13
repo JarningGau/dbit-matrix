@@ -62,6 +62,64 @@ pixi run python scripts/make_cmd.py \
 - stage 依赖通过 `afterok` 管理
 - 单独运行 `split` 时，会额外生成 `05_split_submit.sh` 来串联 `05_split_bams.sbatch -> 05_split_sort.sbatch`
 
+### Slurm 提交依赖图
+
+如果你想理解 `all + slurm + --submit` 在运行时是如何逐段提交的，可以参考下面这张流程图。
+
+```mermaid
+flowchart TD
+    A["run.sbatch<br/>submit fastp_split"] --> B["fastp_split<br/>01_fastp_split.sbatch"]
+
+    B --> C["run_02_demux_extract_bc.sbatch"]
+    C --> D1["demux chunk 1"]
+    C --> D2["demux chunk 2"]
+    C --> Dn["demux chunk N"]
+    D1 --> E["run_03_align.sbatch"]
+    D2 --> E
+    Dn --> E
+
+    E --> F1["align chunk 1"]
+    E --> F2["align chunk 2"]
+    E --> Fn["align chunk N"]
+    F1 --> G["run_04_pool.sbatch"]
+    F2 --> G
+    Fn --> G
+
+    G --> H1["pool_host"]
+    G --> H2["pool_spike"]
+    H1 --> I["run_05_split.sbatch"]
+    H2 --> I
+
+    I --> J1["split_bams"]
+    J1 --> J2["split_sort"]
+    J2 --> K["run_06_mbias.sbatch"]
+
+    K --> L1["mbias_host"]
+    K --> L2["mbias_spike_lambda"]
+    K --> L3["mbias_spike_puc19"]
+    L1 --> M["run_07_call.sbatch"]
+    L2 --> M
+    L3 --> M
+
+    M --> N1["call_host"]
+    M --> N2["call_spike_lambda"]
+    M --> N3["call_spike_puc19"]
+    N1 --> O["run_08_summary.sbatch"]
+    N2 --> O
+    N3 --> O
+
+    O --> P["summary"]
+```
+
+补充说明：
+
+- stage 之间统一使用 `afterok`
+- `demux_extract_bc` 和 `align` 在 `slurm` 下通常按 chunk 并行提交
+- `pool` 会拆成 `host` 和 `spike` 两个 job，并行后再汇合
+- `split` 是特例：内部固定为 `split_bams -> split_sort`
+- `mbias` 和 `call` 是否拆成 `host` 与多个 `spike`，取决于 `workflow/*.json` 里的 `mode` 和 `spike_in_index`
+- 上图中的 `lambda`、`puc19` 是基于 `workflow/dbit_taps_test.json` 的示例
+
 ## 按 Stage 运行
 
 如果你只想检查某一段流程，可以显式指定 `--stage`。
