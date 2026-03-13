@@ -2,6 +2,15 @@
 
 本页记录面向用户可见的版本变化。`README.md` 只保留当前版本号，具体变化统一写在这里。
 
+## 1.1.3
+
+- README、`doc/stages.md` 与 `doc/commands.md` 进一步明确 `call` 的用户侧主交付物，强调 `coverage/*.CG.cov` 与 summary 结果一样属于一等输出
+- `split` stage 在单独使用 `Slurm` 时继续固定保持 `05_split_bams.sbatch -> afterok -> 05_split_sort.sbatch`，减少手动提交和直接提交之间的行为差异
+- `workflow/dbit_taps_test.json` 调整了样例 Slurm 默认资源请求，使共享集群上的最小闭环验证更容易排队；当前样例配置中的 `align` CPU 请求同步更新为 8
+- `scripts/make_cmd.py` 的 `slurm + stage=all` 改为运行时逐 stage 生成并提交下游作业，允许在空 `work/` 目录下直接启动完整流程
+- `run.sbatch` 与阶段 launcher 会基于上游 stage 返回的 `final_slurm_dependency` 用 `afterok` 串联，避免在上游输出尚不存在时提前展开下游脚本
+- 补充 README、TEST 和 `doc/commands.md`，明确新的 Slurm launcher 行为，并提供提交依赖图便于排查和理解
+
 ## 1.1.2
 
 - `scripts/make_cmd.py` 默认优先解析当前 `pixi` 环境内的 `fastp`、`bwa`、`sinto`、`samtools` 可执行路径，减少 `local` 与 `Slurm` 运行时对外部 `PATH` 和 `module load` 的依赖
