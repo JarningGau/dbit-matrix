@@ -110,6 +110,7 @@
 
 - 按 spot 拆分 pooled host BAM
 - 统计每个 spot 的 read 数
+- 在 `slurm` 编排中，作为 `sort` 的上游步骤单独提交
 
 输入：
 
@@ -125,12 +126,14 @@
 - 按 `CB:Z:<x>+<y>` 解析 spot
 - `+` 左侧是 X barcode，右侧是 Y barcode
 - `--smoke` 模式最多输出 16 个非空 spot BAM
+- `slurm` 模式生成 `commands/05_split_bams.sbatch`，只负责拆分，不做排序
 
 ## 6. `sort`
 
 作用：
 
 - 对 `split` 产生的 spot BAM 做排序和索引
+- 在 `slurm` 编排中，必须依赖 `split` 完成后再提交
 
 输入：
 
@@ -146,6 +149,9 @@
 - 该步骤是 `split` 的后处理
 - 执行内容为 `sort + index + remove raw bam`
 - 默认跳过已排序 BAM
+- `slurm` 模式生成 `commands/05_split_sort.sbatch`
+- 若单独运行 `split` stage，应用 `commands/05_split_submit.sh` 提交，由它负责串联
+  `05_split_bams.sbatch -> afterok -> 05_split_sort.sbatch`
 
 ## 7. `mbias`
 

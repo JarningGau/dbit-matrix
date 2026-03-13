@@ -168,6 +168,11 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
+检查点：
+
+- `slurm` 模式下应显示两个 stage 脚本：`commands/05_split_bams.sbatch`、`commands/05_split_sort.sbatch`
+- 真实生成时应额外写出 `commands/05_split_submit.sh`，并由它负责以 `afterok` 串联两个 `sbatch`
+
 可选：`split_bams` smoke：
 
 ```bash

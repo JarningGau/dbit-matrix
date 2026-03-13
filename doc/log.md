@@ -6,6 +6,8 @@
 
 - `scripts/make_cmd.py` 默认优先解析当前 `pixi` 环境内的 `fastp`、`bwa`、`sinto`、`samtools` 可执行路径，减少 `local` 与 `Slurm` 运行时对外部 `PATH` 和 `module load` 的依赖
 - `fastp_split` 的 Slurm 脚本不再默认注入 `module load fastp`，并补充对应的 README/TEST 说明
+- `split` stage 在单独使用 `Slurm` 时，新增 `05_split_submit.sh` 作为提交入口，固定用 `afterok` 串联 `05_split_bams.sbatch` 与 `05_split_sort.sbatch`
+- 补充 `split`/`sort` 阶段文档，明确两段脚本的职责边界与依赖关系
 
 ## 1.1.1
 

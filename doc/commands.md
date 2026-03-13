@@ -60,6 +60,7 @@ pixi run python scripts/make_cmd.py \
 - 额外生成一个入口 `run.sbatch`
 - 使用 `--submit` 时提交 `run.sbatch`
 - stage 依赖通过 `afterok` 管理
+- 单独运行 `split` 时，会额外生成 `05_split_submit.sh` 来串联 `05_split_bams.sbatch -> 05_split_sort.sbatch`
 
 ## 按 Stage 运行
 
@@ -131,6 +132,7 @@ pixi run python scripts/make_cmd.py \
 补充：
 
 - `split_smoke=true` 或 `--split-smoke` 时，只输出最多 16 个非空 spot
+- `slurm` 模式下会生成 `05_split_submit.sh`，用于按依赖顺序提交 `split_bams` 和 `sort`
 
 ### `mbias`
 

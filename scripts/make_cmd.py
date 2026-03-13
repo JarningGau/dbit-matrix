@@ -1584,6 +1584,32 @@ def generate_local_driver_script(stage_scripts: list[tuple[str, list[Path]]], ou
     output_path.chmod(0o755)
 
 
+def generate_split_slurm_submit_script(
+    split_script_path: Path, sort_script_path: Path, output_path: Path
+) -> None:
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        "",
+        'split_out="$(sbatch "$SCRIPT_DIR/' + split_script_path.name + '")"',
+        'echo "$split_out"',
+        'jid_split_bams="${split_out##* }"',
+        "",
+        'sort_out="$(sbatch --dependency=afterok:${jid_split_bams} "$SCRIPT_DIR/'
+        + sort_script_path.name
+        + '")"',
+        'echo "$sort_out"',
+        'jid_split_sort="${sort_out##* }"',
+        "",
+        'echo "[split.submit] done split_bams=${jid_split_bams} split_sort=${jid_split_sort}"',
+        "",
+    ]
+    write_text(output_path, "\n".join(lines))
+    output_path.chmod(0o755)
+
+
 def generate_slurm_driver_script(
     stage_scripts: list[tuple[str, list[Path]]],
     output_path: Path,
@@ -1673,6 +1699,7 @@ def main() -> int:
     sample_work = Path(settings["work_root"]) / settings["sample_id"]
     command_dir = sample_work / "commands"
     log_dir = sample_work / "logs"
+    split_submit_helper_path: Path | None = None
 
     if settings["stage"] == "all":
         passthrough_args = build_stage_passthrough_args(sys.argv[1:])
@@ -1989,6 +2016,7 @@ def main() -> int:
         else:
             split_script_path = command_dir / "05_split_bams.sbatch"
             sort_script_path = command_dir / "05_split_sort.sbatch"
+            split_submit_helper_path = command_dir / "05_split_submit.sh"
             split_command = build_split_command(command_args, sample_work)
             sort_command = build_split_sort_command(command_args, sample_work)
             print(f"[make_cmd] runner={settings['runner']}")
@@ -1998,6 +2026,7 @@ def main() -> int:
             print(f"[make_cmd] command={split_command}")
             print(f"[make_cmd] script={sort_script_path}")
             print(f"[make_cmd] command={sort_command}")
+            print(f"[make_cmd] helper={split_submit_helper_path}")
             if not settings["dry_run"]:
                 split_slurm_args = argparse.Namespace(
                     job_name=f"dbit_split_bams_{settings['sample_id']}",
@@ -2030,6 +2059,9 @@ def main() -> int:
                 )
                 generate_slurm_script(
                     sort_command, sort_script_path, log_dir, sort_slurm_args
+                )
+                generate_split_slurm_submit_script(
+                    split_script_path, sort_script_path, split_submit_helper_path
                 )
             generated_scripts.append(split_script_path)
             generated_scripts.append(sort_script_path)
@@ -2286,11 +2318,14 @@ def main() -> int:
 
     for script_path in generated_scripts:
         print(f"[make_cmd] generated={script_path}")
+    if split_submit_helper_path and not settings["dry_run"] and split_submit_helper_path.exists():
+        print(f"[make_cmd] helper_generated={split_submit_helper_path}")
 
     if settings["submit"]:
         if settings["stage"] == "split" and settings["runner"] == "slurm":
-            split_job_id = submit_slurm_script(generated_scripts[0])
-            submit_slurm_script(generated_scripts[1], dependency_job_id=split_job_id)
+            if split_submit_helper_path is None:
+                raise ValueError("missing split submit helper for slurm split stage")
+            subprocess.run(["bash", str(split_submit_helper_path)], check=True)
         else:
             for script_path in generated_scripts:
                 submit_script(script_path, settings["runner"])
