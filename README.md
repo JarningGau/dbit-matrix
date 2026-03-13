@@ -1,6 +1,6 @@
 # DBiT-Matrix
 
-`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级、sample 级汇总结果和 summary heatmap。
+`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling，并输出 spot 级和 sample 级汇总结果。
 
 - 当前版本：`1.2.0`
 - 历史版本：`doc/log.md`
@@ -9,56 +9,43 @@
 
 - 当前协议：`DBiT-DNAme-TAPS`
 - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
-- 运行方式：支持 `local` 和 `Slurm`
+- 运行方式：`local`、`slurm`
 - 环境管理：统一使用 `pixi`
-- 配置入口：优先通过 `workflow/*.json` 管理参数
+- 配置入口：优先通过 `workflow/*.json` 管理
 - 安全检查：所有 stage 支持 `--dry-run`
 
 ## 你会得到什么
 
-对大多数用户，最重要的交付物是：
+最常用结果在 `work/<sample>/` 下：
 
-- `work/<sample>/summary/per_spot_summary.tsv`
-- `work/<sample>/summary/sample_summary.tsv`
-- `work/<sample>/coverage/host/**/*.CG.cov`
-- `work/<sample>/coverage/host_mito.CG.cov`
-- `work/<sample>/coverage/<spike_name>.CG.cov`
-- `work/<sample>/summary/reads_heatmap.png`
-- `work/<sample>/summary/cpg_site_count_heatmap.png`
-- `work/<sample>/summary/mean_methylation_heatmap.png`
-- `work/<sample>/qc/mbias/*.mbias.tsv`
-- `work/<sample>/qc/mbias/*.mbias.png`
+- `summary/per_spot_summary.tsv`
+- `summary/sample_summary.tsv`
+- `summary/reads_heatmap.png`
+- `summary/cpg_site_count_heatmap.png`
+- `summary/mean_methylation_heatmap.png`
+- `coverage/host/**/*.CG.cov`
+- `coverage/host_mito.CG.cov`
+- `coverage/<spike_name>.CG.cov`
 
-其中：
+## 你需要准备什么
 
-- `per_spot_summary.tsv` 给出每个 spot 的平均甲基化、CpG 位点数和 reads
-- `sample_summary.tsv` 给出样本级 host、mito 和 spike-in 的汇总结果
-- `coverage/*.CG.cov` 是 `call` stage 的主结果，分别保存 host per-spot、host mito 聚合和 spike-in 聚合的甲基化 calling 输出
-- `summary/*.heatmap.png` 给出基于 `per_spot_summary.tsv` 的 spot 空间热图
-- `mbias` 结果用于检查末端偏倚，不会自动修改 calling 参数
-
-## 输入要求
-
-运行 1.2.0 工作流前，通常需要准备：
-
-- 原始双端测序数据：`R1 FASTQ`、`R2 FASTQ`
+- 双端测序数据：`R1 FASTQ`、`R2 FASTQ`
 - barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
-- host 参考序列：`bwa_index` 与 `call_reference_file`
-- 可选 spike-in 参考序列：`spike_in_index`
-- 一个 workflow 配置文件，例如 `workflow/dbit_taps_test.json`
+- host 参考：`bwa_index`、`call_reference_file`
+- 可选 spike-in 参考：`spike_in_index`
+- workflow 配置文件（建议从 `workflow/dbit_taps_test.json` 复制）
 
-建议直接从现有样例配置复制一份，再按你的数据路径和参考基因组修改。
+## 三步快速开始
 
-## 快速开始
-
-安装环境：
+1) 安装环境
 
 ```bash
-pixi lock
 pixi install
 ```
 
-先做一次 dry-run，确认配置和命令展开正确：
+2) 复制样例配置并修改最小必填项（`sample_id`、`r1`、`r2`、参考路径等）
+
+3) 先 dry-run，再真实运行
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -66,20 +53,7 @@ pixi run python scripts/make_cmd.py \
   --stage all \
   --runner local \
   --dry-run
-```
 
-生成本地执行脚本：
-
-```bash
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage all \
-  --runner local
-```
-
-直接提交本地串行入口：
-
-```bash
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage all \
@@ -87,111 +61,31 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
-提交 Slurm 工作流：
+如需提交到 Slurm，把 `--runner local` 改为 `--runner slurm`。
 
-```bash
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage all \
-  --runner slurm \
-  --submit
-```
+## 跑完后先看什么
 
-说明：
+建议按下面顺序检查：
 
-- 未显式传 `--stage` 时，优先读取 `workflow/*.json` 中的 `stage`
-- 推荐在完整流程中显式使用 `--stage all`
-- `all` 会依次展开：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
-- `slurm` 下的 `all` 在真实生成时会直接写出各 stage/chunk 的 sbatch 脚本，以及一个 `commands/run.sbatch`（用于一次性提交依赖 DAG）
-- `slurm` 下 `all --submit` 会在客户端执行 `bash commands/run.sbatch` 提交全部依赖作业，不依赖计算节点上的 nested `sbatch`
-- `slurm` 生成脚本默认优先解析当前 `pixi` 环境内的 `fastp`、`bwa`、`sinto`、`samtools` 绝对路径，不依赖 `module load`
-- 单独生成 `split` 的 `slurm` 脚本时，会额外写出 `commands/05_split_submit.sh`，用于保证 `05_split_sort.sbatch` 以 `afterok` 依赖 `05_split_bams.sbatch`
-
-## 主流程说明
-
-| Stage | 作用 | 关键输出 |
-| --- | --- | --- |
-| `fastp_split` | 质控并按 chunk 切分原始 FASTQ | `shard_fastq/*.fq.gz` |
-| `demux_extract_bc` | 提取 barcode，分流 matched 与 spike-in reads，并输出统计 | `demux/*.demux.fq.gz`、`demux/*.spike-in.fq.gz`、`demux/*.stats.json` |
-| `align` | 对 host 与 spike-in 参考序列比对 | `align_shards/*.cb.bam`、`align_shards/*.<spike_name>.bam` |
-| `pool` | 合并 host 与 spike-in 的分片 BAM | `pooled/pooled.byCB.bam`、`pooled/pooled.<spike_name>.sorted.bam` |
-| `split` | 按 `CB:Z:<x>+<y>` 将 host BAM 拆成 spot BAM 并排序 | `split_bams/**/*.sorted.bam` |
-| `mbias` | 生成 host/spike-in 的 M-bias QC 结果 | `qc/mbias/*` |
-| `call` | 进行 host per-spot、host mito 和 spike-in 甲基化 calling | `coverage/*.CG.cov` |
-| `summary` | 汇总为 spot 级结果、sample 级结果和 spot heatmap | `summary/per_spot_summary.tsv`、`summary/sample_summary.tsv`、`summary/*heatmap.png` |
-
-## 配置建议
-
-1. 复制 `workflow/dbit_taps_test.json` 作为你的项目配置。
-2. 先只改输入路径、样本名、参考基因组和 barcode 白名单。
-3. 先执行 `--dry-run`，再执行真实任务。
-4. 首次跑通时，优先使用 `local` 或较小测试数据确认输出契约。
-
-如果你只需要某一个 stage，也可以把 `stage` 写进配置文件，或在命令行显式传 `--stage <name>`。
-
-## 输出目录约定
-
-默认工作目录在 `work/<sample>/` 下，常见结构如下：
-
-```text
-work/<sample>/
-├── shard_fastq/
-├── demux/
-├── align_shards/
-├── pooled/
-├── split_bams/
-├── qc/mbias/
-├── coverage/
-└── summary/
-```
-
-这套目录约定也是下游 stage 的输入契约，建议不要手动改名或移动中间产物。
-
-## 常见使用场景
-
-只检查命令是否会正确生成：
-
-```bash
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage all \
-  --dry-run
-```
-
-只跑某一个 stage：
-
-```bash
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage mbias \
-  --runner local \
-  --dry-run
-```
-
-查看 CLI 帮助：
-
-```bash
-pixi run python scripts/make_cmd.py --help
-```
+1. `summary/sample_summary.tsv`（样本级总览）
+2. `summary/per_spot_summary.tsv`（spot 级主表）
+3. `summary/*.heatmap.png`（空间分布）
 
 ## 文档导航
 
-- `doc/setup.md`：环境、测试数据、样例配置
-- `doc/stages.md`：各 stage 的输入输出契约
-- `doc/commands.md`：`make_cmd.py` 的常用命令
+首次用户建议阅读路径：
+`README -> doc/setup.md -> doc/config.md -> doc/commands.md -> doc/outputs.md`
+
+用户文档：
+
+- `doc/setup.md`：环境和数据准备
+- `doc/config.md`：`workflow/*.json` 配置说明（最小必改项）
+- `doc/commands.md`：运行命令与 `local/slurm` 场景
+- `doc/outputs.md`：主要结果文件与查看顺序
+- `doc/stages.md`：各 stage 输入输出契约（参考手册）
+
+维护与内部文档：
+
+- `TEST.md`：回归/维护者检查
+- `doc/progress.md`：内部里程碑与风险跟踪
 - `doc/log.md`：版本变化记录
-- `TEST.md`：最小回归与 smoke 检查
-
-## 说明
-
-- 文档示例统一使用 `pixi run ...`
-- 如需新增依赖，请同步更新 `pixi.lock`
-- README 只保留当前版本号；版本变化统一记录到 `doc/log.md`
-
-## Summary 可视化
-
-`summary` stage 在写出 `per_spot_summary.tsv` 后，会继续生成 3 张基于 spot 坐标的 heatmap：
-
-- `summary/reads_heatmap.png`：`(X, Y, reads)`
-- `summary/cpg_site_count_heatmap.png`：`(X, Y, CpGs)`
-- `summary/mean_methylation_heatmap.png`：`(X, Y, beta)`

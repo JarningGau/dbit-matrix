@@ -128,12 +128,12 @@
 - `--smoke` 模式最多输出 16 个非空 spot BAM
 - `slurm` 模式生成 `commands/05_split_bams.sbatch`，只负责拆分，不做排序
 
-## 6. `sort`
+## 6. `split` 内部子步骤 `sort`（非顶层 stage）
 
 作用：
 
 - 对 `split` 产生的 spot BAM 做排序和索引
-- 在 `slurm` 编排中，必须依赖 `split` 完成后再提交
+- 在 `slurm` 编排中，必须依赖 `split_bams` 完成后再提交
 
 输入：
 
@@ -146,7 +146,7 @@
 
 关键约定：
 
-- 该步骤是 `split` 的后处理
+- 该步骤是 `split` stage 的后处理，不作为顶层 `--stage` 选项暴露给用户
 - 执行内容为 `sort + index + remove raw bam`
 - 默认跳过已排序 BAM
 - `slurm` 模式生成 `commands/05_split_sort.sbatch`

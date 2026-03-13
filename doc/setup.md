@@ -1,11 +1,13 @@
 # Setup
 
+本页面向首次用户，聚焦环境准备和测试数据。  
+配置字段说明请看 `doc/config.md`，运行命令请看 `doc/commands.md`。
+
 ## 环境
 
 初始化环境：
 
 ```bash
-pixi lock
 pixi install
 ```
 
@@ -15,13 +17,6 @@ pixi install
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --dry-run
-```
-
-如需增加 PyPI 依赖：
-
-```bash
-pixi add --pypi <package>
-pixi lock
 ```
 
 ## 环境验收

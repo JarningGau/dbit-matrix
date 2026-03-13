@@ -1,8 +1,9 @@
-# Commands
+# Run Commands
 
-本页只保留 `scripts/make_cmd.py` 的常用命令。默认推荐先 `--dry-run`，确认输入路径、stage 展开顺序和 runner 设置都正确。
+本页是 `scripts/make_cmd.py` 的运行手册。  
+建议顺序：先 `--dry-run`，再真实执行。
 
-## 最常用
+## 最常用命令
 
 查看帮助：
 
@@ -10,7 +11,7 @@
 pixi run python scripts/make_cmd.py --help
 ```
 
-完整流程 dry-run：
+完整流程 dry-run（推荐首次必跑）：
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -30,7 +31,7 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
-完整流程提交到 Slurm：
+完整流程 Slurm 执行：
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -40,89 +41,38 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
-说明：
+## 固定行为
 
 - 推荐显式传 `--stage all`
-- `all` 的固定展开顺序是 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
-- 未显式传 `--stage` 时，会优先读取 `workflow/*.json` 里的 `stage`
+- `all` 固定展开：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- 未显式传 `--stage` 时，会优先读取 `workflow/*.json` 中的 `stage`
+- 全部 stage 都支持 `--dry-run`
 
 ## Runner 说明
 
 `local`：
 
 - 生成每个 stage 的 `.sh`
-- 额外生成一个串行入口 `run.sh`
-- 使用 `--submit` 时执行 `run.sh`
+- 额外生成串行入口 `run.sh`
+- `--submit` 时执行 `run.sh`
 
 `slurm`：
 
-- 生成每个 stage 的 `.sbatch`
-- 额外生成一个入口 `run.sbatch`
-- 使用 `--submit` 时提交 `run.sbatch`
-- stage 依赖通过 `afterok` 管理
-- 单独运行 `split` 时，会额外生成 `05_split_submit.sh` 来串联 `05_split_bams.sbatch -> 05_split_sort.sbatch`
+- 生成每个 stage/chunk 的 `.sbatch`
+- 额外生成入口 `run.sbatch`
+- `--submit` 时由客户端提交依赖 DAG（`submit_mode=client_side_sbatch_dag`）
+- stage 间依赖统一用 `afterok`
+- 不依赖计算节点内 nested `sbatch`
 
-### Slurm 提交依赖图
+`split` 在 `slurm` 下是两段实现：
 
-如果你想理解 `all + slurm + --submit` 在运行时是如何逐段提交的，可以参考下面这张流程图。
+- `05_split_bams.sbatch`
+- `05_split_sort.sbatch`
 
-```mermaid
-flowchart TD
-    A["run.sbatch<br/>submit fastp_split"] --> B["fastp_split<br/>01_fastp_split.sbatch"]
+并通过 `05_split_submit.sh` 串联为  
+`05_split_bams.sbatch -> afterok -> 05_split_sort.sbatch`。
 
-    B --> C["run_02_demux_extract_bc.sbatch"]
-    C --> D1["demux chunk 1"]
-    C --> D2["demux chunk 2"]
-    C --> Dn["demux chunk N"]
-    D1 --> E["run_03_align.sbatch"]
-    D2 --> E
-    Dn --> E
-
-    E --> F1["align chunk 1"]
-    E --> F2["align chunk 2"]
-    E --> Fn["align chunk N"]
-    F1 --> G["run_04_pool.sbatch"]
-    F2 --> G
-    Fn --> G
-
-    G --> H1["pool_host"]
-    G --> H2["pool_spike"]
-    H1 --> I["run_05_split.sbatch"]
-    H2 --> I
-
-    I --> J1["split_bams"]
-    J1 --> J2["split_sort"]
-    J2 --> K["run_06_mbias.sbatch"]
-
-    K --> L1["mbias_host"]
-    K --> L2["mbias_spike_lambda"]
-    K --> L3["mbias_spike_puc19"]
-    L1 --> M["run_07_call.sbatch"]
-    L2 --> M
-    L3 --> M
-
-    M --> N1["call_host"]
-    M --> N2["call_spike_lambda"]
-    M --> N3["call_spike_puc19"]
-    N1 --> O["run_08_summary.sbatch"]
-    N2 --> O
-    N3 --> O
-
-    O --> P["summary"]
-```
-
-补充说明：
-
-- stage 之间统一使用 `afterok`
-- `demux_extract_bc` 和 `align` 在 `slurm` 下通常按 chunk 并行提交
-- `pool` 会拆成 `host` 和 `spike` 两个 job，并行后再汇合
-- `split` 是特例：内部固定为 `split_bams -> split_sort`
-- `mbias` 和 `call` 是否拆成 `host` 与多个 `spike`，取决于 `workflow/*.json` 里的 `mode` 和 `spike_in_index`
-- 上图中的 `lambda`、`puc19` 是基于 `workflow/dbit_taps_test.json` 的示例
-
-## 按 Stage 运行
-
-如果你只想检查某一段流程，可以显式指定 `--stage`。
+## 按 Stage dry-run
 
 ### `demux_extract_bc`
 
@@ -134,12 +84,6 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
-用途：
-
-- 从 `shard_fastq/` 读取 chunk FASTQ
-- 提取 barcode
-- 输出 matched reads、spike-in reads 和统计信息
-
 ### `align`
 
 ```bash
@@ -149,12 +93,6 @@ pixi run python scripts/make_cmd.py \
   --runner local \
   --dry-run
 ```
-
-用途：
-
-- 读取 `demux/` 输出
-- 先对 spike-in 比对，再对 host 比对
-- 生成 host 和 spike-in 的 BAM 分片
 
 ### `pool`
 
@@ -166,11 +104,6 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
-用途：
-
-- 合并 host BAM 分片
-- 合并并排序 spike-in BAM 分片
-
 ### `split`
 
 ```bash
@@ -181,17 +114,6 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
-用途：
-
-- 读取 `pooled/pooled.byCB.bam`
-- 按 `CB:Z:<x>+<y>` 拆成 spot BAM
-- 对 spot BAM 做后续排序
-
-补充：
-
-- `split_smoke=true` 或 `--split-smoke` 时，只输出最多 16 个非空 spot
-- `slurm` 模式下会生成 `05_split_submit.sh`，用于按依赖顺序提交 `split_bams` 和 `sort`
-
 ### `mbias`
 
 ```bash
@@ -201,12 +123,6 @@ pixi run python scripts/make_cmd.py \
   --runner local \
   --dry-run
 ```
-
-用途：
-
-- 对 host 和/或 spike-in 生成 M-bias 质控结果
-- 输出 `qc/mbias/*.mbias.tsv` 和 `qc/mbias/*.mbias.png`
-- host 抽样 BAM 会固定输出到 `qc/mbias/host.subsampled.sorted.bam`，供 `call` 复用
 
 ### `call`
 
@@ -219,18 +135,6 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
-用途：
-
-- 对 host spot BAM 进行 calling
-- 生成聚合 `host_mito` calling 结果
-- 对 spike-in 生成聚合 calling 结果
-
-补充：
-
-- `--call-mode all`：同时生成 host 和 spike-in
-- `--call-mode host`：只生成 host 结果
-- `--call-mode spike`：只生成 spike-in 结果
-
 ### `summary`
 
 ```bash
@@ -240,15 +144,6 @@ pixi run python scripts/make_cmd.py \
   --runner local \
   --dry-run
 ```
-
-用途：
-
-- 读取 `coverage/` 和 `split_bams/per_spot_read_counts.tsv`
-- 输出 `summary/per_spot_summary.tsv`
-- 输出 `summary/sample_summary.tsv`
-- 输出 `summary/reads_heatmap.png`
-- 输出 `summary/cpg_site_count_heatmap.png`
-- 输出 `summary/mean_methylation_heatmap.png`
 
 ## 常见组合
 
@@ -262,17 +157,7 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
-只检查 `mbias`：
-
-```bash
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage mbias \
-  --runner local \
-  --dry-run
-```
-
-只检查 `call` 的 host 结果：
+只检查 host calling：
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -280,5 +165,16 @@ pixi run python scripts/make_cmd.py \
   --stage call \
   --runner local \
   --call-mode host \
+  --dry-run
+```
+
+只检查 spike calling：
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage call \
+  --runner local \
+  --call-mode spike \
   --dry-run
 ```
