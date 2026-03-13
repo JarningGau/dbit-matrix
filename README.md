@@ -102,6 +102,7 @@ pixi run python scripts/make_cmd.py \
 - 未显式传 `--stage` 时，优先读取 `workflow/*.json` 中的 `stage`
 - 推荐在完整流程中显式使用 `--stage all`
 - `all` 会依次展开：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- `slurm` 下的 `all` 在真实生成时会写出 `commands/run.sbatch` 和一组阶段 launcher；launcher 会在上游完成后再生成并提交下游 stage，因此空 `work/` 目录也可以直接启动
 - `slurm` 生成脚本默认优先解析当前 `pixi` 环境内的 `fastp`、`bwa`、`sinto`、`samtools` 绝对路径，不依赖 `module load`
 - 单独生成 `split` 的 `slurm` 脚本时，会额外写出 `commands/05_split_submit.sh`，用于保证 `05_split_sort.sbatch` 以 `afterok` 依赖 `05_split_bams.sbatch`
 

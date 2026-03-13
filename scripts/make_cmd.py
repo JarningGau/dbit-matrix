@@ -1538,6 +1538,27 @@ def parse_generated_paths(command_output: str) -> list[Path]:
     return generated
 
 
+def join_dependency_ids(job_ids: list[str]) -> str:
+    return ":".join(job_id for job_id in job_ids if job_id)
+
+
+def build_stage_make_cmd_command(
+    passthrough_args: list[str], runner: str, stage: str, *, submit: bool = False
+) -> str:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        *passthrough_args,
+        "--runner",
+        runner,
+        "--stage",
+        stage,
+    ]
+    if submit:
+        command.append("--submit")
+    return quoted(command)
+
+
 def build_stage_passthrough_args(argv: list[str]) -> list[str]:
     passthrough: list[str] = []
     flags_without_value = {"--split-smoke", "--submit", "--dry-run"}
@@ -1693,6 +1714,93 @@ def generate_slurm_driver_script(
     generate_slurm_script(driver_command, output_path, log_dir, slurm_args)
 
 
+def generate_runtime_slurm_launcher_scripts(
+    output_path: Path,
+    command_dir: Path,
+    log_dir: Path,
+    settings: dict,
+    args: argparse.Namespace,
+    passthrough_args: list[str],
+) -> list[Path]:
+    launcher_paths = [output_path]
+    for index, stage_name in enumerate(STAGE_SEQUENCE[1:], start=2):
+        launcher_paths.append(command_dir / f"run_{index:02d}_{stage_name}.sbatch")
+
+    for index, stage_name in enumerate(STAGE_SEQUENCE):
+        launcher_path = launcher_paths[index]
+        next_launcher = launcher_paths[index + 1] if index + 1 < len(launcher_paths) else None
+        next_launcher_name = next_launcher.name if next_launcher else ""
+        stage_command = build_stage_make_cmd_command(
+            passthrough_args, "slurm", stage_name, submit=True
+        )
+        lines = [
+            'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            f'echo "[run.sbatch] stage={stage_name}"',
+            "",
+            f'if ! stage_output="$({stage_command} 2>&1)"; then',
+            '  printf "%s\\n" "$stage_output"',
+            "  exit 1",
+            "fi",
+            'printf "%s\\n" "$stage_output"',
+            'final_dep="$(printf "%s\\n" "$stage_output" | sed -n '
+            '\'s/^\\[make_cmd\\] final_slurm_dependency=//p\' | tail -n 1)"',
+            'if [[ -z "$final_dep" ]]; then',
+            f'  echo "[run.sbatch] missing final_slurm_dependency stage={stage_name}" >&2',
+            "  exit 1",
+            "fi",
+        ]
+        if next_launcher_name:
+            lines.extend(
+                [
+                    f'next_out="$(sbatch --dependency=afterok:${{final_dep}} "$SCRIPT_DIR/{next_launcher_name}")"',
+                    'echo "$next_out"',
+                    (
+                        f'echo "[run.sbatch] queued_next={next_launcher_name} '
+                        'afterok=${final_dep}"'
+                    ),
+                ]
+            )
+        else:
+            lines.append('echo "[run.sbatch] done final_dep=${final_dep}"')
+        launcher_command = "\n".join(lines)
+        launcher_settings = apply_stage_slurm_settings(settings, args, stage_name)
+        job_name = f"dbit_all_launcher_{settings['sample_id']}_{stage_name}".replace(
+            "-", "_"
+        )
+        slurm_args = argparse.Namespace(
+            job_name=job_name,
+            slurm_partition=launcher_settings["slurm_partition"],
+            slurm_mem=launcher_settings["slurm_mem"],
+            slurm_cpus_per_task=launcher_settings["slurm_cpus_per_task"],
+            slurm_output=launcher_settings["slurm_output"].replace("%x", job_name),
+            slurm_error=launcher_settings["slurm_error"].replace("%x", job_name),
+            module_line="",
+        )
+        generate_slurm_script(launcher_command, launcher_path, log_dir, slurm_args)
+    return launcher_paths
+
+
+def submit_generated_stage_scripts(
+    generated_scripts: list[Path],
+    runner: str,
+    stage: str,
+) -> str | None:
+    if runner == "local":
+        for script_path in generated_scripts:
+            submit_script(script_path, runner)
+        return None
+
+    if stage == "split":
+        if len(generated_scripts) < 2:
+            raise ValueError("missing split stage scripts for slurm submission")
+        jid_split_bams = submit_slurm_script(generated_scripts[0])
+        jid_split_sort = submit_slurm_script(generated_scripts[1], jid_split_bams)
+        return jid_split_sort
+
+    submitted_job_ids = [submit_slurm_script(script_path) for script_path in generated_scripts]
+    return join_dependency_ids(submitted_job_ids)
+
+
 def main() -> int:
     args = parse_args()
     settings = resolve_settings(args)
@@ -1703,6 +1811,27 @@ def main() -> int:
 
     if settings["stage"] == "all":
         passthrough_args = build_stage_passthrough_args(sys.argv[1:])
+        if settings["runner"] == "slurm" and not settings["dry_run"]:
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            driver_path = command_dir / "run.sbatch"
+            launcher_paths = generate_runtime_slurm_launcher_scripts(
+                driver_path,
+                command_dir,
+                log_dir,
+                settings,
+                args,
+                passthrough_args,
+            )
+            print("[make_cmd] driver_mode=runtime_stage_launchers")
+            for launcher_path in launcher_paths:
+                print(f"[make_cmd] generated={launcher_path}")
+            if settings["submit"]:
+                submit_script(driver_path, settings["runner"])
+                print("[make_cmd] submitted_driver=1")
+            print("[make_cmd] stage=all helper generation complete")
+            return 0
         stage_scripts: list[tuple[str, list[Path]]] = []
         for stage_name in STAGE_SEQUENCE:
             stage_argv = [
@@ -2322,13 +2451,13 @@ def main() -> int:
         print(f"[make_cmd] helper_generated={split_submit_helper_path}")
 
     if settings["submit"]:
-        if settings["stage"] == "split" and settings["runner"] == "slurm":
-            if split_submit_helper_path is None:
-                raise ValueError("missing split submit helper for slurm split stage")
-            subprocess.run(["bash", str(split_submit_helper_path)], check=True)
-        else:
-            for script_path in generated_scripts:
-                submit_script(script_path, settings["runner"])
+        final_dependency = submit_generated_stage_scripts(
+            generated_scripts,
+            settings["runner"],
+            settings["stage"],
+        )
+        if final_dependency:
+            print(f"[make_cmd] final_slurm_dependency={final_dependency}")
         print(f"[make_cmd] submitted_count={len(generated_scripts)}")
 
     return 0

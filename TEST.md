@@ -43,6 +43,23 @@ pixi run python scripts/make_cmd.py \
 - 无参数缺失、无路径解析错误
 - `slurm` dry-run 中外部工具默认应展开为当前 `pixi` 环境下的可执行路径，或显式使用用户传入的 `--*-bin`
 
+`slurm` 真实生成回归：
+
+```bash
+rm -rf work
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner slurm
+```
+
+通过标准：
+
+- 空 `work/` 下也能成功生成，不要求预先存在 `shard_fastq`、`demux`、`split_bams` 等下游输入
+- 会写出 `work/<sample>/commands/run.sbatch`
+- 会额外写出一组按 stage 串联的 launcher sbatch，用于在上游 stage 完成后再生成并提交下游作业
+
 ## 基础 Smoke
 
 如果只想快速确认入口可用，可以先跑一个最小 smoke：
