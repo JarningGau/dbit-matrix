@@ -330,6 +330,12 @@ pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
   --stage summary \
   --dry-run
+
+pixi run python scripts/summary.py \
+  --work-path work/test-DNAme-TAPS \
+  --spike-in-name lambda \
+  --spike-in-name puc19 \
+  --dry-run
 ```
 
 检查输出时重点关注：
@@ -340,4 +346,10 @@ pixi run python scripts/make_cmd.py \
 - `work/<sample>/summary/cpg_site_count_heatmap.png`
 - `work/<sample>/summary/mean_methylation_heatmap.png`
 - `sample_summary.tsv` 应保持固定列，缺失输入写 `NA`
+- `sample_summary.tsv` 应包含：`raw_reads`、`barcoded_reads`、`host_mapped_reads`、
+  `lambda_mapped_reads`、`puc19_mapped_reads`、`host_valid_reads`、
+  `barcoded_reads_rate`、`valid_reads_rate`（若输入缺失则为 `NA`）
+- `barcoded_reads` 应按 reads 口径（demux 的 read pairs 计数需要 `×2` 归一化）
+- reads 数值字段应为千分位格式，百分比字段应为 `XX.XX%` 格式
+- `valid_reads_rate` 应满足 `host_valid_reads/raw_reads`
 - 3 张 heatmap 应来自 `per_spot_summary.tsv` 中的 `X_index`、`Y_index` 和对应指标列

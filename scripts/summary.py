@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import pysam
 
 
 HEATMAP_SPECS = (
@@ -43,6 +45,7 @@ HEATMAP_SPECS = (
         "vmax": 100.0,
     },
 )
+VALID_FLAGS = {99, 147, 83, 163}
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,6 +99,124 @@ def parse_cov_stats(cov_path: Path) -> tuple[float, int] | None:
     if cpg_count == 0:
         return None
     return methylation_sum / cpg_count, cpg_count
+
+
+def to_optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            try:
+                return int(float(text))
+            except ValueError:
+                return None
+    return None
+
+
+def format_optional_int(value: int | None) -> str:
+    if value is None:
+        return "NA"
+    return f"{value:,}"
+
+
+def format_percentage(numerator: int | None, denominator: int | None) -> str:
+    if numerator is None or denominator is None or denominator <= 0:
+        return "NA"
+    return f"{(numerator / denominator) * 100:.2f}%"
+
+
+def parse_fastp_raw_reads(fastp_json_path: Path) -> int | None:
+    if not fastp_json_path.exists():
+        return None
+    try:
+        payload = json.loads(fastp_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        before_filtering = summary.get("before_filtering")
+        if isinstance(before_filtering, dict):
+            total_reads = to_optional_int(before_filtering.get("total_reads"))
+            if total_reads is not None:
+                return total_reads
+        total_reads = to_optional_int(summary.get("total_reads"))
+        if total_reads is not None:
+            return total_reads
+
+    return to_optional_int(payload.get("total_reads"))
+
+
+def collect_barcoded_reads(demux_dir: Path) -> int | None:
+    if not demux_dir.exists():
+        return None
+    stats_paths = sorted(demux_dir.glob("*.stats.json"))
+    if not stats_paths:
+        return None
+
+    total = 0
+    has_value = False
+    for stats_path in stats_paths:
+        try:
+            payload = json.loads(stats_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        kept_reads = to_optional_int(payload.get("kept_reads"))
+        if kept_reads is None:
+            continue
+        # demux stats report read pairs; summary read metrics are normalized to reads.
+        total += kept_reads * 2
+        has_value = True
+    if not has_value:
+        return None
+    return total
+
+
+def count_host_bam_metrics(host_bam_path: Path) -> tuple[int | None, int | None]:
+    if not host_bam_path.exists():
+        return None, None
+    mapped_reads = 0
+    valid_reads = 0
+    try:
+        with pysam.AlignmentFile(str(host_bam_path), "rb") as bam_handle:
+            for read in bam_handle.fetch(until_eof=True):
+                if read.is_unmapped:
+                    continue
+                mapped_reads += 1
+                if read.flag in VALID_FLAGS:
+                    valid_reads += 1
+    except OSError:
+        return None, None
+    return mapped_reads, valid_reads
+
+
+def count_mapped_reads(bam_path: Path) -> int | None:
+    if not bam_path.exists():
+        return None
+    mapped_reads = 0
+    try:
+        with pysam.AlignmentFile(str(bam_path), "rb") as bam_handle:
+            for read in bam_handle.fetch(until_eof=True):
+                if not read.is_unmapped:
+                    mapped_reads += 1
+    except OSError:
+        return None
+    return mapped_reads
 
 
 def read_per_spot_reads(read_counts_path: Path) -> dict[str, tuple[str, str, str]]:
@@ -202,6 +323,11 @@ def build_sample_summary_row(
     per_spot_rows: list[dict[str, str]],
     host_mito_cov_path: Path,
     spike_cov_paths: dict[str, Path],
+    raw_reads: int | None,
+    barcoded_reads: int | None,
+    host_mapped_reads: int | None,
+    host_valid_reads: int | None,
+    spike_mapped_reads: dict[str, int | None],
 ) -> dict[str, str]:
     weighted_sum = 0.0
     total_cpg = 0
@@ -230,6 +356,16 @@ def build_sample_summary_row(
         spike_stats = parse_cov_stats(spike_cov_paths[spike_name])
         spike_mean = spike_stats[0] if spike_stats else None
         row[f"{spike_name}_mean_methylation"] = format_float(spike_mean)
+    row["raw_reads"] = format_optional_int(raw_reads)
+    row["barcoded_reads"] = format_optional_int(barcoded_reads)
+    row["barcoded_reads_rate"] = format_percentage(barcoded_reads, raw_reads)
+    row["host_mapped_reads"] = format_optional_int(host_mapped_reads)
+    for spike_name in sorted(spike_cov_paths.keys()):
+        row[f"{spike_name}_mapped_reads"] = format_optional_int(
+            spike_mapped_reads.get(spike_name)
+        )
+    row["host_valid_reads"] = format_optional_int(host_valid_reads)
+    row["valid_reads_rate"] = format_percentage(host_valid_reads, raw_reads)
     return row
 
 
@@ -375,6 +511,11 @@ def main() -> int:
     coverage_dir = work_path / "coverage"
     host_cov_paths = sorted((coverage_dir / "host").rglob("*.CG.cov"))
     read_counts_path = work_path / "split_bams" / "per_spot_read_counts.tsv"
+    fastp_json_path = work_path / "shard_fastq" / "fastp.json"
+    fastp_json_legacy_path = work_path / "fastp.json"
+    demux_dir = work_path / "demux"
+    pooled_dir = work_path / "pooled"
+    host_bam_path = pooled_dir / "pooled.byCB.bam"
     host_mito_cov_path = coverage_dir / "host_mito.CG.cov"
     summary_dir = work_path / "summary"
     per_spot_out = summary_dir / "per_spot_summary.tsv"
@@ -392,14 +533,24 @@ def main() -> int:
     spike_cov_paths = {
         spike_name: coverage_dir / f"{spike_name}.CG.cov" for spike_name in spike_names
     }
+    spike_bam_paths = {
+        spike_name: pooled_dir / f"pooled.{spike_name}.sorted.bam"
+        for spike_name in spike_names
+    }
 
     print(f"[summary] work_path={work_path}")
     print(f"[summary] host_spot_cov_count={len(host_cov_paths)}")
     print(f"[summary] reads_table={read_counts_path}")
+    print(f"[summary] fastp_json={fastp_json_path}")
+    print(f"[summary] fastp_json_legacy={fastp_json_legacy_path}")
+    print(f"[summary] demux_dir={demux_dir}")
+    print(f"[summary] host_bam={host_bam_path}")
     print(f"[summary] host_mito_cov={host_mito_cov_path}")
     print(f"[summary] spike_names={','.join(spike_names) if spike_names else 'none'}")
     for spike_name, spike_cov_path in spike_cov_paths.items():
         print(f"[summary] spike_cov[{spike_name}]={spike_cov_path}")
+    for spike_name, spike_bam_path in spike_bam_paths.items():
+        print(f"[summary] spike_bam[{spike_name}]={spike_bam_path}")
     print(f"[summary] output_per_spot={per_spot_out}")
     print(f"[summary] output_sample={sample_out}")
     for heatmap_path in heatmap_outputs:
@@ -421,7 +572,26 @@ def main() -> int:
     ]
     write_tsv(per_spot_out, per_spot_fields, per_spot_rows)
 
-    sample_row = build_sample_summary_row(per_spot_rows, host_mito_cov_path, spike_cov_paths)
+    raw_reads = parse_fastp_raw_reads(fastp_json_path)
+    if raw_reads is None:
+        raw_reads = parse_fastp_raw_reads(fastp_json_legacy_path)
+    barcoded_reads = collect_barcoded_reads(demux_dir)
+    host_mapped_reads, host_valid_reads = count_host_bam_metrics(host_bam_path)
+    spike_mapped_reads = {
+        spike_name: count_mapped_reads(spike_bam_paths[spike_name])
+        for spike_name in spike_names
+    }
+
+    sample_row = build_sample_summary_row(
+        per_spot_rows,
+        host_mito_cov_path,
+        spike_cov_paths,
+        raw_reads,
+        barcoded_reads,
+        host_mapped_reads,
+        host_valid_reads,
+        spike_mapped_reads,
+    )
     sample_fields = list(sample_row.keys())
     write_tsv(sample_out, sample_fields, [sample_row])
     write_summary_heatmaps(per_spot_out, summary_dir)

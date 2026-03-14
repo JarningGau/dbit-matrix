@@ -27,6 +27,17 @@
 - `coverage/host_mito.CG.cov`
 - `coverage/<spike_name>.CG.cov`
 
+`summary/sample_summary.tsv` 当前除甲基化汇总外，还包含 sample-level reads 指标：
+
+- `raw_reads`（来自 `shard_fastq/fastp.json`）
+- `barcoded_reads`（聚合 `demux/*.stats.json` 的 `kept_reads`，按 read pairs 归一化为 reads）
+- `barcoded_reads_rate`（`barcoded_reads/raw_reads`，格式为 `XX.XX%`）
+- `host_mapped_reads`（来自 `pooled/pooled.byCB.bam`）
+- `<spike_name>_mapped_reads`（来自 `pooled/pooled.<spike_name>.sorted.bam`）
+- `host_valid_reads`（`pooled/pooled.byCB.bam` 中 flag 为 `99/147/83/163` 的 reads）
+- `valid_reads_rate`（`host_valid_reads/raw_reads`，格式为 `XX.XX%`）
+- 上述 reads 数值字段在 `sample_summary.tsv` 中按千分位格式输出
+
 `call` 阶段会按 batch 流式追加写出 `.CG.cov`，避免把整次 calling 结果长期累积在内存里。
 
 ## 你需要准备什么

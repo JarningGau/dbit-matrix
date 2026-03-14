@@ -22,8 +22,8 @@
 
 - `work/<sample>/shard_fastq/*.R1.fq.gz`
 - `work/<sample>/shard_fastq/*.R2.fq.gz`
-- `work/<sample>/fastp.html`
-- `work/<sample>/fastp.json`
+- `work/<sample>/shard_fastq/fastp.html`
+- `work/<sample>/shard_fastq/fastp.json`
 
 关键约定：
 
@@ -224,6 +224,10 @@
 - host mito aggregate：`coverage/host_mito.CG.cov`
 - spike aggregate calling：`coverage/<spike_name>.CG.cov`
 - split reads 统计：`split_bams/per_spot_read_counts.tsv`
+- fastp 统计：`shard_fastq/fastp.json`
+- demux 统计：`demux/*.stats.json`
+- host pooled BAM：`pooled/pooled.byCB.bam`
+- spike pooled BAM：`pooled/pooled.<spike_name>.sorted.bam`
 
 输出：
 
@@ -243,5 +247,14 @@
 - `mean_methylation_heatmap.png` 使用 `(X_index, Y_index, mean_methylation)`
 - `sample_summary.tsv` 每个样本一行
 - 包含 host、host_mito 和各 spike-in 的汇总甲基化结果
+- 同时包含 reads 汇总字段：`raw_reads`、`barcoded_reads`、`host_mapped_reads`、
+  `<spike_name>_mapped_reads`、`host_valid_reads`、`barcoded_reads_rate`、
+  `valid_reads_rate`
+- `barcoded_reads` 基于 `demux/*.stats.json` 的 `kept_reads` 统计并按 read pairs
+  归一化为 reads（`×2`）
+- `barcoded_reads_rate` 定义为 `barcoded_reads/raw_reads`，格式为 `XX.XX%`
+- `valid_reads_rate` 定义为 `host_valid_reads/raw_reads`，格式为 `XX.XX%`
 - host spots 平均甲基化按 `cpg_site_count` 加权
+- `host_valid_reads` 统计规则固定为 host BAM 中 flag `99/147/83/163`
+- reads 数值字段在 `sample_summary.tsv` 中按千分位格式输出
 - 缺失输入保持固定列并写 `NA`
