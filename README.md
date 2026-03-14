@@ -27,6 +27,8 @@
 - `coverage/host_mito.CG.cov`
 - `coverage/<spike_name>.CG.cov`
 
+`call` 阶段会按 batch 流式追加写出 `.CG.cov`，避免把整次 calling 结果长期累积在内存里。
+
 ## 你需要准备什么
 
 - 双端测序数据：`R1 FASTQ`、`R2 FASTQ`

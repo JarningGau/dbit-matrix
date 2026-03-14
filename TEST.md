@@ -319,6 +319,7 @@ pixi run python scripts/make_cmd.py \
 
 - 若存在 `work/<sample>/qc/mbias/host.subsampled.sorted.bam`，`host_mito` 应直接复用
 - 若不存在该 BAM，`call.py` 会先抽样并排序，再生成 `coverage/host_mito.CG.cov`
+- `scripts/methy_caller.py` 应按 batch 流式写出 `.CG.cov`，不再先累计完整结果再统一落盘
 
 ### `summary`
 

@@ -269,27 +269,40 @@ def process_all_cpg_positions(
     r1_right_trimming: int,
     r2_left_trimming: int,
     r2_right_trimming: int,
-) -> list[dict[str, object]]:
+    output_handle,
+) -> tuple[int, int]:
     target_flags = {99, 147, 83, 163}
-    results: list[dict[str, object]] = []
+    processed_sites = 0
+    covered_sites = 0
     batches = create_position_batches(cpg_positions, batch_size)
     for cpg_batch in batches:
-        results.extend(
-            process_cpg_batch(
-                inbam,
-                chromosome,
-                cpg_batch,
-                min_base_quality,
-                min_mapping_quality,
-                target_flags,
-                max_depth,
-                r1_left_trimming,
-                r1_right_trimming,
-                r2_left_trimming,
-                r2_right_trimming,
-            )
+        batch_results = process_cpg_batch(
+            inbam,
+            chromosome,
+            cpg_batch,
+            min_base_quality,
+            min_mapping_quality,
+            target_flags,
+            max_depth,
+            r1_left_trimming,
+            r1_right_trimming,
+            r2_left_trimming,
+            r2_right_trimming,
         )
-    return results
+        processed_sites += len(batch_results)
+        covered_sites += sum(1 for result in batch_results if int(result["coverage"]) > 0)
+        for result in batch_results:
+            output_handle.write(format_result_line(result))
+    return processed_sites, covered_sites
+
+
+def format_result_line(result: dict[str, object]) -> str:
+    chrom = result["chrom"]
+    pos = result["pos"]
+    methy_percent = result["methylation_percent"]
+    mc = result["TG_counts"] + result["CA_counts"]
+    c_unmeth = result["CG_counts"]
+    return f"{chrom}\t{pos}\t{pos}\t{methy_percent:.2f}\t{mc}\t{c_unmeth}\n"
 
 
 def write_results_to_file(results: list[dict[str, object]], output_file: str) -> None:
@@ -297,12 +310,7 @@ def write_results_to_file(results: list[dict[str, object]], output_file: str) ->
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as handle:
         for result in results:
-            chrom = result["chrom"]
-            pos = result["pos"]
-            methy_percent = result["methylation_percent"]
-            mc = result["TG_counts"] + result["CA_counts"]
-            c_unmeth = result["CG_counts"]
-            handle.write(f"{chrom}\t{pos}\t{pos}\t{methy_percent:.2f}\t{mc}\t{c_unmeth}\n")
+            handle.write(format_result_line(result))
 
 
 def load_reference_and_find_cpg(
@@ -354,32 +362,37 @@ def methylation_caller(
     r2_left_trimming: int,
     r2_right_trimming: int,
     verbose: bool,
-) -> list[dict[str, object]]:
+) -> tuple[int, int]:
     chromosomes = parse_chromosome_csv(chromosome)
     validate_chromosomes_in_reference(reference_file, chromosomes)
     inbam = open_bam_file(bam_file)
     try:
-        all_results: list[dict[str, object]] = []
-        for idx, chrom in enumerate(chromosomes, start=1):
-            if verbose:
-                print(f"[methy_caller] chromosome={chrom} ({idx}/{len(chromosomes)})")
-            cpg_positions = load_reference_and_find_cpg(reference_file, chrom, sample_size)
-            chrom_results = process_all_cpg_positions(
-                inbam=inbam,
-                chromosome=chrom,
-                cpg_positions=cpg_positions,
-                min_base_quality=min_base_quality,
-                min_mapping_quality=min_mapping_quality,
-                max_depth=max_depth,
-                batch_size=batch_size,
-                r1_left_trimming=r1_left_trimming,
-                r1_right_trimming=r1_right_trimming,
-                r2_left_trimming=r2_left_trimming,
-                r2_right_trimming=r2_right_trimming,
-            )
-            all_results.extend(chrom_results)
-        write_results_to_file(all_results, output_file)
-        return all_results
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        processed_sites = 0
+        covered_sites = 0
+        with output_path.open("w", encoding="utf-8") as handle:
+            for idx, chrom in enumerate(chromosomes, start=1):
+                if verbose:
+                    print(f"[methy_caller] chromosome={chrom} ({idx}/{len(chromosomes)})")
+                cpg_positions = load_reference_and_find_cpg(reference_file, chrom, sample_size)
+                chrom_processed_sites, chrom_covered_sites = process_all_cpg_positions(
+                    inbam=inbam,
+                    chromosome=chrom,
+                    cpg_positions=cpg_positions,
+                    min_base_quality=min_base_quality,
+                    min_mapping_quality=min_mapping_quality,
+                    max_depth=max_depth,
+                    batch_size=batch_size,
+                    r1_left_trimming=r1_left_trimming,
+                    r1_right_trimming=r1_right_trimming,
+                    r2_left_trimming=r2_left_trimming,
+                    r2_right_trimming=r2_right_trimming,
+                    output_handle=handle,
+                )
+                processed_sites += chrom_processed_sites
+                covered_sites += chrom_covered_sites
+        return processed_sites, covered_sites
     finally:
         inbam.close()
 
@@ -444,7 +457,7 @@ def main() -> int:
         print("[methy_caller] dry_run=1")
         return 0
 
-    results = methylation_caller(
+    processed_sites, covered_sites = methylation_caller(
         reference_file=args.reference_file,
         bam_file=args.bam_file,
         output_file=args.output,
@@ -460,8 +473,7 @@ def main() -> int:
         r2_right_trimming=args.r2_right_trimming,
         verbose=args.verbose,
     )
-    covered_sites = len([result for result in results if int(result["coverage"]) > 0])
-    print(f"[methy_caller] done processed_sites={len(results)} covered_sites={covered_sites}")
+    print(f"[methy_caller] done processed_sites={processed_sites} covered_sites={covered_sites}")
     return 0
 
 
