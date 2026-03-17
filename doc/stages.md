@@ -186,6 +186,9 @@
 - spike-in 直接使用全量 `pooled.<spike_name>.sorted.bam`
 - 只在参考序列真实 `CpG` 位点上计算甲基化率：`(TG+CA)/(TG+CA+CG)`
 - 本步骤只输出 QC，不自动修改 trimming 或 calling 参数
+- 使用 `pysam` 读取 BAM 时，`query_sequence` 始终按 BAM 存储方向返回（负链为原始 read 的反向互补）；`mbias` 内部对正负链统一映射 cycle，使 cycle 1 始终对应原始测序 read 的 5' 端，便于比较不同链/reads 的 M-bias 曲线
+  >The sequence is returned as it is stored in the BAM file. (This will be the reverse complement of the original read sequence if the mapper has aligned the read to the reverse strand.) 
+  https://pysam.readthedocs.io/en/latest/api.html#pysam.AlignmentFile
 
 ## 8. `call`
 
