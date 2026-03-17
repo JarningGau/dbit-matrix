@@ -54,66 +54,66 @@
         "puc19": "/storage/liliLab/gaojianing/resource/bwa/puc19/genome.fa"
     },
     "slurm": {
-	  "fastp_split": {
-		"partition": "amd-ep2,intel-sc3",
-		"mem": "16G",
-		"cpus_per_task": 2
-	  },
-	  "demux_extract_bc": {
-		"partition": "amd-ep2,intel-sc3",
-		"mem": "8G",
-		"cpus_per_task": 1
-	  },
-	  "align": {
-		"partition": "amd-ep2,intel-sc3",
-		"mem": "64G",
-		"cpus_per_task": 16
-	  },
-	  "pool": {
-		"partition": "amd-ep2,intel-sc3",
-		"mem": "160G",
-		"cpus_per_task": 8
-	  },
-	  "split": {
-		"split_bams": {
-		  "partition": "amd-ep2,intel-sc3",
-		  "mem": "8G",
-		  "cpus_per_task": 2
-		},
-		"sort": {
-		  "partition": "amd-ep2,intel-sc3",
-		  "mem": "64G",
-		  "cpus_per_task": 32
-		}
-	  },
-	  "mbias": {
-		"host": {
-		  "partition": "amd-ep2,intel-sc3",
-		  "mem": "32G",
-		  "cpus_per_task": 8
-		},
-		"spike": {
-		  "partition": "amd-ep2,intel-sc3",
-		  "mem": "8G",
-		  "cpus_per_task": 1
-		}
-	  },
-	  "call": {
-		"host": {
-		  "partition": "amd-ep2,intel-sc3",
-		  "mem": "128G",
-		  "cpus_per_task": 32
-		},
-		"spike": {
-		  "partition": "amd-ep2,intel-sc3",
-		  "mem": "16G",
-		  "cpus_per_task": 1
-		}
-	  },
-	  "summary": {
-		"partition": "amd-ep2,intel-sc3",
-		"mem": "8G",
-		"cpus_per_task": 1
-	  }
-	}
+        "fastp_split": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "demux_extract_bc": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
+        },
+        "align": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "64G",
+            "cpus_per_task": 16
+        },
+        "pool": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "160G",
+            "cpus_per_task": 8
+        },
+        "split": {
+            "split_bams": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "8G",
+                "cpus_per_task": 2
+            },
+            "sort": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "64G",
+                "cpus_per_task": 32
+            }
+        },
+        "mbias": {
+            "host": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "32G",
+                "cpus_per_task": 8
+            },
+            "spike": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "8G",
+                "cpus_per_task": 1
+            }
+        },
+        "call": {
+            "host": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "128G",
+                "cpus_per_task": 32
+            },
+            "spike": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "16G",
+                "cpus_per_task": 1
+            }
+        },
+        "summary": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
+        }
+    }
 }

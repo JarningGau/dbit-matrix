@@ -197,6 +197,17 @@ def count_host_bam_metrics(host_bam_path: Path) -> tuple[int | None, int | None]
             for read in bam_handle.fetch(until_eof=True):
                 if read.is_unmapped:
                     continue
+                # Only count reasonably confident unique alignments.
+                if read.mapping_quality <= 10:
+                    continue
+                try:
+                    nh = read.get_tag("NH")
+                    if isinstance(nh, int) and nh > 1:
+                        # Multiple alignments (NH>1) are excluded.
+                        continue
+                except KeyError:
+                    # NH tag may be absent; treat as unique in that case.
+                    pass
                 mapped_reads += 1
                 if read.flag in VALID_FLAGS:
                     valid_reads += 1
