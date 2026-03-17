@@ -223,8 +223,19 @@ def count_mapped_reads(bam_path: Path) -> int | None:
     try:
         with pysam.AlignmentFile(str(bam_path), "rb") as bam_handle:
             for read in bam_handle.fetch(until_eof=True):
-                if not read.is_unmapped:
-                    mapped_reads += 1
+                if read.is_unmapped:
+                    continue
+                # Only count reasonably confident unique alignments (MAPQ>10, NH==1 if present).
+                if read.mapping_quality <= 10:
+                    continue
+                try:
+                    nh = read.get_tag("NH")
+                    if isinstance(nh, int) and nh > 1:
+                        continue
+                except KeyError:
+                    # No NH tag; treat as unique.
+                    pass
+                mapped_reads += 1
     except OSError:
         return None
     return mapped_reads
