@@ -294,7 +294,7 @@ def write_mbias_png(
         ("R1", "CG"): "#FEA830",
         ("R2", "CG"): "#65EAFB",
     }
-    fig, axis = plt.subplots(figsize=(12, 6.4), dpi=120)
+    fig, axis = plt.subplots(figsize=(5, 3), dpi=300)
     for read_label in ("R1", "R2"):
         for context in ("CG",):
             series = grouped.get((read_label, context))

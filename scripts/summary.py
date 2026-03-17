@@ -320,6 +320,7 @@ def summarize_per_spot(
 
 
 def build_sample_summary_row(
+    sample_id: str,
     per_spot_rows: list[dict[str, str]],
     host_mito_cov_path: Path,
     spike_cov_paths: dict[str, Path],
@@ -331,6 +332,7 @@ def build_sample_summary_row(
 ) -> dict[str, str]:
     weighted_sum = 0.0
     total_cpg = 0
+    cpg_counts_for_median: list[int] = []
     for row in per_spot_rows:
         mean_text = row["mean_methylation"]
         cpg_text = row["cpg_site_count"]
@@ -342,16 +344,30 @@ def build_sample_summary_row(
         mean_value = float(mean_text)
         weighted_sum += mean_value * cpg_count
         total_cpg += cpg_count
+        cpg_counts_for_median.append(cpg_count)
 
     host_spot_mean = (weighted_sum / total_cpg) if total_cpg > 0 else None
+    host_spot_median_cpg: float | None
+    if not cpg_counts_for_median:
+        host_spot_median_cpg = None
+    else:
+        sorted_counts = sorted(cpg_counts_for_median)
+        n = len(sorted_counts)
+        mid = n // 2
+        if n % 2 == 1:
+            host_spot_median_cpg = float(sorted_counts[mid])
+        else:
+            host_spot_median_cpg = (sorted_counts[mid - 1] + sorted_counts[mid]) / 2.0
+
     host_mito_stats = parse_cov_stats(host_mito_cov_path)
     host_mito_mean = host_mito_stats[0] if host_mito_stats else None
 
-    row = {
+    row: dict[str, str] = {"sample_id": sample_id}
+    row.update({
         "host_spot_mean_methylation": format_float(host_spot_mean),
-        "host_spot_total_cpg_sites": str(total_cpg) if total_cpg > 0 else "NA",
+        "host_spot_median_cpg_sites": format_float(host_spot_median_cpg),
         "host_mito_mean_methylation": format_float(host_mito_mean),
-    }
+    })
     for spike_name in sorted(spike_cov_paths.keys()):
         spike_stats = parse_cov_stats(spike_cov_paths[spike_name])
         spike_mean = spike_stats[0] if spike_stats else None
@@ -583,6 +599,7 @@ def main() -> int:
     }
 
     sample_row = build_sample_summary_row(
+        work_path.name,
         per_spot_rows,
         host_mito_cov_path,
         spike_cov_paths,
