@@ -5,7 +5,7 @@
 
 如果你是首次使用者，请先阅读：`README.md -> doc/setup.md -> doc/config.md -> doc/commands.md -> doc/outputs.md`。
 
-## 1.2.0 最小验收
+## 最小验收
 
 建议在提交前至少执行以下 3 步：
 

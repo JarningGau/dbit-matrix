@@ -1,7 +1,17 @@
 # Version Log
 
 本页记录面向用户可见的版本变化。`README.md` 只保留当前版本号，具体变化统一写在这里。
+ 
+## 1.3.0
 
+- `call` 阶段按 batch 流式追加写出 `.CG.cov`，在完整样本上保持甲基化调用的内存占用在可预测范围内
+- `call` 阶段对 R1/R2 trimming 的方向语义与 `mbias` 保持严格一致，修剪后 CpG 的 coverage 与甲基化统计与可视化结果对齐
+- `summary` 阶段重构 sample-level reads 指标：统一以 reads 为主度量，区分 raw / barcoded / host_mapped / host_valid 等不同层级，并补齐 spike-in mapped reads
+- `summary` 阶段收紧 host mapped reads 与 valid reads 的计数口径，避免将低置信度或多重比对的 reads 计入可用 reads
+- `summary` 阶段的 per-spot CpG 统计与 heatmap 基于新的 per-spot coverage 分布，帮助更直观地理解 spot 级 CpG 丰度与甲基化水平
+- 新增适配 Slurm 的 workflow profile，使集群环境可以直接从样例配置启动端到端最小闭环
+- 重构首次用户文档阅读路径，从 FASTQ 到 summary 保持一条低摩擦主线
+ 
 ## 1.2.0
 
 - `all + slurm + submit` 改为由客户端一次性提交完整依赖 DAG，不再依赖计算节点内的 nested `sbatch` 提交
