@@ -57,6 +57,7 @@
 - `call_mode`：`spike`、`host`、`all`
 - `call_r1_left_trimming` / `call_r1_right_trimming`
 - `call_r2_left_trimming` / `call_r2_right_trimming`
+  以上 trimming 参数按原始 read 两端的 cycle 定义生效，对 reverse-strand 比对同样保持 left/right 端语义。
 
 ## spike_in_index 写法
 

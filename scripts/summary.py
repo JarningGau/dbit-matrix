@@ -88,11 +88,15 @@ def parse_cov_stats(cov_path: Path) -> tuple[float, int] | None:
             if not line:
                 continue
             fields = line.split("\t")
-            if len(fields) < 4:
+            if len(fields) < 6:
                 continue
             try:
                 methylation = float(fields[3])
+                methylated_count = int(fields[4])
+                unmethylated_count = int(fields[5])
             except ValueError:
+                continue
+            if methylated_count + unmethylated_count <= 0:
                 continue
             methylation_sum += methylation
             cpg_count += 1

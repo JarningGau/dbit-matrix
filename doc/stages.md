@@ -207,6 +207,7 @@
 - `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
 - `coverage/host_mito.CG.cov`
 - `coverage/<spike_name>.CG.cov`
+- 上述 `.CG.cov` 仅包含 `coverage>0` 的位点行（不输出 `coverage=0` 行）
 
 关键约定：
 

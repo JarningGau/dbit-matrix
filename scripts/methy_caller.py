@@ -290,8 +290,10 @@ def process_all_cpg_positions(
             r2_right_trimming,
         )
         processed_sites += len(batch_results)
-        covered_sites += sum(1 for result in batch_results if int(result["coverage"]) > 0)
         for result in batch_results:
+            if int(result["coverage"]) <= 0:
+                continue
+            covered_sites += 1
             output_handle.write(format_result_line(result))
     return processed_sites, covered_sites
 
@@ -414,8 +416,12 @@ def is_trimmed_read_position(
         right_trim = r2_right_trimming
     else:
         return False
-    left_cycle = query_pos + 1
-    right_cycle = read_len - query_pos
+    if record.is_reverse:
+        left_cycle = read_len - query_pos
+        right_cycle = query_pos + 1
+    else:
+        left_cycle = query_pos + 1
+        right_cycle = read_len - query_pos
     return left_cycle <= left_trim or right_cycle <= right_trim
 
 

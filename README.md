@@ -39,6 +39,8 @@
 - 上述 reads 数值字段在 `sample_summary.tsv` 中按千分位格式输出
 
 `call` 阶段会按 batch 流式追加写出 `.CG.cov`，避免把整次 calling 结果长期累积在内存里。
+`call_r1_*_trimming` / `call_r2_*_trimming` 按原始 read 两端的 cycle 定义生效，对 reverse-strand 比对也保持与 `mbias` 一致的方向语义。
+`.CG.cov` 只保留 `coverage>0` 的位点行，不再输出 `coverage=0` 行。
 
 ## 你需要准备什么
 
