@@ -48,6 +48,8 @@
     "call_r2_left_trimming": 0,
     "call_r2_right_trimming": 0,
     "call_caller_script": "scripts/methy_caller.py",
+    "saturation_script": "scripts/saturation.py",
+    "saturation_reads_threshold": 500,
     "summary_script": "scripts/summary.py",
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
@@ -111,6 +113,11 @@
             }
         },
         "summary": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
+        },
+        "saturation": {
             "partition": "amd-ep2,intel-sc3",
             "mem": "8G",
             "cpus_per_task": 1

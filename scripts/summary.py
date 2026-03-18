@@ -350,6 +350,7 @@ def build_sample_summary_row(
     per_spot_rows: list[dict[str, str]],
     host_mito_cov_path: Path,
     spike_cov_paths: dict[str, Path],
+    saturation_rate: str | None,
     raw_reads: int | None,
     barcoded_reads: int | None,
     host_mapped_reads: int | None,
@@ -390,6 +391,7 @@ def build_sample_summary_row(
 
     row: dict[str, str] = {"sample_id": sample_id}
     row.update({
+        "saturation_rate": saturation_rate if saturation_rate else "NA",
         "host_spot_mean_methylation": format_float(host_spot_mean),
         "host_spot_median_cpg_sites": format_float(host_spot_median_cpg),
         "host_mito_mean_methylation": format_float(host_mito_mean),
@@ -409,6 +411,21 @@ def build_sample_summary_row(
     row["host_valid_reads"] = format_optional_int(host_valid_reads)
     row["valid_reads_rate"] = format_percentage(host_valid_reads, raw_reads)
     return row
+
+
+def read_saturation_rate(summary_path: Path, sample_id: str) -> str | None:
+    if not summary_path.exists():
+        return None
+    with summary_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            if (row.get("sample_id") or "").strip() != sample_id:
+                continue
+            value = (row.get("saturation_rate") or "").strip()
+            if not value:
+                return None
+            return value
+    return None
 
 
 def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
@@ -556,6 +573,7 @@ def main() -> int:
     fastp_json_path = work_path / "shard_fastq" / "fastp.json"
     fastp_json_legacy_path = work_path / "fastp.json"
     demux_dir = work_path / "demux"
+    saturation_summary_path = work_path / "qc" / "saturation" / "saturation_summary.tsv"
     pooled_dir = work_path / "pooled"
     host_bam_path = pooled_dir / "pooled.byCB.bam"
     host_mito_cov_path = coverage_dir / "host_mito.CG.cov"
@@ -586,6 +604,7 @@ def main() -> int:
     print(f"[summary] fastp_json={fastp_json_path}")
     print(f"[summary] fastp_json_legacy={fastp_json_legacy_path}")
     print(f"[summary] demux_dir={demux_dir}")
+    print(f"[summary] saturation_summary={saturation_summary_path}")
     print(f"[summary] host_bam={host_bam_path}")
     print(f"[summary] host_mito_cov={host_mito_cov_path}")
     print(f"[summary] spike_names={','.join(spike_names) if spike_names else 'none'}")
@@ -614,6 +633,9 @@ def main() -> int:
     ]
     write_tsv(per_spot_out, per_spot_fields, per_spot_rows)
 
+    sample_id = work_path.name
+    saturation_rate = read_saturation_rate(saturation_summary_path, sample_id)
+
     raw_reads = parse_fastp_raw_reads(fastp_json_path)
     if raw_reads is None:
         raw_reads = parse_fastp_raw_reads(fastp_json_legacy_path)
@@ -625,10 +647,11 @@ def main() -> int:
     }
 
     sample_row = build_sample_summary_row(
-        work_path.name,
+        sample_id,
         per_spot_rows,
         host_mito_cov_path,
         spike_cov_paths,
+        saturation_rate,
         raw_reads,
         barcoded_reads,
         host_mapped_reads,
