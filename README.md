@@ -7,12 +7,18 @@
 
 ## 支持范围
 
-- 当前协议：`DBiT-DNAme-TAPS`
-- 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- **TAPS 主流程**
+  - 当前协议：`DBiT-DNAme-TAPS`
+  - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 - 运行方式：`local`、`slurm`
 - 环境管理：统一使用 `pixi`
 - 配置入口：优先通过 `workflow/*.json` 管理
 - 安全检查：所有 stage 支持 `--dry-run`
+
+- **EMSeq（独立入口 / 试验性）**
+  - 当前仅支持 `fastp_split` 阶段
+  - 独立入口：`scripts-emseq/make_cmd.py`
+  - 推荐从 `workflow/dbit_emseq_test.json` 复制配置，并只保留 `fastp_split` 所需最小字段
 
 ## 你会得到什么
 

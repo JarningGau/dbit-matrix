@@ -2,7 +2,7 @@
 
 本页描述 dbit-matrix 各个 stage 的输入输出契约。建议把它理解为用户侧的“结果约定”文档：你需要知道每一步读什么、写什么，以及哪些行为是固定的。
 
-固定主流程：
+固定主流程（TAPS）：
 
 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
 
@@ -30,6 +30,12 @@
 - 使用 `fastp --split`
 - 输出的 chunk FASTQ 是 `demux_extract_bc` 的直接输入
 - 支持 `local` 和 `Slurm`
+
+对于 EMSeq 独立入口：
+
+- 入口为 `scripts-emseq/make_cmd.py`
+- 仅定义与上述相同的 `fastp_split` 契约（输入/输出路径与文件命名保持一致）
+- 当前阶段不在 EMSeq pipeline 中继续串联 `demux_extract_bc` 之后的各个 stage
 
 ## 2. `demux_extract_bc`
 

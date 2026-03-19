@@ -1,0 +1,18 @@
+{
+    "runner": "local",
+    "stage": "fastp_split",
+    "sample_id": "test-DNAme-EMSeq",
+    "r1": "data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_1.fq.gz",
+    "r2": "data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_2.fq.gz",
+    "work_root": "work",
+    "fastp_threads": 2,
+    "number_of_split_parts": 2,
+    "fastp_bin": "fastp",
+    "slurm": {
+        "fastp_split": {
+            "partition": "cpu",
+            "mem": "16G",
+            "cpus_per_task": 2
+        }
+    }
+}

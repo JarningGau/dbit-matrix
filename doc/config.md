@@ -26,6 +26,22 @@
 - `slurm.<stage>.mem`
 - `slurm.<stage>.cpus_per_task`
 
+对于 EMSeq 独立入口（当前仅支持 `fastp_split`），推荐：
+
+- 从 `workflow/dbit_emseq_test.json` 复制一份配置
+- 只保留 `sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin` 以及可选的 `slurm.fastp_split.*`
+- 通过：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage fastp_split \
+  --runner local \
+  --dry-run
+```
+
+先检查命令展开是否符合预期
+
 ## 常改字段
 
 ### 运行控制
