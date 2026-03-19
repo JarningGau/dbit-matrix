@@ -2,7 +2,7 @@
 
 `DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling、饱和度分析，并输出 spot 级和 sample 级汇总结果。
 
-- 当前版本：`1.3.0`
+- 当前版本：`1.4.0`
 - 历史版本：`doc/log.md`
 
 ## 支持范围

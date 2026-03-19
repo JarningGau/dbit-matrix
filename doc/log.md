@@ -2,6 +2,12 @@
 
 本页记录面向用户可见的版本变化。`README.md` 只保留当前版本号，具体变化统一写在这里。
  
+## 1.4.0
+
+- 主流程新增 `saturation` stage：`... -> call -> saturation -> summary`，在 `work/<sample>/qc/saturation/` 下输出饱和度曲线图与汇总表
+- `summary/sample_summary.tsv` 新增 `saturation_rate` 字段：从 `qc/saturation/saturation_summary.tsv` 读取；缺失时输出 `NA`
+- `workflow/*.json` 新增 `saturation_script` / `saturation_reads_threshold` 配置项，并补齐对应的 `slurm.saturation` 资源配置块
+
 ## 1.3.0
 
 - `call` 阶段按 batch 流式追加写出 `.CG.cov`，在完整样本上保持甲基化调用的内存占用在可预测范围内
