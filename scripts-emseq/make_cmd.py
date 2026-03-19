@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 
-STAGE_SEQUENCE = ["fastp_split", "demux_extract_bc"]
+STAGE_SEQUENCE = ["fastp_split", "demux_extract_bc", "align"]
 STAGE_CHOICES = STAGE_SEQUENCE
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
@@ -29,6 +29,10 @@ STAGE_REQUIRED_FIELDS = {
         "barcode1_whitelist",
         "barcode2_whitelist",
         "number_of_split_parts",
+    ],
+    "align": [
+        "number_of_split_parts",
+        "biscuit_reference",
     ],
 }
 
@@ -110,6 +114,50 @@ def parse_args() -> argparse.Namespace:
         "--gzip-level",
         type=int,
         help="gzip compress level (0-9) for demux output FASTQ.",
+    )
+    parser.add_argument(
+        "--biscuit-reference",
+        help="Reference FASTA passed to biscuit align (EMSeq align stage).",
+    )
+    parser.add_argument(
+        "--biscuit-threads",
+        type=int,
+        help="Thread count for biscuit align -@. Default: 32 in EMSeq config.",
+    )
+    parser.add_argument(
+        "--biscuit-batch-size",
+        type=int,
+        help="Batch size for biscuit align -b. Default: 1.",
+    )
+    parser.add_argument(
+        "--biscuit-bin",
+        help=(
+            "biscuit executable path or command name. "
+            "Default: biscuit from current Python env if available, else biscuit."
+        ),
+    )
+    parser.add_argument(
+        "--sinto-bin",
+        help=(
+            "sinto executable path or command name. "
+            "Default: sinto from current Python env if available, else sinto."
+        ),
+    )
+    parser.add_argument(
+        "--samtools-bin",
+        help=(
+            "samtools executable path or command name. "
+            "Default: samtools from current Python env if available, else samtools."
+        ),
+    )
+    parser.add_argument(
+        "--spike-in-index",
+        action="append",
+        default=None,
+        help=(
+            "Spike-in reference in NAME=INDEX format. "
+            "May be specified multiple times."
+        ),
     )
     parser.add_argument(
         "--submit",
@@ -345,6 +393,15 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.barcode_hamming_distance, cfg.get("barcode_hamming_distance")
         ),
         "gzip_level": pick(args.gzip_level, cfg.get("gzip_level")),
+        "biscuit_reference": pick(args.biscuit_reference, cfg.get("biscuit_reference")),
+        "biscuit_threads": pick(args.biscuit_threads, cfg.get("biscuit_threads")),
+        "biscuit_batch_size": pick(
+            args.biscuit_batch_size, cfg.get("biscuit_batch_size")
+        ),
+        "biscuit_bin": pick(args.biscuit_bin, cfg.get("biscuit_bin")),
+        "sinto_bin": pick(args.sinto_bin, cfg.get("sinto_bin")),
+        "samtools_bin": pick(args.samtools_bin, cfg.get("samtools_bin")),
+        "spike_in_index": pick(args.spike_in_index, cfg.get("spike_in_index")),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -370,8 +427,31 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if settings["number_of_split_parts"] <= 0:
         raise ValueError("number_of_split_parts must be > 0")
 
+    if settings["biscuit_threads"] is not None:
+        settings["biscuit_threads"] = int(settings["biscuit_threads"])
+        if settings["biscuit_threads"] <= 0:
+            raise ValueError("biscuit_threads must be > 0")
+    else:
+        settings["biscuit_threads"] = 32
+
+    if settings["biscuit_batch_size"] is not None:
+        settings["biscuit_batch_size"] = int(settings["biscuit_batch_size"])
+        if settings["biscuit_batch_size"] <= 0:
+            raise ValueError("biscuit_batch_size must be > 0")
+    else:
+        settings["biscuit_batch_size"] = 1
+
     settings["fastp_bin"] = normalize_executable_setting(
         settings["fastp_bin"], "fastp"
+    )
+    settings["biscuit_bin"] = normalize_executable_setting(
+        settings["biscuit_bin"], "biscuit"
+    )
+    settings["sinto_bin"] = normalize_executable_setting(
+        settings["sinto_bin"], "sinto"
+    )
+    settings["samtools_bin"] = normalize_executable_setting(
+        settings["samtools_bin"], "samtools"
     )
     settings["linker1"] = settings["linker1"]
     settings["linker2"] = settings["linker2"]
@@ -414,6 +494,19 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     validate_required_for_stage(stage, settings)
     return settings
+
+
+def normalize_spike_in_index(raw) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    if isinstance(raw, dict):
+        items: list[str] = []
+        for name, index in raw.items():
+            items.append(f"{name}={index}")
+        return items
+    raise ValueError("spike_in_index must be either an object or an array")
 
 
 def generate_local_script(command: str, output_path: Path) -> None:
@@ -460,6 +553,7 @@ def submit_script(path: Path, runner: str) -> None:
 def main() -> int:
     args = parse_args()
     settings = resolve_settings(args)
+    settings["spike_in_index"] = normalize_spike_in_index(settings["spike_in_index"])
 
     sample_work = Path(settings["work_root"]) / settings["sample_id"]
     command_dir = sample_work / "commands"
@@ -551,6 +645,118 @@ def main() -> int:
                 chunk_error = (settings["slurm_error"] or "").replace(
                     "%x", job_name
                 )
+                slurm_settings = {
+                    "sample_id": settings["sample_id"],
+                    "stage": stage,
+                    "slurm_partition": settings["slurm_partition"],
+                    "slurm_mem": settings["slurm_mem"],
+                    "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                    "slurm_output": chunk_output,
+                    "slurm_error": chunk_error,
+                    "job_name": job_name,
+                }
+                print(f"[emseq.make_cmd] script={script_path}")
+                print(f"[emseq.make_cmd] command={command}")
+                if not settings["dry_run"]:
+                    generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                    print(f"[emseq.make_cmd] generated={script_path}")
+                generated_scripts.append(script_path)
+
+            if settings["submit"] and not settings["dry_run"]:
+                for script_path in generated_scripts:
+                    submit_script(script_path, settings["runner"])
+                print(f"[emseq.make_cmd] submitted_count={len(generated_scripts)}")
+    elif stage == "align":
+        command_args = argparse.Namespace(
+            biscuit_reference=settings["biscuit_reference"],
+            biscuit_threads=settings["biscuit_threads"],
+            biscuit_batch_size=settings["biscuit_batch_size"],
+            biscuit_bin=settings["biscuit_bin"],
+            sinto_bin=settings["sinto_bin"],
+            samtools_bin=settings["samtools_bin"],
+            spike_in_index=settings["spike_in_index"],
+        )
+
+        print(f"[emseq.make_cmd] runner={settings['runner']}")
+        print(f"[emseq.make_cmd] stage={stage}")
+        print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+
+        if settings["runner"] == "local":
+            base_name = "03_align"
+            script_path = command_dir / f"{base_name}.sh"
+            script = quoted(
+                [
+                    sys.executable,
+                    "scripts-emseq/aligner.py",
+                    "--work-path",
+                    str(sample_work),
+                    "--biscuit-reference",
+                    command_args.biscuit_reference,
+                    "--biscuit-threads",
+                    str(command_args.biscuit_threads),
+                    "--biscuit-batch-size",
+                    str(command_args.biscuit_batch_size),
+                    "--biscuit-bin",
+                    command_args.biscuit_bin,
+                    "--sinto-bin",
+                    command_args.sinto_bin,
+                    "--samtools-bin",
+                    command_args.samtools_bin,
+                ]
+                + [
+                    item
+                    for value in command_args.spike_in_index
+                    for item in ["--spike-in-index", value]
+                ]
+            )
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={script}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(script, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            chunks = build_chunk_names(settings["number_of_split_parts"])
+            print(f"[emseq.make_cmd] chunk_count={len(chunks)}")
+            generated_scripts: list[Path] = []
+            for chunk in chunks:
+                base_name = f"03_align_{chunk}"
+                script_path = command_dir / f"{base_name}.sbatch"
+                command = quoted(
+                    [
+                        sys.executable,
+                        "scripts-emseq/aligner.py",
+                        "--work-path",
+                        str(sample_work),
+                        "--chunk",
+                        chunk,
+                        "--biscuit-reference",
+                        command_args.biscuit_reference,
+                        "--biscuit-threads",
+                        str(command_args.biscuit_threads),
+                        "--biscuit-batch-size",
+                        str(command_args.biscuit_batch_size),
+                        "--biscuit-bin",
+                        command_args.biscuit_bin,
+                        "--sinto-bin",
+                        command_args.sinto_bin,
+                        "--samtools-bin",
+                        command_args.samtools_bin,
+                    ]
+                    + [
+                        item
+                        for value in command_args.spike_in_index
+                        for item in ["--spike-in-index", value]
+                    ]
+                )
+                job_name = f"emseq_align_{settings['sample_id']}_{chunk}"
+                chunk_output = (settings["slurm_output"] or "").replace(
+                    "%x", job_name
+                )
+                chunk_error = (settings["slurm_error"] or "").replace("%x", job_name)
                 slurm_settings = {
                     "sample_id": settings["sample_id"],
                     "stage": stage,
