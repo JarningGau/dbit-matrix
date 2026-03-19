@@ -1,17 +1,14 @@
 # Outputs Guide
 
-本页说明跑完后先看哪些结果，以及这些结果代表什么。
+本页说明 TAPS 主线跑完后先看哪些结果，以及这些结果代表什么。`EMSeq` 当前已覆盖到 `align`，但仍不产出本页中的 `coverage`、`saturation` 或 `summary` 结果。
 
 ## 推荐检查顺序
 
-1. `summary/sample_summary.tsv`  
-   先看样本级汇总，确认 host、host_mito、spike-in 是否都产出。
-
-2. `summary/per_spot_summary.tsv`  
-   再看 spot 主表，确认每个 spot 的 reads、CpG 位点数和平均甲基化。
-
-3. `summary/*.heatmap.png`  
-   最后看空间图，快速识别高低值分布是否符合预期。
+1. `summary/sample_summary.tsv`
+2. `summary/per_spot_summary.tsv`
+3. `summary/*.heatmap.png`
+4. `qc/saturation/saturation_summary.tsv`
+5. `qc/saturation/saturation_curve.png`
 
 ## 主结果清单
 
@@ -29,6 +26,11 @@
 - `work/<sample>/coverage/host_mito.CG.cov`
 - `work/<sample>/coverage/<spike_name>.CG.cov`
 
+### saturation
+
+- `work/<sample>/qc/saturation/saturation_curve.png`
+- `work/<sample>/qc/saturation/saturation_summary.tsv`
+
 ### mbias QC
 
 - `work/<sample>/qc/mbias/*.mbias.tsv`
@@ -45,16 +47,28 @@
 - `cpg_site_count`
 - `reads`
 
-`sample_summary.tsv` 固定列输出样本级结果；缺失输入会写 `NA`，不会改变列结构。
+`sample_summary.tsv` 固定列输出样本级结果；缺失输入会写 `NA`，不会改变列结构。除甲基化汇总外，当前还包含：
+
+- `raw_reads`
+- `barcoded_reads`
+- `barcoded_reads_rate`
+- `host_mapped_reads`
+- `host_valid_reads`
+- `<spike_name>_mapped_reads`
+- `valid_reads_rate`
+- `saturation_rate`
+
+其中 `saturation_rate` 来自 `qc/saturation/saturation_summary.tsv`；若 `saturation` 未执行或无可用结果，则写 `NA`。
 
 ## 常见判断
 
-- `reads` 极低且大面积为 0：优先检查 `demux` 保留率和 `split` 输入。
-- spike-in 缺失：先检查 `spike_in_index` 配置和 `align/pool` 的 spike 输出。
-- `host_mito.CG.cov` 缺失：检查 `call` 是否执行、以及 `mbias` 的 host 抽样 BAM 是否可复用。
+- `reads` 极低且大面积为 0：优先检查 `demux` 保留率和 `split` 输入
+- spike-in 缺失：先检查 `spike_in_index` 配置和 `align/pool` 的 spike 输出
+- `host_mito.CG.cov` 缺失：检查 `call` 是否执行，以及 `mbias` 的 host 抽样 BAM 是否可复用
+- `saturation_rate` 为 `NA`：检查 `saturation` 是否执行，以及 `coverage/host/**/*.CG.cov` 和 `split_bams/per_spot_read_counts.tsv` 是否存在
 
 ## 相关文档
 
-- `doc/stages.md`：想看每个 stage 的输入输出契约
-- `doc/commands.md`：想看如何只跑某个 stage
-- `TEST.md`：想做维护者回归检查
+- `doc/stages.md`：每个 stage 的输入输出契约
+- `doc/commands.md`：如何只跑某个 stage
+- `TEST.md`：维护者回归检查

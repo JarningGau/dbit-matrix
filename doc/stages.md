@@ -1,10 +1,12 @@
 # Stages
 
-本页描述 dbit-matrix 各个 stage 的输入输出契约。建议把它理解为用户侧的“结果约定”文档：你需要知道每一步读什么、写什么，以及哪些行为是固定的。
+本页描述 `DBiT-Matrix` 各个 stage 的输入输出契约，面向使用者回答“每一步读什么、写什么、哪些行为是固定的”。
 
-固定主流程（TAPS）：
+TAPS 固定主流程：
 
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+
+EMSeq 当前是独立入口，已覆盖 `fastp_split -> demux_extract_bc -> align`。首次使用请看 `doc/emseq.md`。
 
 ## 1. `fastp_split`
 
@@ -29,13 +31,8 @@
 
 - 使用 `fastp --split`
 - 输出的 chunk FASTQ 是 `demux_extract_bc` 的直接输入
-- 支持 `local` 和 `Slurm`
-
-对于 EMSeq 独立入口：
-
-- 入口为 `scripts-emseq/make_cmd.py`
-- 仅定义与上述相同的 `fastp_split` 契约（输入/输出路径与文件命名保持一致）
-- 当前阶段不在 EMSeq pipeline 中继续串联 `demux_extract_bc` 之后的各个 stage
+- 支持 `local` 和 `slurm`
+- EMSeq 入口沿用相同的输入输出路径和命名
 
 ## 2. `demux_extract_bc`
 
@@ -44,7 +41,6 @@
 - 从 chunk FASTQ 中提取 barcode
 - 将 matched reads 与 spike-in reads 分流
 - 生成保留率与拒绝原因统计
-- TAPS 与 EMSeq 需要使用各自匹配的 R1 结构解析脚本
 
 输入：
 
@@ -66,7 +62,7 @@
 - 统计文件必须能反映保留率和拒绝原因
 - TAPS 使用 `scripts/extract_bc.py`，假定 `R1 = barcodeB-linker2-barcodeA-linker1-Tn5-insert`
 - EMSeq 使用 `scripts-emseq/extract_bc.py`，假定 `R1 = linker1-barcodeB-linker2-barcodeA-others(15 bp)-Tn5-insert`
-- EMSeq demux 的外部参数设计与 TAPS demux 对齐；`others(15 bp)` 作为 EMSeq 固定内部约束，不单独暴露为 CLI 参数
+- EMSeq demux 的外部参数设计与 TAPS 对齐；`others(15 bp)` 作为内部固定约束，不单独暴露为 CLI 参数
 
 ## 3. `align`
 
@@ -90,6 +86,7 @@
 - 支持 `0/1/N` 个 spike-in
 - host 输入必须来自 `*.demux.fq.gz`
 - spike-in 输入必须来自 `*.spike-in.fq.gz`
+- EMSeq 入口使用 `scripts-emseq/aligner.py`，以 `biscuit align` 产出比对结果，并保持相同的输出契约：host 为 `align_shards/<chunk>.cb.bam`，spike-in 为 `align_shards/<chunk>.<spike_name>.bam`
 
 ## 4. `pool`
 
@@ -120,7 +117,6 @@
 
 - 按 spot 拆分 pooled host BAM
 - 统计每个 spot 的 read 数
-- 在 `slurm` 编排中，作为 `sort` 的上游步骤单独提交
 
 输入：
 
@@ -136,14 +132,13 @@
 - 按 `CB:Z:<x>+<y>` 解析 spot
 - `+` 左侧是 X barcode，右侧是 Y barcode
 - `--smoke` 模式最多输出 16 个非空 spot BAM
-- `slurm` 模式生成 `commands/05_split_bams.sbatch`，只负责拆分，不做排序
+- `slurm` 模式先生成 `commands/05_split_bams.sbatch`，再串联排序步骤
 
-## 6. `split` 内部子步骤 `sort`（非顶层 stage）
+## 6. `split` 内部子步骤 `sort`
 
 作用：
 
 - 对 `split` 产生的 spot BAM 做排序和索引
-- 在 `slurm` 编排中，必须依赖 `split_bams` 完成后再提交
 
 输入：
 
@@ -156,18 +151,16 @@
 
 关键约定：
 
-- 该步骤是 `split` stage 的后处理，不作为顶层 `--stage` 选项暴露给用户
+- 该步骤是 `split` stage 的后处理，不作为顶层 `--stage` 暴露
 - 执行内容为 `sort + index + remove raw bam`
-- 默认跳过已排序 BAM
 - `slurm` 模式生成 `commands/05_split_sort.sbatch`
-- 若单独运行 `split` stage，应用 `commands/05_split_submit.sh` 提交，由它负责串联
-  `05_split_bams.sbatch -> afterok -> 05_split_sort.sbatch`
+- 单独运行 `split` 时可通过 `commands/05_split_submit.sh` 串联依赖
 
 ## 7. `mbias`
 
 作用：
 
-- 生成 host 和/或 spike-in 的 M-bias 质控结果
+- 生成 host 和或 spike-in 的 M-bias 质控结果
 - 为 `call` 的聚合 `host_mito` 结果准备可复用的 host 抽样 BAM
 
 输入：
@@ -190,15 +183,9 @@
 
 - 默认 `mode=spike`
 - 可显式切换到 `host` 或 `all`
-- host 从 `pooled.byCB.bam` 固定比例抽样，再 `sort + index`
-- host 抽样 BAM 固定输出为 `qc/mbias/host.subsampled.sorted.bam`
-- `call` 的 `host_mito` 会优先复用该 BAM
-- spike-in 直接使用全量 `pooled.<spike_name>.sorted.bam`
-- 只在参考序列真实 `CpG` 位点上计算甲基化率：`(TG+CA)/(TG+CA+CG)`
+- host 从 `pooled.byCB.bam` 固定比例抽样，再排序并建立索引
+- `call` 的 `host_mito` 会优先复用 `qc/mbias/host.subsampled.sorted.bam`
 - 本步骤只输出 QC，不自动修改 trimming 或 calling 参数
-- 使用 `pysam` 读取 BAM 时，`query_sequence` 始终按 BAM 存储方向返回（负链为原始 read 的反向互补）；`mbias` 内部对正负链统一映射 cycle，使 cycle 1 始终对应原始测序 read 的 5' 端，便于比较不同链/reads 的 M-bias 曲线
-  >The sequence is returned as it is stored in the BAM file. (This will be the reverse complement of the original read sequence if the mapper has aligned the read to the reverse strand.) 
-  https://pysam.readthedocs.io/en/latest/api.html#pysam.AlignmentFile
 
 ## 8. `call`
 
@@ -217,20 +204,40 @@
 - `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
 - `coverage/host_mito.CG.cov`
 - `coverage/<spike_name>.CG.cov`
-- 上述 `.CG.cov` 仅包含 `coverage>0` 的位点行（不输出 `coverage=0` 行）
 
 关键约定：
 
+- `.CG.cov` 仅包含 `coverage>0` 的位点行
 - host 主结果按 spot 输出
 - `host_mito` 输出为单个聚合结果
 - `host_mito` 优先复用 `qc/mbias/host.subsampled.sorted.bam`
-- 若该 BAM 不存在，会从 `pooled/pooled.byCB.bam` 按与 `mbias` 相同规则抽样并排序后再调用
 
-## 9. `summary`
+## 9. `saturation`
 
 作用：
 
-- 将 calling 结果汇总为 spot 级和 sample 级表格
+- 基于 host per-spot coverage 估计样本的 CpG 饱和度曲线
+
+输入：
+
+- `coverage/host/**/*.CG.cov`
+- `split_bams/per_spot_read_counts.tsv`
+
+输出：
+
+- `qc/saturation/saturation_curve.png`
+- `qc/saturation/saturation_summary.tsv`
+
+关键约定：
+
+- 结果写到 `qc/saturation/`
+- `summary` 会读取 `saturation_summary.tsv` 中的 `saturation_rate`
+
+## 10. `summary`
+
+作用：
+
+- 将 calling 和 QC 结果汇总为 spot 级和 sample 级结果
 
 输入：
 
@@ -242,6 +249,7 @@
 - demux 统计：`demux/*.stats.json`
 - host pooled BAM：`pooled/pooled.byCB.bam`
 - spike pooled BAM：`pooled/pooled.<spike_name>.sorted.bam`
+- saturation 汇总：`qc/saturation/saturation_summary.tsv`
 
 输出：
 
@@ -255,20 +263,7 @@
 
 - `per_spot_summary.tsv` 每个 spot 一行
 - 固定包含：`X_index`、`Y_index`、`spot`、`mean_methylation`、`cpg_site_count`、`reads`
-- heatmap 固定基于 `per_spot_summary.tsv` 生成
-- `reads_heatmap.png` 使用 `(X_index, Y_index, reads)`
-- `cpg_site_count_heatmap.png` 使用 `(X_index, Y_index, cpg_site_count)`
-- `mean_methylation_heatmap.png` 使用 `(X_index, Y_index, mean_methylation)`
 - `sample_summary.tsv` 每个样本一行
-- 包含 host、host_mito 和各 spike-in 的汇总甲基化结果
-- 同时包含 reads 汇总字段：`raw_reads`、`barcoded_reads`、`host_mapped_reads`、
-  `<spike_name>_mapped_reads`、`host_valid_reads`、`barcoded_reads_rate`、
-  `valid_reads_rate`
-- `barcoded_reads` 基于 `demux/*.stats.json` 的 `kept_reads` 统计并按 read pairs
-  归一化为 reads（`×2`）
-- `barcoded_reads_rate` 定义为 `barcoded_reads/raw_reads`，格式为 `XX.XX%`
-- `valid_reads_rate` 定义为 `host_valid_reads/raw_reads`，格式为 `XX.XX%`
-- host spots 平均甲基化按 `cpg_site_count` 加权
-- `host_valid_reads` 统计规则固定为 host BAM 中 flag `99/147/83/163`
-- reads 数值字段在 `sample_summary.tsv` 中按千分位格式输出
+- 包含 host、host_mito、各 spike-in 和 `saturation_rate` 的汇总结果
+- reads 数值字段按千分位格式输出
 - 缺失输入保持固定列并写 `NA`

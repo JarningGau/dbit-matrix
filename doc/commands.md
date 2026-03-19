@@ -1,7 +1,6 @@
 # Run Commands
 
-本页是 `scripts/make_cmd.py` 的运行手册。  
-建议顺序：先 `--dry-run`，再真实执行。
+本页是 `scripts/make_cmd.py` 的运行手册，只覆盖用户侧运行命令与 `runner` 行为。回归型检查命令请看 `TEST.md`；EMSeq 独立入口请看 `doc/emseq.md`。
 
 ## 最常用命令
 
@@ -11,7 +10,7 @@
 pixi run python scripts/make_cmd.py --help
 ```
 
-完整流程 dry-run（推荐首次必跑）：
+完整流程 dry-run：
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -44,7 +43,7 @@ pixi run python scripts/make_cmd.py \
 ## 固定行为
 
 - 推荐显式传 `--stage all`
-- `all` 固定展开：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- `all` 固定展开：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 - 未显式传 `--stage` 时，会优先读取 `workflow/*.json` 中的 `stage`
 - 全部 stage 都支持 `--dry-run`
 
@@ -58,18 +57,18 @@ pixi run python scripts/make_cmd.py \
 
 `slurm`：
 
-- 生成每个 stage/chunk 的 `.sbatch`
+- 生成每个 stage 或 chunk 的 `.sbatch`
 - 额外生成入口 `run.sbatch`
-- `--submit` 时由客户端提交依赖 DAG（`submit_mode=client_side_sbatch_dag`）
+- `--submit` 时由客户端提交依赖 DAG
 - stage 间依赖统一用 `afterok`
 - 不依赖计算节点内 nested `sbatch`
 
-`split` 在 `slurm` 下是两段实现：
+`split` 在 `slurm` 下固定拆成两段：
 
 - `05_split_bams.sbatch`
 - `05_split_sort.sbatch`
 
-并通过 `05_split_submit.sh` 串联为  
+并通过 `05_split_submit.sh` 串联为
 `05_split_bams.sbatch -> afterok -> 05_split_sort.sbatch`。
 
 ## 按 Stage dry-run
@@ -132,6 +131,16 @@ pixi run python scripts/make_cmd.py \
   --stage call \
   --runner local \
   --call-mode all \
+  --dry-run
+```
+
+### `saturation`
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage saturation \
+  --runner local \
   --dry-run
 ```
 

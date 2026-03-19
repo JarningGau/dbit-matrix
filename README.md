@@ -1,33 +1,35 @@
 # DBiT-Matrix
 
-`DBiT-Matrix` 是面向 `DBiT-DNAme-TAPS` 的工作流：从原始 `FASTQ` 出发，完成条码提取、比对、spot 拆分、M-bias 质控、甲基化 calling、饱和度分析，并输出 spot 级和 sample 级汇总结果。
+`DBiT-Matrix` 是面向空间 DNA 甲基化数据的工作流集合。当前正式主线是 `DBiT-DNAme-TAPS`；`EMSeq` 作为独立入口保留在试验阶段。
 
 - 当前版本：`1.4.0`
-- 历史版本：`doc/log.md`
+- 版本变化：`doc/log.md`
 
-## 支持范围
+## 当前支持范围
 
-- **TAPS 主流程**
-  - 当前协议：`DBiT-DNAme-TAPS`
-  - 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+### TAPS 主线
+
+- 协议：`DBiT-DNAme-TAPS`
+- 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- 入口脚本：`scripts/make_cmd.py`
 - 运行方式：`local`、`slurm`
 - 环境管理：统一使用 `pixi`
-- 配置入口：优先通过 `workflow/*.json` 管理
+- 配置入口：优先通过 `workflow/*.json`
 - 安全检查：所有 stage 支持 `--dry-run`
 
-- **EMSeq（独立入口 / 试验性）**
-  - 当前已支持 `fastp_split -> demux_extract_bc`
-  - `demux_extract_bc` 使用 `scripts-emseq/extract_bc.py`，按 EMSeq 的 `R1 = linker1-barcodeB-linker2-barcodeA-others(15 bp)-Tn5-insert` 结构解析
-  - EMSeq demux 复用与 `scripts/extract_bc.py` 同风格的外部参数：`linker1`、`linker2`、`tn5`、`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
-  - 独立入口：`scripts-emseq/make_cmd.py`
-  - 推荐从 `workflow/dbit_emseq_test.json` 复制配置，并按需调整 EMSeq 所需最小字段
+### EMSeq 独立入口
+
+- 当前状态：试验性 / MVP
+- 当前支持：`fastp_split -> demux_extract_bc -> align`
+- 入口脚本：`scripts-emseq/make_cmd.py`
+- 说明页面：`doc/emseq.md`
 
 ## 你会得到什么
 
-最常用结果在 `work/<sample>/` 下：
+TAPS 主线最常用结果位于 `work/<sample>/`：
 
-- `summary/per_spot_summary.tsv`
 - `summary/sample_summary.tsv`
+- `summary/per_spot_summary.tsv`
 - `summary/reads_heatmap.png`
 - `summary/cpg_site_count_heatmap.png`
 - `summary/mean_methylation_heatmap.png`
@@ -37,40 +39,19 @@
 - `coverage/host_mito.CG.cov`
 - `coverage/<spike_name>.CG.cov`
 
-`summary/sample_summary.tsv` 当前除甲基化汇总外，还包含 sample-level reads 指标：
-
-- `raw_reads`（来自 `shard_fastq/fastp.json`）
-- `barcoded_reads`（聚合 `demux/*.stats.json` 的 `kept_reads`，按 read pairs 归一化为 reads）
-- `barcoded_reads_rate`（`barcoded_reads/raw_reads`，格式为 `XX.XX%`）
-- `host_mapped_reads`（来自 `pooled/pooled.byCB.bam`）
-- `<spike_name>_mapped_reads`（来自 `pooled/pooled.<spike_name>.sorted.bam`）
-- `host_valid_reads`（`pooled/pooled.byCB.bam` 中 flag 为 `99/147/83/163` 的 reads）
-- `valid_reads_rate`（`host_valid_reads/raw_reads`，格式为 `XX.XX%`）
-- 上述 reads 数值字段在 `sample_summary.tsv` 中按千分位格式输出
-
-`call` 阶段会按 batch 流式追加写出 `.CG.cov`，避免把整次 calling 结果长期累积在内存里。
-`call_r1_*_trimming` / `call_r2_*_trimming` 按原始 read 两端的 cycle 定义生效，对 reverse-strand 比对也保持与 `mbias` 一致的方向语义。
-`.CG.cov` 只保留 `coverage>0` 的位点行，不再输出 `coverage=0` 行。
-
-## 你需要准备什么
-
-- 双端测序数据：`R1 FASTQ`、`R2 FASTQ`
-- barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
-- host 参考：`bwa_index`、`call_reference_file`
-- 可选 spike-in 参考：`spike_in_index`
-- workflow 配置文件（建议从 `workflow/dbit_taps_test.json` 复制）
+`summary/sample_summary.tsv` 当前除甲基化汇总外，还包含 `raw_reads`、`barcoded_reads`、`host_mapped_reads`、`host_valid_reads`、`<spike_name>_mapped_reads`、`barcoded_reads_rate`、`valid_reads_rate` 和 `saturation_rate`。
 
 ## 三步快速开始
 
-1) 安装环境
+1. 安装环境：
 
 ```bash
 pixi install
 ```
 
-2) 复制样例配置并修改最小必填项（`sample_id`、`r1`、`r2`、参考路径等）
+2. 复制 `workflow/dbit_taps_test.json`，先只修改最小必填字段：`sample_id`、`r1`、`r2`、参考路径、barcode 白名单。
 
-3) 先 dry-run，再真实运行
+3. 先 dry-run，再真实运行：
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -90,27 +71,37 @@ pixi run python scripts/make_cmd.py \
 
 ## 跑完后先看什么
 
-建议按下面顺序检查：
+建议先看：
 
-1. `summary/sample_summary.tsv`（样本级总览）
-2. `summary/per_spot_summary.tsv`（spot 级主表）
-3. `summary/*.heatmap.png`（空间分布）
+1. `summary/sample_summary.tsv`
+2. `summary/per_spot_summary.tsv`
+3. `summary/*.heatmap.png`
+4. `qc/saturation/saturation_summary.tsv`
 
 ## 文档导航
 
-首次用户建议阅读路径：
-`README -> doc/setup.md -> doc/config.md -> doc/commands.md -> doc/outputs.md`
+首次使用 TAPS，建议阅读：
+`README -> doc/setup.md -> doc/config.md -> doc/commands.md -> doc/outputs.md -> doc/stages.md`
 
-用户文档：
+### TAPS 用户
 
-- `doc/setup.md`：环境和数据准备
-- `doc/config.md`：`workflow/*.json` 配置说明（最小必改项）
+- `doc/setup.md`：环境、测试数据和准备材料
+- `doc/config.md`：`workflow/*.json` 最小必改项与常用字段
 - `doc/commands.md`：运行命令与 `local/slurm` 场景
-- `doc/outputs.md`：主要结果文件与查看顺序
-- `doc/stages.md`：各 stage 输入输出契约（参考手册）
+- `doc/outputs.md`：主要产物与查看顺序
+- `doc/stages.md`：各 stage 输入输出契约
 
-维护与内部文档：
+### EMSeq 用户
 
-- `TEST.md`：回归/维护者检查
-- `doc/progress.md`：内部里程碑与风险跟踪
+- `doc/emseq.md`：EMSeq 当前支持范围、最小配置和首次运行命令
+
+### 维护者 / 开发者
+
+- `TEST.md`：TAPS 回归检查
+- `TEST-emseq.md`：EMSeq 回归检查
+
+### 内部材料
+
+- `doc/progress.md`：里程碑、风险和下一步
 - `doc/log.md`：版本变化记录
+- `doc/TODO.md`：设计备忘和待决策事项

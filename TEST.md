@@ -1,9 +1,6 @@
 # TEST (Maintainer)
 
-本页是维护者/贡献者回归文档，不是首次用户上手教程。  
-目标是快速确认工作流入口、关键 stage 和最终产物在版本演进后仍符合预期。
-
-如果你是首次使用者，请先阅读：`README.md -> doc/setup.md -> doc/config.md -> doc/commands.md -> doc/outputs.md`。
+本页是 `TAPS` 主线的维护者回归文档，不是首次用户上手教程。目标是快速确认工作流入口、关键 stage 和最终产物在版本演进后仍符合预期。使用说明请回到 `README.md` 和 `doc/*.md` 用户文档。
 
 ## 最小验收
 

@@ -1,7 +1,6 @@
 # Setup
 
-本页面向首次用户，聚焦环境准备和测试数据。  
-配置字段说明请看 `doc/config.md`，运行命令请看 `doc/commands.md`。
+本页面向首次用户，聚焦环境准备、测试数据和最小输入材料。配置字段说明请看 `doc/config.md`，运行命令请看 `doc/commands.md`。如果你使用 `EMSeq` 独立入口，请改看 `doc/emseq.md`。
 
 ## 环境
 
@@ -16,6 +15,8 @@ pixi install
 ```bash
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
+  --stage all \
+  --runner local \
   --dry-run
 ```
 
@@ -34,41 +35,27 @@ pixi run which sinto
 pixi run sinto --help >/dev/null
 pixi run which samtools
 pixi run samtools --version | head -n 1
-
-pixi run make-cmd-dry-run
 ```
+
+## 你需要准备什么
+
+- 双端测序数据：`R1 FASTQ`、`R2 FASTQ`
+- barcode 白名单：`barcode1_whitelist`、`barcode2_whitelist`
+- host 参考：`bwa_index`、`call_reference_file`
+- 可选 spike-in 参考：`spike_in_index`
+- 一份 workflow 配置文件，建议从 `workflow/dbit_taps_test.json` 复制
 
 ## 测试数据
 
-- R1: `data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R1.fq.gz`
-- R2: `data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R2.fq.gz`
-
-样例 workflow：
-
-- `workflow/dbit_taps_test.json`
+- R1：`data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R1.fq.gz`
+- R2：`data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R2.fq.gz`
+- 样例 workflow：`workflow/dbit_taps_test.json`
 
 ## 文库结构
 
-TAPS：
+TAPS 当前假定：
 
-- R1: `barcodeB-linker2-barcodeA-linker1-Tn5-insert`
-- R2: `insert`
+- R1：`barcodeB-linker2-barcodeA-linker1-Tn5-insert`
+- R2：`insert`
 
-EMSeq：
-
-- R1: `linker1-barcodeB-linker2-barcodeA-Tn5-insert`
-- R2: `insert`
-
-## 关键参数
-
-- barcodes: `configs/barcodes_50a.tsv`
-- linker1: `GTGGCCGATGTTTCG`
-- linker2: `ATCCACGTGCTTGAGAGGCCAGAGCATTCG`
-- tn5: `CATCGGCGTACGACTAGATGTGTATAAGAGACAG`
-- `linker_edit_distance`: linker 模糊匹配编辑距离上限
-- `barcode_hamming_distance`: whitelist 纠错汉明距离上限
-- `gzip_level`: demux FASTQ 压缩等级
-- `bwa_index`: host 参考索引
-- `bwa_threads`: align 线程数
-- `bwa_bin / sinto_bin / samtools_bin`: 相关工具路径
-- `spike_in_index`: spike-in 参考，支持对象或 `NAME=INDEX` 列表
+EMSeq 的文库结构和最小配置说明见 `doc/emseq.md`。

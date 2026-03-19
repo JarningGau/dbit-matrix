@@ -1,6 +1,6 @@
 # Version Log
 
-本页记录面向用户可见的版本变化。`README.md` 只保留当前版本号，具体变化统一写在这里。
+本页记录版本变化，不作为当前支持范围说明。当前支持范围、入口和主流程以 `README.md` 为准。
  
 ## 1.4.0
 
@@ -54,6 +54,6 @@
 
 ## 1.0.0
 
-- 固定主流程为 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
+- `1.0.0` 时固定主流程为 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> summary`
 - 提供 `local` 和 `Slurm` 两种运行方式，并统一通过 `pixi` 管理环境
 - 交付稳定的 `per_spot_summary.tsv`、`sample_summary.tsv` 和 `mbias` 结果，作为 1.0 用户侧最小闭环

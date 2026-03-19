@@ -1,9 +1,10 @@
 # TODO
 
-- CG扩展到CH位点
+本页是内部设计备忘，不进入用户阅读路径。当前内容优先服务 `mbias -> call` 阶段迭代。
 
->>Ignore Here
-本页记录当前实现细节澄清、待决策事项和后续最小改造方向，优先服务 `mbias -> call` 阶段迭代。
+## 总主题
+
+- `CG` 扩展到 `CH` 位点
 
 ## `methy_caller` 当前算法说明
 
@@ -66,4 +67,3 @@
 - 若支持 `CH`，先确定 MVP 输出契约：是否新增 `strand` 与 `context` 列
 - 评估是否将当前 caller 从 “CpG-specific dinucleotide caller” 重构为 “strand-aware cytosine caller”
 - 若修改 calling 契约，同步更新 `README.md`、`TEST.md` 与下游 summary/文档说明
->>Ignore Here
