@@ -26,10 +26,13 @@
 - `slurm.<stage>.mem`
 - `slurm.<stage>.cpus_per_task`
 
-对于 EMSeq 独立入口（当前仅支持 `fastp_split`），推荐：
+对于 EMSeq 独立入口（当前支持 `fastp_split`、`demux_extract_bc`），推荐：
 
 - 从 `workflow/dbit_emseq_test.json` 复制一份配置
-- 只保留 `sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin` 以及可选的 `slurm.fastp_split.*`
+- `fastp_split` 最小字段：`sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin`
+- `demux_extract_bc` 额外字段：`barcode1_whitelist`、`barcode2_whitelist`、`linker1`、`linker2`、`tn5`
+- demux 的可调参数与 `scripts/extract_bc.py` 对齐：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
+- Slurm 场景按 stage 分别配置 `slurm.fastp_split.*` 与 `slurm.demux_extract_bc.*`
 - 通过：
 
 ```bash

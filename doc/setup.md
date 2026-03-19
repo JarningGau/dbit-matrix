@@ -49,7 +49,14 @@ pixi run make-cmd-dry-run
 
 ## 文库结构
 
+TAPS：
+
 - R1: `barcodeB-linker2-barcodeA-linker1-Tn5-insert`
+- R2: `insert`
+
+EMSeq：
+
+- R1: `linker1-barcodeB-linker2-barcodeA-Tn5-insert`
 - R2: `insert`
 
 ## 关键参数

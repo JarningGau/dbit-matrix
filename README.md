@@ -16,9 +16,11 @@
 - 安全检查：所有 stage 支持 `--dry-run`
 
 - **EMSeq（独立入口 / 试验性）**
-  - 当前仅支持 `fastp_split` 阶段
+  - 当前已支持 `fastp_split -> demux_extract_bc`
+  - `demux_extract_bc` 使用 `scripts-emseq/extract_bc.py`，按 EMSeq 的 `R1 = linker1-barcodeB-linker2-barcodeA-others(15 bp)-Tn5-insert` 结构解析
+  - EMSeq demux 复用与 `scripts/extract_bc.py` 同风格的外部参数：`linker1`、`linker2`、`tn5`、`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
   - 独立入口：`scripts-emseq/make_cmd.py`
-  - 推荐从 `workflow/dbit_emseq_test.json` 复制配置，并只保留 `fastp_split` 所需最小字段
+  - 推荐从 `workflow/dbit_emseq_test.json` 复制配置，并按需调整 EMSeq 所需最小字段
 
 ## 你会得到什么
 

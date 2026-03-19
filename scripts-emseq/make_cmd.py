@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Generate and optionally submit EMSeq fastp_split commands.
+"""Generate and optionally submit EMSeq workflow commands.
 
-This is an EMSeq-only entrypoint that currently supports a single stage:
-`fastp_split`. It intentionally reuses the shared `scripts/fastp_split.py`
-implementation while keeping EMSeq orchestration separate from the TAPS
-workflow.
+This is an EMSeq-only entrypoint that currently supports:
+
+- `fastp_split`
+- `demux_extract_bc`
+
+It intentionally keeps EMSeq orchestration separate from the TAPS workflow
+while reusing only the stage implementations whose contracts still match the
+EMSeq library layout.
 """
 
 from __future__ import annotations
@@ -17,10 +21,15 @@ import sys
 from pathlib import Path
 
 
-STAGE_SEQUENCE = ["fastp_split"]
+STAGE_SEQUENCE = ["fastp_split", "demux_extract_bc"]
 STAGE_CHOICES = STAGE_SEQUENCE
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
+    "demux_extract_bc": [
+        "barcode1_whitelist",
+        "barcode2_whitelist",
+        "number_of_split_parts",
+    ],
 }
 
 
@@ -39,7 +48,7 @@ def normalize_executable_setting(value: str | None, default_name: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate executable command scripts for EMSeq fastp_split."
+        description="Generate executable command scripts for EMSeq workflow stages."
     )
     parser.add_argument(
         "--workflow-config",
@@ -75,6 +84,32 @@ def parse_args() -> argparse.Namespace:
             "fastp executable path or command name. "
             "Default: fastp from current Python env if available, else fastp."
         ),
+    )
+    parser.add_argument(
+        "--barcode1-whitelist",
+        help="Whitelist path for barcodeA, used by demux stage.",
+    )
+    parser.add_argument(
+        "--barcode2-whitelist",
+        help="Whitelist path for barcodeB, used by demux stage.",
+    )
+    parser.add_argument("--linker1", help="Linker1 sequence for demux stage.")
+    parser.add_argument("--linker2", help="Linker2 sequence for demux stage.")
+    parser.add_argument("--tn5", help="Tn5 sequence for demux stage.")
+    parser.add_argument(
+        "--linker-edit-distance",
+        type=int,
+        help="Max edit distance for linker/Tn5 fallback in demux stage.",
+    )
+    parser.add_argument(
+        "--barcode-hamming-distance",
+        type=int,
+        help="Max Hamming distance for whitelist fallback in demux stage.",
+    )
+    parser.add_argument(
+        "--gzip-level",
+        type=int,
+        help="gzip compress level (0-9) for demux output FASTQ.",
     )
     parser.add_argument(
         "--submit",
@@ -119,6 +154,113 @@ def build_fastp_split_command(args: argparse.Namespace, sample_work: Path) -> st
         args.fastp_bin,
     ]
     return quoted(command)
+
+
+def build_demux_chunk_command(
+    args: argparse.Namespace, r1_path: Path, r2_path: Path, out_prefix: Path
+) -> str:
+    script_path = Path("scripts-emseq/extract_bc.py")
+    return quoted(
+        [
+            sys.executable,
+            str(script_path),
+            str(r1_path),
+            str(r2_path),
+            "-b1",
+            args.barcode1_whitelist,
+            "-b2",
+            args.barcode2_whitelist,
+            "-o",
+            str(out_prefix),
+            "--linker1",
+            args.linker1,
+            "--linker2",
+            args.linker2,
+            "--tn5",
+            args.tn5,
+            "--linker-edit-distance",
+            str(args.linker_edit_distance),
+            "--barcode-hamming-distance",
+            str(args.barcode_hamming_distance),
+            "--gzip-level",
+            str(args.gzip_level),
+        ]
+    )
+
+
+def build_demux_local_batch_command(
+    args: argparse.Namespace, sample_work: Path
+) -> str:
+    chunk_dir = sample_work / "shard_fastq"
+    demux_dir = sample_work / "demux"
+    chunk_dir_q = shlex.quote(str(chunk_dir))
+    demux_dir_q = shlex.quote(str(demux_dir))
+    py = quoted([sys.executable, "scripts-emseq/extract_bc.py"])
+    return (
+        f"chunk_dir={chunk_dir_q}\n"
+        f"demux_dir={demux_dir_q}\n"
+        "bar_width=30\n"
+        "\n"
+        "mkdir -p \"$demux_dir\"\n"
+        "shopt -s nullglob\n"
+        "r1_files=(\"$chunk_dir\"/*.R1.fq.gz)\n"
+        "total=${#r1_files[@]}\n"
+        "if [ \"$total\" -eq 0 ]; then\n"
+        '  echo "[demux] no chunk found under shard_fastq"\n'
+        "  exit 1\n"
+        "fi\n"
+        "\n"
+        "idx=0\n"
+        "for r1 in \"${r1_files[@]}\"; do\n"
+        "  idx=$((idx + 1))\n"
+        "  percent=$((idx * 100 / total))\n"
+        "  filled=$((idx * bar_width / total))\n"
+        "  empty=$((bar_width - filled))\n"
+        "  bar_filled=$(printf '%*s' \"$filled\" '' | tr ' ' '#')\n"
+        "  bar_empty=$(printf '%*s' \"$empty\" '')\n"
+        '  chunk="$(basename "$r1" .R1.fq.gz)"\n'
+        "  r2=\"$chunk_dir/${chunk}.R2.fq.gz\"\n"
+        "  printf '[demux] [%s%s] %3d%% (%d/%d) %s\\n' "
+        "\"$bar_filled\" \"$bar_empty\" \"$percent\" \"$idx\" \"$total\" \"$chunk\"\n"
+        '  [ -f "$r2" ] || { echo "[demux] missing pair for $r1: $r2"; exit 1; }\n'
+        f"  {py} "
+        '"$r1" "$r2" '
+        f"-b1 {shlex.quote(args.barcode1_whitelist)} "
+        f"-b2 {shlex.quote(args.barcode2_whitelist)} "
+        f"-o \"$demux_dir\"/${{chunk}} "
+        f"--linker1 {shlex.quote(args.linker1)} "
+        f"--linker2 {shlex.quote(args.linker2)} "
+        f"--tn5 {shlex.quote(args.tn5)} "
+        f"--linker-edit-distance {int(args.linker_edit_distance)} "
+        f"--barcode-hamming-distance {int(args.barcode_hamming_distance)} "
+        f"--gzip-level {int(args.gzip_level)}\n"
+        "done\n"
+        "\n"
+        'echo "[demux] done"'
+    )
+
+
+def build_chunk_names(number_of_split_parts: int) -> list[str]:
+    if number_of_split_parts <= 0:
+        raise ValueError("number_of_split_parts must be > 0")
+    width = max(4, len(str(number_of_split_parts)))
+    return [f"{index:0{width}d}" for index in range(1, number_of_split_parts + 1)]
+
+
+def build_demux_chunks_from_config(
+    sample_work: Path, number_of_split_parts: int
+) -> list[tuple[str, Path, Path, Path]]:
+    chunk_dir = sample_work / "shard_fastq"
+    demux_dir = sample_work / "demux"
+    return [
+        (
+            chunk,
+            chunk_dir / f"{chunk}.R1.fq.gz",
+            chunk_dir / f"{chunk}.R2.fq.gz",
+            demux_dir / chunk,
+        )
+        for chunk in build_chunk_names(number_of_split_parts)
+    ]
 
 
 def write_text(path: Path, content: str) -> None:
@@ -187,6 +329,22 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.number_of_split_parts, cfg.get("number_of_split_parts")
         ),
         "fastp_bin": pick(args.fastp_bin, cfg.get("fastp_bin")),
+        "barcode1_whitelist": pick(
+            args.barcode1_whitelist, cfg.get("barcode1_whitelist")
+        ),
+        "barcode2_whitelist": pick(
+            args.barcode2_whitelist, cfg.get("barcode2_whitelist")
+        ),
+        "linker1": pick(args.linker1, cfg.get("linker1")),
+        "linker2": pick(args.linker2, cfg.get("linker2")),
+        "tn5": pick(args.tn5, cfg.get("tn5")),
+        "linker_edit_distance": pick(
+            args.linker_edit_distance, cfg.get("linker_edit_distance")
+        ),
+        "barcode_hamming_distance": pick(
+            args.barcode_hamming_distance, cfg.get("barcode_hamming_distance")
+        ),
+        "gzip_level": pick(args.gzip_level, cfg.get("gzip_level")),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -207,7 +365,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         raise ValueError("fastp_threads must be > 0")
 
     if settings["number_of_split_parts"] is None:
-        raise ValueError("number_of_split_parts is required for fastp_split")
+        raise ValueError("number_of_split_parts is required")
     settings["number_of_split_parts"] = int(settings["number_of_split_parts"])
     if settings["number_of_split_parts"] <= 0:
         raise ValueError("number_of_split_parts must be > 0")
@@ -215,6 +373,28 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["fastp_bin"] = normalize_executable_setting(
         settings["fastp_bin"], "fastp"
     )
+    settings["linker1"] = settings["linker1"]
+    settings["linker2"] = settings["linker2"]
+    settings["tn5"] = settings["tn5"]
+    settings["linker_edit_distance"] = (
+        int(settings["linker_edit_distance"])
+        if settings["linker_edit_distance"] is not None
+        else 1
+    )
+    settings["barcode_hamming_distance"] = (
+        int(settings["barcode_hamming_distance"])
+        if settings["barcode_hamming_distance"] is not None
+        else 1
+    )
+    if settings["linker_edit_distance"] < 0:
+        raise ValueError("linker_edit_distance must be >= 0")
+    if settings["barcode_hamming_distance"] < 0:
+        raise ValueError("barcode_hamming_distance must be >= 0")
+    settings["gzip_level"] = (
+        int(settings["gzip_level"]) if settings["gzip_level"] is not None else 6
+    )
+    if settings["gzip_level"] < 0 or settings["gzip_level"] > 9:
+        raise ValueError("gzip_level must be between 0 and 9")
 
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
@@ -250,7 +430,7 @@ def generate_slurm_script(
     command: str, output_path: Path, log_dir: Path, settings: dict
 ) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
-    job_name = f"emseq_fastp_split_{settings['sample_id']}"
+    job_name = settings.get("job_name") or f"emseq_{settings['stage']}_{settings['sample_id']}"
     lines = [
         "#!/usr/bin/env bash",
         f"#SBATCH --job-name={job_name}",
@@ -285,43 +465,115 @@ def main() -> int:
     command_dir = sample_work / "commands"
     log_dir = sample_work / "logs"
 
-    if settings["stage"] != "fastp_split":
-        raise ValueError(f"unsupported stage for EMSeq entry: {settings['stage']}")
+    stage = settings["stage"]
 
-    base_name = "01_fastp_split"
-    command_args = argparse.Namespace(
-        r1=settings["r1"],
-        r2=settings["r2"],
-        fastp_threads=settings["fastp_threads"],
-        number_of_split_parts=settings["number_of_split_parts"],
-        fastp_bin=settings["fastp_bin"],
-    )
-    command = build_fastp_split_command(command_args, sample_work)
+    if stage == "fastp_split":
+        base_name = "01_fastp_split"
+        command_args = argparse.Namespace(
+            r1=settings["r1"],
+            r2=settings["r2"],
+            fastp_threads=settings["fastp_threads"],
+            number_of_split_parts=settings["number_of_split_parts"],
+            fastp_bin=settings["fastp_bin"],
+        )
+        command = build_fastp_split_command(command_args, sample_work)
 
-    if settings["runner"] == "local":
-        script_path = command_dir / f"{base_name}.sh"
+        if settings["runner"] == "local":
+            script_path = command_dir / f"{base_name}.sh"
+        else:
+            script_path = command_dir / f"{base_name}.sbatch"
+
+        print(f"[emseq.make_cmd] runner={settings['runner']}")
+        print(f"[emseq.make_cmd] stage={stage}")
+        print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+        print(f"[emseq.make_cmd] script={script_path}")
+        print(f"[emseq.make_cmd] command={command}")
+
+        if settings["dry_run"]:
+            return 0
+
+        if settings["runner"] == "local":
+            generate_local_script(command, script_path)
+        else:
+            slurm_settings = dict(settings)
+            slurm_settings["stage"] = stage
+            generate_slurm_script(command, script_path, log_dir, slurm_settings)
+
+        print(f"[emseq.make_cmd] generated={script_path}")
+
+        if settings["submit"]:
+            submit_script(script_path, settings["runner"])
+            print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "demux_extract_bc":
+        command_args = argparse.Namespace(
+            barcode1_whitelist=settings["barcode1_whitelist"],
+            barcode2_whitelist=settings["barcode2_whitelist"],
+            linker1=settings["linker1"],
+            linker2=settings["linker2"],
+            tn5=settings["tn5"],
+            linker_edit_distance=settings["linker_edit_distance"],
+            barcode_hamming_distance=settings["barcode_hamming_distance"],
+            gzip_level=settings["gzip_level"],
+        )
+
+        print(f"[emseq.make_cmd] runner={settings['runner']}")
+        print(f"[emseq.make_cmd] stage={stage}")
+        print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+
+        if settings["runner"] == "local":
+            script_path = command_dir / "02_demux_extract_bc.sh"
+            command = build_demux_local_batch_command(command_args, sample_work)
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            chunks = build_demux_chunks_from_config(
+                sample_work, settings["number_of_split_parts"]
+            )
+            print(f"[emseq.make_cmd] chunk_count={len(chunks)}")
+            generated_scripts: list[Path] = []
+            for chunk, r1_path, r2_path, out_prefix in chunks:
+                base_name = f"02_demux_extract_bc_{chunk}"
+                script_path = command_dir / f"{base_name}.sbatch"
+                command = build_demux_chunk_command(
+                    command_args, r1_path, r2_path, out_prefix
+                )
+                job_name = f"emseq_demux_{settings['sample_id']}_{chunk}"
+                chunk_output = (settings["slurm_output"] or "").replace(
+                    "%x", job_name
+                )
+                chunk_error = (settings["slurm_error"] or "").replace(
+                    "%x", job_name
+                )
+                slurm_settings = {
+                    "sample_id": settings["sample_id"],
+                    "stage": stage,
+                    "slurm_partition": settings["slurm_partition"],
+                    "slurm_mem": settings["slurm_mem"],
+                    "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                    "slurm_output": chunk_output,
+                    "slurm_error": chunk_error,
+                    "job_name": job_name,
+                }
+                print(f"[emseq.make_cmd] script={script_path}")
+                print(f"[emseq.make_cmd] command={command}")
+                if not settings["dry_run"]:
+                    generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                    print(f"[emseq.make_cmd] generated={script_path}")
+                generated_scripts.append(script_path)
+
+            if settings["submit"] and not settings["dry_run"]:
+                for script_path in generated_scripts:
+                    submit_script(script_path, settings["runner"])
+                print(f"[emseq.make_cmd] submitted_count={len(generated_scripts)}")
     else:
-        script_path = command_dir / f"{base_name}.sbatch"
-
-    print(f"[emseq.make_cmd] runner={settings['runner']}")
-    print(f"[emseq.make_cmd] stage={settings['stage']}")
-    print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
-    print(f"[emseq.make_cmd] script={script_path}")
-    print(f"[emseq.make_cmd] command={command}")
-
-    if settings["dry_run"]:
-        return 0
-
-    if settings["runner"] == "local":
-        generate_local_script(command, script_path)
-    else:
-        generate_slurm_script(command, script_path, log_dir, settings)
-
-    print(f"[emseq.make_cmd] generated={script_path}")
-
-    if settings["submit"]:
-        submit_script(script_path, settings["runner"])
-        print("[emseq.make_cmd] submitted_count=1")
+        raise ValueError(f"unsupported stage for EMSeq entry: {stage}")
 
     return 0
 

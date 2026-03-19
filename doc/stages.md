@@ -44,6 +44,7 @@
 - 从 chunk FASTQ 中提取 barcode
 - 将 matched reads 与 spike-in reads 分流
 - 生成保留率与拒绝原因统计
+- TAPS 与 EMSeq 需要使用各自匹配的 R1 结构解析脚本
 
 输入：
 
@@ -63,6 +64,9 @@
 - matched 与 spike-in 必须分流
 - read name 会被改写为 `@barcodeA+barcodeB:original_name`
 - 统计文件必须能反映保留率和拒绝原因
+- TAPS 使用 `scripts/extract_bc.py`，假定 `R1 = barcodeB-linker2-barcodeA-linker1-Tn5-insert`
+- EMSeq 使用 `scripts-emseq/extract_bc.py`，假定 `R1 = linker1-barcodeB-linker2-barcodeA-others(15 bp)-Tn5-insert`
+- EMSeq demux 的外部参数设计与 TAPS demux 对齐；`others(15 bp)` 作为 EMSeq 固定内部约束，不单独暴露为 CLI 参数
 
 ## 3. `align`
 

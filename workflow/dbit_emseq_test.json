@@ -2,17 +2,30 @@
     "runner": "local",
     "stage": "fastp_split",
     "sample_id": "test-DNAme-EMSeq",
-    "r1": "data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_1.fq.gz",
-    "r2": "data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_2.fq.gz",
+    "r1": "data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_2.fq.gz",
+    "r2": "data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_1.fq.gz",
     "work_root": "work",
     "fastp_threads": 2,
     "number_of_split_parts": 2,
     "fastp_bin": "fastp",
+    "barcode1_whitelist": "configs/barcodes_50a_CtoT.tsv",
+    "barcode2_whitelist": "configs/barcodes_50a_CtoT.tsv",
+    "linker1": "TAAGTGTTGGTTTTTTGTATTT",
+    "linker2": "ATTTATGTGTTTGAGAGGTTAGAGTATTTG",
+    "tn5": "TATTGGTGTATGATTAGATGTGTATAAGAGATAG",
+    "linker_edit_distance": 1,
+    "barcode_hamming_distance": 0,
+    "gzip_level": 1,
     "slurm": {
         "fastp_split": {
             "partition": "cpu",
             "mem": "16G",
             "cpus_per_task": 2
+        },
+        "demux_extract_bc": {
+            "partition": "cpu",
+            "mem": "8G",
+            "cpus_per_task": 1
         }
     }
 }
