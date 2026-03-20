@@ -22,22 +22,47 @@
     "biscuit_bin": "biscuit",
     "sinto_bin": "sinto",
     "samtools_bin": "samtools",
+    "samtools_threads": 4,
+    "host_sort_mem": "16G",
+    "split_barcodes": "configs/barcodes_50a_CtoT.tsv",
+    "split_cb_tag": "CB",
+    "split_threads_read": 1,
+    "split_threads_write": 1,
+    "split_smoke": true,
+    "split_sort_jobs": 8,
     "spike_in_index": {},
     "slurm": {
         "fastp_split": {
-            "partition": "cpu",
+            "partition": "amd-ep2,intel-sc3",
             "mem": "16G",
             "cpus_per_task": 2
         },
         "demux_extract_bc": {
-            "partition": "cpu",
+            "partition": "amd-ep2,intel-sc3",
             "mem": "8G",
             "cpus_per_task": 1
         },
         "align": {
-            "partition": "cpu",
+            "partition": "amd-ep2,intel-sc3",
             "mem": "64G",
             "cpus_per_task": 8
+        },
+        "pool": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "64G",
+            "cpus_per_task": 4
+        },
+        "split": {
+            "split_bams": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "8G",
+                "cpus_per_task": 1
+            },
+            "sort": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "8G",
+                "cpus_per_task": 8
+            }
         }
     }
 }

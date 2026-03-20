@@ -20,7 +20,7 @@
 ### EMSeq 独立入口
 
 - 当前状态：试验性 / MVP
-- 当前支持：`fastp_split -> demux_extract_bc -> align`
+- 当前支持：`fastp_split -> demux_extract_bc -> align -> pool -> split`
 - 入口脚本：`scripts-emseq/make_cmd.py`
 - 说明页面：`doc/emseq.md`
 

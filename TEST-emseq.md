@@ -1,12 +1,12 @@
 # TEST-EMSeq (Maintainer)
 
-本页是 `EMSeq` 独立入口的维护者回归文档。当前覆盖 `fastp_split -> demux_extract_bc -> align`，不包含 `pool -> split -> mbias -> call -> saturation -> summary` 的后续链路。用户入口说明请看 `doc/emseq.md`。
+本页是 `EMSeq` 独立入口的维护者回归文档。当前覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split`，不包含 `mbias -> call -> saturation -> summary` 的后续链路。用户入口说明请看 `doc/emseq.md`。
 
 ## 当前范围
 
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`
-- 单步执行实现：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`
+- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`
+- 单步执行实现：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`
 - 样例配置：`workflow/dbit_emseq_test.json`
 
 ## 最小验收
@@ -14,8 +14,8 @@
 提交前建议至少执行以下 3 组检查：
 
 1. CLI 可用。
-2. 三个 stage 在 `local` 与 `slurm` 下都能正确 dry-run。
-3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align` 的本地真实生成。
+2. 五个 stage 在 `local` 与 `slurm` 下都能正确 dry-run。
+3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align -> pool -> split` 的本地真实生成。
 
 CLI：
 
@@ -43,6 +43,18 @@ pixi run python scripts-emseq/make_cmd.py \
   --stage align \
   --runner local \
   --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage pool \
+  --runner local \
+  --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage split \
+  --runner local \
+  --dry-run
 ```
 
 `slurm` dry-run：
@@ -65,13 +77,25 @@ pixi run python scripts-emseq/make_cmd.py \
   --stage align \
   --runner slurm \
   --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage pool \
+  --runner slurm \
+  --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage split \
+  --runner slurm \
+  --dry-run
 ```
 
 通过标准：
 
 - 命令正常展开
-- `fastp_split` / `demux_extract_bc` / `align` 分别调用对应脚本
-- 输出目录分别指向 `shard_fastq`、`demux`、`align_shards`
+- `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` 分别调用对应脚本
+- 输出目录分别指向 `shard_fastq`、`demux`、`align_shards`、`pooled`、`split_bams`
 - 无参数缺失、无路径解析错误
 - `slurm` dry-run 中工具路径应解析到当前 `pixi` 环境，或显式使用用户传入的 `--*-bin`
 
@@ -83,17 +107,32 @@ rm -rf work/test-DNAme-EMSeq
 pixi run python scripts-emseq/make_cmd.py \
   --workflow-config workflow/dbit_emseq_test.json \
   --stage fastp_split \
-  --runner local
+  --runner local \
+  --submit
 
 pixi run python scripts-emseq/make_cmd.py \
   --workflow-config workflow/dbit_emseq_test.json \
   --stage demux_extract_bc \
-  --runner local
+  --runner local \
+  --submit
 
 pixi run python scripts-emseq/make_cmd.py \
   --workflow-config workflow/dbit_emseq_test.json \
   --stage align \
-  --runner local
+  --runner local \
+  --submit
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage pool \
+  --runner local \
+  --submit
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage split \
+  --runner local \
+  --submit
 ```
 
 ## 输出检查点
@@ -111,13 +150,18 @@ Smoke 通过标准：
 - `work/<sample>/demux/*.stats.json`
 - `work/<sample>/align_shards/*.cb.bam`
 - 若配置了 `spike_in_index`：`work/<sample>/align_shards/*.<spike_name>.bam`
+- `work/<sample>/pooled/pooled.byCB.bam`
+- 若配置了 `spike_in_index`：`work/<sample>/pooled/pooled.<spike_name>.sorted.bam`
+- `work/<sample>/split_bams/per_spot_read_counts.tsv`
+- `work/<sample>/split_bams/**/*.sorted.bam`
 
 关键行为检查：
 
 - chunk FASTQ 命名应保持与现有 `fastp_split` 契约一致
 - `align` 应使用 `demux/*.R1.demux.fq.gz` / `*.R2.demux.fq.gz` 作为 host 输入
 - 若配置了 `spike_in_index`，`align` 应先处理 `*.spike-in.fq.gz`，再处理 host 输入
-- EMSeq 入口当前不应暴露 `all` 或其他非 `fastp_split` / `demux_extract_bc` / `align` stage
+- 若 `spike_in_index` 为空，`pool` 应仅处理 host（不生成 spike/all 相关作业）
+- EMSeq 入口当前不应暴露 `all` 或其他非 `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` stage
 
 ## 数据说明
 

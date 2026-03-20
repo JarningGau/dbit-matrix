@@ -6,8 +6,8 @@
 
 - 当前状态：试验性 / MVP
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split -> demux_extract_bc -> align`
-- 当前不包含：`pool -> split -> mbias -> call -> saturation -> summary`
+- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split`
+- 当前不包含：`mbias -> call -> saturation -> summary`
 
 ## 与 TAPS 的主要差异
 
@@ -52,7 +52,7 @@
 
 - `spike_in_index`
 
-`workflow/dbit_emseq_test.json` 中若出现 `pool`、`split`、`mbias`、`call`、`saturation`、`summary` 等后续阶段字段，应视为预留字段，不表示当前已经支持这些 stage。
+`workflow/dbit_emseq_test.json` 中若出现 `mbias`、`call`、`saturation`、`summary` 等后续阶段字段，应视为预留字段，不表示当前已经支持这些 stage。
 
 ## 首次运行命令
 
@@ -88,6 +88,26 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
+再检查 `pool`：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage pool \
+  --runner local \
+  --dry-run
+```
+
+再检查 `split`：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage split \
+  --runner local \
+  --dry-run
+```
+
 ## 预期输出
 
 `fastp_split` 后：
@@ -109,3 +129,14 @@ pixi run python scripts-emseq/make_cmd.py \
 
 - `work/<sample>/align_shards/*.cb.bam`
 - `work/<sample>/align_shards/*.<spike_name>.bam`
+
+`pool` 后：
+
+- `work/<sample>/pooled/pooled.byCB.bam`
+- 若配置了 `spike_in_index`：`work/<sample>/pooled/pooled.<spike_name>.sorted.bam`
+
+`split` 后：
+
+- `work/<sample>/split_bams/per_spot_read_counts.tsv`
+- `work/<sample>/split_bams/**/*.sorted.bam`
+- `work/<sample>/split_bams/**/*.sorted.bam.bai`
