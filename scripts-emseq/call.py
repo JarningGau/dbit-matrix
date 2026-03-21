@@ -13,6 +13,7 @@ Produces (TAPS-compatible) outputs:
 from __future__ import annotations
 
 import argparse
+import shlex
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -76,13 +77,13 @@ def parse_args() -> argparse.Namespace:
         "--host-threads",
         type=int,
         default=8,
-        help="Threads for biscuit pileup/bgzip in host mode. Default: 8.",
+        help="Threads for biscuit pileup in host mode (bgzip uses 1). Default: 8.",
     )
     parser.add_argument(
         "--spike-threads",
         type=int,
         default=8,
-        help="Threads for biscuit pileup/bgzip in spike mode. Default: 8.",
+        help="Threads for biscuit pileup in spike mode (bgzip uses 1). Default: 8.",
     )
     parser.add_argument(
         "--biscuit-bin",
@@ -217,11 +218,15 @@ def ensure_pileup_vcf(
         reference_file,
         str(bam_file),
     ]
-    bgzip_cmd = [args.bgzip_bin, "-@", str(threads), "-c"]
+    bgzip_cmd = [args.bgzip_bin, "-@", "1", "-c"]
 
     print(f"[emseq.call] pileup_bam={bam_file} -> {out_vcf_gz}")
     if args.dry_run:
-        print(f"[emseq.call] command_pipe={pileup_cmd} | {bgzip_cmd} > {out_vcf_gz}")
+        pipe = (
+            f"{shlex.join(pileup_cmd)} | {shlex.join(bgzip_cmd)} "
+            f"> {shlex.quote(str(out_vcf_gz))}"
+        )
+        print(f"[emseq.call] command_pipe={pipe}")
         return
 
     pileup_proc = subprocess.Popen(pileup_cmd, stdout=subprocess.PIPE)
@@ -269,10 +274,11 @@ def ensure_coverage_from_vcf(
 
     print(f"[emseq.call] vcf2bed+mergecg {vcf_gz} -> {out_cov}")
     if args.dry_run:
-        print(
-            f"[emseq.call] command_pipe={vcf2bed_cmd} | {mergecg_cmd} | awk "
-            f"'{{print $1,$2+1,$3-1,$4,$5,$6}}' > {out_cov}"
+        pipe = (
+            f"{shlex.join(vcf2bed_cmd)} | {shlex.join(mergecg_cmd)} | "
+            f"awk '{{print $1,$2+1,$3-1,$4,$5,$6}}' > {shlex.quote(str(out_cov))}"
         )
+        print(f"[emseq.call] command_pipe={pipe}")
         return
 
     vcf2bed_proc = subprocess.Popen(
@@ -334,6 +340,12 @@ def extract_host_mito_from_cov(
 ) -> None:
     host_covs = sorted(cov_root.rglob("*.CG.cov"))
     if not host_covs:
+        if dry_run:
+            print(
+                f"[emseq.call] dry_run_skip extract_host_mito_from_cov (no *.CG.cov yet under "
+                f"{cov_root}; would merge mito={sorted(mito_chromosomes)} -> {mito_out_cov})"
+            )
+            return
         raise ValueError(f"no host coverage files found under: {cov_root}/**/*.CG.cov")
 
     print(
