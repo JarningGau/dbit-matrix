@@ -8,6 +8,7 @@ This is an EMSeq-only entrypoint that supports:
 - `align`
 - `pool`
 - `split`
+- `call`
 
 It intentionally keeps EMSeq orchestration separate from the TAPS workflow
 while reusing only the stage implementations whose contracts still match the
@@ -24,7 +25,7 @@ import sys
 from pathlib import Path
 
 
-STAGE_SEQUENCE = ["fastp_split", "demux_extract_bc", "align", "pool", "split"]
+STAGE_SEQUENCE = ["fastp_split", "demux_extract_bc", "align", "pool", "split", "call"]
 STAGE_CHOICES = STAGE_SEQUENCE
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
@@ -39,6 +40,7 @@ STAGE_REQUIRED_FIELDS = {
     ],
     "pool": [],
     "split": ["split_barcodes"],
+    "call": ["call_reference_file", "call_jobs"],
 }
 
 
@@ -194,6 +196,56 @@ def parse_args() -> argparse.Namespace:
         "--split-sort-jobs",
         type=int,
         help="Parallel job count for bam_sort_parallel in split stage. Default: 8.",
+    )
+    # Call stage.
+    parser.add_argument(
+        "--call-reference-file",
+        help="Host reference FASTA for EMSeq call stage (biscuit pileup/mergecg).",
+    )
+    parser.add_argument(
+        "--call-jobs",
+        type=int,
+        help="Maximum per-stage pileup jobs for EMSeq call. Default: 8.",
+    )
+    parser.add_argument(
+        "--call-mode",
+        choices=["all", "host", "spike"],
+        help="Call mode: host+spike, host only, or spike only. Default: all.",
+    )
+    parser.add_argument(
+        "--call-host-threads",
+        type=int,
+        help="biscuit pileup/bgzip threads in host call. Default: biscuit_threads.",
+    )
+    parser.add_argument(
+        "--call-spike-threads",
+        type=int,
+        help="biscuit pileup/bgzip threads in spike call. Default: biscuit_threads.",
+    )
+    parser.add_argument(
+        "--call-bgzip-bin",
+        help="bgzip executable path or command name. Default: bgzip.",
+    )
+    parser.add_argument(
+        "--call-tabix-bin",
+        help="tabix executable path or command name. Default: tabix.",
+    )
+    parser.add_argument(
+        "--call-host-subsample-fraction",
+        type=float,
+        help="Host subsample fraction for host_mito BAM fallback. Default: 0.1.",
+    )
+    parser.add_argument(
+        "--call-host-subsample-seed",
+        type=int,
+        help="Host subsample seed for host_mito BAM fallback. Default: scripts.host_subsample_bam.HOST_SUBSAMPLE_SEED.",
+    )
+    parser.add_argument(
+        "--call-mito-chromosomes",
+        help=(
+            "Comma-separated host contigs treated as mitochondrial in EMSeq call. "
+            "Default: chrM."
+        ),
     )
     parser.add_argument(
         "--spike-in-index",
@@ -429,6 +481,46 @@ def build_split_sort_command(args: argparse.Namespace, sample_work: Path) -> str
     return quoted(command)
 
 
+def build_call_command(
+    args: argparse.Namespace,
+    sample_work: Path,
+    mode: str,
+    spike_name: str | None = None,
+    spike_references: list[str] | None = None,
+) -> str:
+    script_path = Path("scripts-emseq/call.py")
+    command: list[str] = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--mode",
+        mode,
+        "--reference-file",
+        args.call_reference_file,
+        "--jobs",
+        str(args.call_jobs),
+        "--host-threads",
+        str(args.call_host_threads),
+        "--spike-threads",
+        str(args.call_spike_threads),
+        "--biscuit-bin",
+        args.biscuit_bin,
+        "--bgzip-bin",
+        args.call_bgzip_bin,
+        "--tabix-bin",
+        args.call_tabix_bin,
+        "--mito-chromosomes",
+        args.call_mito_chromosomes,
+    ]
+    if spike_references:
+        for item in spike_references:
+            command.extend(["--spike-reference", item])
+    if spike_name:
+        command.extend(["--spike-in-name", spike_name])
+    return quoted(command)
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -562,6 +654,30 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         ),
         "split_smoke": pick(args.split_smoke, cfg.get("split_smoke")),
         "split_sort_jobs": pick(args.split_sort_jobs, cfg.get("split_sort_jobs")),
+        # Call stage.
+        "call_reference_file": pick(
+            args.call_reference_file,
+            cfg.get("call_reference_file", cfg.get("biscuit_reference")),
+        ),
+        "call_jobs": pick(args.call_jobs, cfg.get("call_jobs")),
+        "call_mode": pick(args.call_mode, cfg.get("call_mode")),
+        "call_host_threads": pick(
+            args.call_host_threads, cfg.get("call_host_threads")
+        ),
+        "call_spike_threads": pick(
+            args.call_spike_threads, cfg.get("call_spike_threads")
+        ),
+        "call_bgzip_bin": pick(args.call_bgzip_bin, cfg.get("call_bgzip_bin")),
+        "call_tabix_bin": pick(args.call_tabix_bin, cfg.get("call_tabix_bin")),
+        "host_subsample_fraction": pick(
+            args.call_host_subsample_fraction, cfg.get("call_host_subsample_fraction")
+        ),
+        "host_subsample_seed": pick(
+            args.call_host_subsample_seed, cfg.get("call_host_subsample_seed")
+        ),
+        "call_mito_chromosomes": pick(
+            args.call_mito_chromosomes, cfg.get("call_mito_chromosomes")
+        ),
         "spike_in_index": pick(args.spike_in_index, cfg.get("spike_in_index")),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
@@ -613,6 +729,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     settings["samtools_bin"] = normalize_executable_setting(
         settings["samtools_bin"], "samtools"
+    )
+    settings["call_bgzip_bin"] = normalize_executable_setting(
+        settings["call_bgzip_bin"], "bgzip"
+    )
+    settings["call_tabix_bin"] = normalize_executable_setting(
+        settings["call_tabix_bin"], "tabix"
     )
     settings["linker1"] = settings["linker1"]
     settings["linker2"] = settings["linker2"]
@@ -677,6 +799,47 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if settings["split_sort_jobs"] <= 0:
         raise ValueError("split_sort_jobs must be > 0")
 
+    # Call defaults.
+    settings["call_jobs"] = (
+        int(settings["call_jobs"]) if settings["call_jobs"] is not None else 8
+    )
+    if settings["call_jobs"] <= 0:
+        raise ValueError("call_jobs must be > 0")
+    settings["call_mode"] = settings["call_mode"] or "all"
+    if settings["call_mode"] not in {"all", "host", "spike"}:
+        raise ValueError("call_mode must be one of: all, host, spike")
+
+    settings["call_host_threads"] = (
+        int(settings["call_host_threads"])
+        if settings["call_host_threads"] is not None
+        else int(settings["biscuit_threads"])
+    )
+    if settings["call_host_threads"] <= 0:
+        raise ValueError("call_host_threads must be > 0")
+    settings["call_spike_threads"] = (
+        int(settings["call_spike_threads"])
+        if settings["call_spike_threads"] is not None
+        else int(settings["biscuit_threads"])
+    )
+    if settings["call_spike_threads"] <= 0:
+        raise ValueError("call_spike_threads must be > 0")
+
+    settings["host_subsample_fraction"] = (
+        float(settings["host_subsample_fraction"])
+        if settings["host_subsample_fraction"] is not None
+        else 0.1
+    )
+    if settings["host_subsample_fraction"] <= 0 or settings["host_subsample_fraction"] > 1:
+        raise ValueError("host_subsample_fraction must be in (0, 1]")
+    settings["host_subsample_seed"] = (
+        int(settings["host_subsample_seed"])
+        if settings["host_subsample_seed"] is not None
+        else 11
+    )
+    if settings["host_subsample_seed"] < 0:
+        raise ValueError("host_subsample_seed must be >= 0")
+    settings["call_mito_chromosomes"] = settings["call_mito_chromosomes"] or "chrM"
+
     # Step-specific slurm for split.
     settings["split_bams_slurm_partition"] = (
         pick(args.slurm_partition, split_bams_slurm_cfg.get("partition"))
@@ -701,6 +864,38 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         pick(args.slurm_cpus_per_task, split_sort_slurm_cfg.get("cpus_per_task"))
         or settings["slurm_cpus_per_task"]
     )
+
+    # Step-specific slurm for call: slurm.call.host / slurm.call.spike.
+    if isinstance(stage_slurm_cfg, dict) and ("host" in stage_slurm_cfg or "spike" in stage_slurm_cfg):
+        call_host_cfg = stage_slurm_cfg.get("host") or {}
+        call_spike_cfg = stage_slurm_cfg.get("spike") or {}
+    else:
+        call_host_cfg = stage_slurm_cfg
+        call_spike_cfg = stage_slurm_cfg
+
+    settings["call_host_slurm_partition"] = (
+        pick(args.slurm_partition, call_host_cfg.get("partition"))
+        or settings["slurm_partition"]
+    )
+    settings["call_host_slurm_mem"] = (
+        pick(args.slurm_mem, call_host_cfg.get("mem")) or settings["slurm_mem"]
+    )
+    settings["call_host_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, call_host_cfg.get("cpus_per_task"))
+        or settings["slurm_cpus_per_task"]
+    )
+    settings["call_spike_slurm_partition"] = (
+        pick(args.slurm_partition, call_spike_cfg.get("partition"))
+        or settings["slurm_partition"]
+    )
+    settings["call_spike_slurm_mem"] = (
+        pick(args.slurm_mem, call_spike_cfg.get("mem")) or settings["slurm_mem"]
+    )
+    settings["call_spike_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, call_spike_cfg.get("cpus_per_task"))
+        or settings["slurm_cpus_per_task"]
+    )
+
     settings["slurm_output"] = settings["slurm_output"] or str(
         Path(settings["work_root"])
         / settings["sample_id"]
@@ -1220,6 +1415,145 @@ def main() -> int:
                         ["bash", str(split_submit_helper_path)], check=True
                     )
                     print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "call":
+        spike_names = parse_spike_names(settings["spike_in_index"])
+        effective_mode = settings["call_mode"]
+        if effective_mode in ("all", "spike") and not spike_names:
+            print("[emseq.make_cmd] call spike_in_index empty: run host only")
+            effective_mode = "host"
+
+        include_host = effective_mode in ("all", "host")
+        include_spike = effective_mode in ("all", "spike")
+
+        command_args = argparse.Namespace(
+            call_reference_file=settings["call_reference_file"],
+            call_jobs=settings["call_jobs"],
+            call_host_threads=settings["call_host_threads"],
+            call_spike_threads=settings["call_spike_threads"],
+            call_bgzip_bin=settings["call_bgzip_bin"],
+            call_tabix_bin=settings["call_tabix_bin"],
+            call_mito_chromosomes=settings["call_mito_chromosomes"],
+            biscuit_bin=settings["biscuit_bin"],
+            spike_in_index=settings["spike_in_index"],
+        )
+
+        print(f"[emseq.make_cmd] runner={settings['runner']}")
+        print(f"[emseq.make_cmd] stage={stage}")
+        print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+        print(f"[emseq.make_cmd] call_mode={effective_mode}")
+        print(f"[emseq.make_cmd] spike_in_count={len(spike_names)}")
+
+        if settings["runner"] == "local":
+            script_path = command_dir / "07_call.sh"
+            spike_references = (
+                settings["spike_in_index"] if include_spike else []
+            )
+            command = build_call_command(
+                command_args,
+                sample_work,
+                effective_mode,
+                spike_references=spike_references,
+            )
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            generated_scripts: list[Path] = []
+
+            if include_host:
+                host_script_path = command_dir / "07_call_host.sbatch"
+                host_job_name = f"emseq_call_host_{settings['sample_id']}"
+                host_output = (settings["slurm_output"] or "").replace(
+                    "%x", host_job_name
+                )
+                host_error = (settings["slurm_error"] or "").replace(
+                    "%x", host_job_name
+                )
+                host_command = build_call_command(
+                    command_args,
+                    sample_work,
+                    "host",
+                    spike_references=[],
+                )
+                host_slurm_settings = {
+                    "sample_id": settings["sample_id"],
+                    "stage": stage,
+                    "slurm_partition": settings["call_host_slurm_partition"],
+                    "slurm_mem": settings["call_host_slurm_mem"],
+                    "slurm_cpus_per_task": settings["call_host_slurm_cpus_per_task"],
+                    "slurm_output": host_output,
+                    "slurm_error": host_error,
+                    "job_name": host_job_name,
+                }
+                print(f"[emseq.make_cmd] script={host_script_path}")
+                print(f"[emseq.make_cmd] command={host_command}")
+                if not settings["dry_run"]:
+                    generate_slurm_script(
+                        host_command, host_script_path, log_dir, host_slurm_settings
+                    )
+                    print(f"[emseq.make_cmd] generated={host_script_path}")
+                generated_scripts.append(host_script_path)
+
+            if include_spike:
+                for spike_name in spike_names:
+                    spike_script_path = (
+                        command_dir / f"07_call_spike_{spike_name}.sbatch"
+                    )
+                    spike_job_name = (
+                        f"emseq_call_spike_{settings['sample_id']}_{spike_name}"
+                    )
+                    spike_output = (settings["slurm_output"] or "").replace(
+                        "%x", spike_job_name
+                    )
+                    spike_error = (settings["slurm_error"] or "").replace(
+                        "%x", spike_job_name
+                    )
+                    spike_reference_items: list[str] = [
+                        item
+                        for item in settings["spike_in_index"]
+                        if item.split("=", 1)[0] == spike_name
+                    ]
+                    spike_command = build_call_command(
+                        command_args,
+                        sample_work,
+                        "spike",
+                        spike_name=spike_name,
+                        spike_references=spike_reference_items,
+                    )
+                    spike_slurm_settings = {
+                        "sample_id": settings["sample_id"],
+                        "stage": stage,
+                        "slurm_partition": settings["call_spike_slurm_partition"],
+                        "slurm_mem": settings["call_spike_slurm_mem"],
+                        "slurm_cpus_per_task": settings["call_spike_slurm_cpus_per_task"],
+                        "slurm_output": spike_output,
+                        "slurm_error": spike_error,
+                        "job_name": spike_job_name,
+                    }
+                    print(f"[emseq.make_cmd] script={spike_script_path}")
+                    print(f"[emseq.make_cmd] command={spike_command}")
+                    if not settings["dry_run"]:
+                        generate_slurm_script(
+                            spike_command,
+                            spike_script_path,
+                            log_dir,
+                            spike_slurm_settings,
+                        )
+                        print(f"[emseq.make_cmd] generated={spike_script_path}")
+                    generated_scripts.append(spike_script_path)
+
+            if settings["submit"] and not settings["dry_run"]:
+                for script_path in generated_scripts:
+                    submit_script(script_path, settings["runner"])
+                print(
+                    f"[emseq.make_cmd] submitted_count={len(generated_scripts)}"
+                )
     else:
         raise ValueError(f"unsupported stage for EMSeq entry: {stage}")
 

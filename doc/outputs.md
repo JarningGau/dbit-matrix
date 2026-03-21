@@ -1,6 +1,6 @@
 # Outputs Guide
 
-本页说明 TAPS 主线跑完后先看哪些结果，以及这些结果代表什么。`EMSeq` 当前已覆盖到 `align`，但仍不产出本页中的 `coverage`、`saturation` 或 `summary` 结果。
+本页说明 TAPS 主线跑完后先看哪些结果，以及这些结果代表什么。`EMSeq` 现在已覆盖到 `call`（会产出 `coverage`），但仍不产出 `saturation` 或 `summary` 结果。
 
 ## 推荐检查顺序
 
@@ -23,7 +23,9 @@
 ### calling
 
 - `work/<sample>/coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
+  不包含线粒体 contig（EMSeq 默认去除 `chrM`）
 - `work/<sample>/coverage/host_mito.CG.cov`
+  为线粒体 contig 的样本级汇总（EMSeq 默认由各 spot host coverage 中的 `chrM` 位点合并得到）
 - `work/<sample>/coverage/<spike_name>.CG.cov`
 
 ### saturation
@@ -64,7 +66,7 @@
 
 - `reads` 极低且大面积为 0：优先检查 `demux` 保留率和 `split` 输入
 - spike-in 缺失：先检查 `spike_in_index` 配置和 `align/pool` 的 spike 输出
-- `host_mito.CG.cov` 缺失：检查 `call` 是否执行，以及 `mbias` 的 host 抽样 BAM 是否可复用
+- `host_mito.CG.cov` 缺失：检查 `call` 是否执行，以及 `coverage/host/**/*.CG.cov` 是否已经生成
 - `saturation_rate` 为 `NA`：检查 `saturation` 是否执行，以及 `coverage/host/**/*.CG.cov` 和 `split_bams/per_spot_read_counts.tsv` 是否存在
 
 ## 相关文档

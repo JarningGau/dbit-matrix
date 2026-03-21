@@ -30,7 +30,14 @@
     "split_threads_write": 1,
     "split_smoke": true,
     "split_sort_jobs": 8,
-    "spike_in_index": {},
+    "call_reference_file": "/mnt/e/LiLab_HL/resource/biscuit/mm10/genome.fa",
+    "call_jobs": 8,
+    "call_mode": "host",
+    "call_host_threads": 8,
+    "call_spike_threads": 8,
+    "spike_in_index": {
+        "lambda": "/mnt/e/LiLab_HL/resource/biscuit/lambda/genome.fa"
+    },
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
@@ -62,6 +69,18 @@
                 "partition": "amd-ep2,intel-sc3",
                 "mem": "8G",
                 "cpus_per_task": 8
+            }
+        },
+        "call": {
+            "host": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "64G",
+                "cpus_per_task": 8
+            },
+            "spike": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "16G",
+                "cpus_per_task": 4
             }
         }
     }
