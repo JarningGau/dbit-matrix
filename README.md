@@ -1,60 +1,40 @@
 # DBiT-Matrix
 
-`DBiT-Matrix` 是面向空间 DNA 甲基化数据的工作流集合。当前正式主线是 `DBiT-DNAme-TAPS`；`EMSeq` 作为独立入口保留在试验阶段。
+空间 DNA 甲基化数据分析工作流。支持 **TAPS** 与 **EMSeq** 两种化学协议，共享 `work/<sample>/` 目录结构与下游产物路径。
 
-- 当前版本：`1.4.0`
-- 版本变化：`doc/log.md`
+- 版本：`1.5.0`
+- 变更记录：`doc/log.md`
 
-## 当前支持范围
+## 入口选择
 
-### TAPS 主线
+| 入口   | 编排脚本                | 配置示例                      |
+|--------|------------------------|-------------------------------|
+| TAPS   | `scripts/make_cmd.py`      | `workflow/dbit_taps_test.json`   |
+| EMSeq  | `scripts-emseq/make_cmd.py` | `workflow/dbit_emseq_test.json`  |
 
-- 协议：`DBiT-DNAme-TAPS`
-- 固定主流程：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
-- 入口脚本：`scripts/make_cmd.py`
-- 运行方式：`local`、`slurm`
-- 环境管理：统一使用 `pixi`
-- 配置入口：优先通过 `workflow/*.json`
-- 安全检查：所有 stage 支持 `--dry-run`
+主流程：
 
-### EMSeq 独立入口
+`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 
-- 当前状态：试验性 / MVP
-- 当前支持：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
-- 入口脚本：`scripts-emseq/make_cmd.py`（`--stage all` 时生成 `work/<sample>/commands/run.sh` 或 `run.sbatch`，按顺序串联上述各 stage）
-- 说明页面：`doc/emseq.md`
-- `mbias` 参考 asTair 的 TOP/BOT 方式，只统计 reference `CG` 位点
-- `call` 阶段默认将 `chrM` 从 `coverage/host/**/*.CG.cov` 中移除，并汇总为 `coverage/host_mito.CG.cov`
-- `summary` 复用 `scripts/summary.py`，产物路径与 TAPS 主线一致（见下方 `summary/` 与 `qc/saturation/`）
+`--stage all` 按序串联各 stage；所有 stage 支持 `--dry-run`。
 
-## 你会得到什么
+## 主要产物
 
-TAPS 主线最常用结果位于 `work/<sample>/`：
+`work/<sample>/` 下的核心输出：
 
-- `summary/sample_summary.tsv`
-- `summary/per_spot_summary.tsv`
-- `summary/reads_heatmap.png`
-- `summary/cpg_site_count_heatmap.png`
-- `summary/mean_methylation_heatmap.png`
-- `qc/saturation/saturation_curve.png`
-- `qc/saturation/saturation_summary.tsv`
-- `coverage/host/**/*.CG.cov`
-- `coverage/host_mito.CG.cov`
-- `coverage/<spike_name>.CG.cov`
+- `summary/sample_summary.tsv`、`summary/per_spot_summary.tsv`、`summary/*.heatmap.png`
+- `qc/saturation/saturation_curve.png`、`qc/saturation/saturation_summary.tsv`
+- `coverage/host/**/*.CG.cov`、`coverage/host_mito.CG.cov`、`coverage/<spike_name>.CG.cov`（可选）
 
-`summary/sample_summary.tsv` 当前除甲基化汇总外，还包含 `raw_reads`、`barcoded_reads`、`host_mapped_reads`、`host_valid_reads`、`<spike_name>_mapped_reads`、`barcoded_reads_rate`、`valid_reads_rate` 和 `saturation_rate`。
+字段说明与排错指南见 `doc/outputs.md`。
 
-## 三步快速开始
+## 快速开始
 
-1. 安装环境：
+### TAPS
 
-```bash
-pixi install
-```
-
-2. 复制 `workflow/dbit_taps_test.json`，先只修改最小必填字段：`sample_id`、`r1`、`r2`、参考路径、barcode 白名单。
-
-3. 先 dry-run，再真实运行：
+1. `pixi install`
+2. 复制 `workflow/dbit_taps_test.json`，配置必填字段：`sample_id`、`r1`、`r2`、参考路径、barcode 白名单
+3. 验证配置后提交：
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -70,9 +50,13 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
-如需提交到 Slurm，把 `--runner local` 改为 `--runner slurm`。
+Slurm 环境：`--runner local` 改为 `--runner slurm`。
 
-EMSeq 也可一键展开整条主线（先 dry-run，再生成驱动脚本或 `--submit`）：
+### EMSeq
+
+1. `pixi install`
+2. 复制 `workflow/dbit_emseq_test.json`，按 `doc/emseq.md` 配置必填字段（含 `split_barcodes`、`call_reference_file`、`call_jobs`）
+3. 验证配置后提交：
 
 ```bash
 pixi run python scripts-emseq/make_cmd.py \
@@ -84,42 +68,42 @@ pixi run python scripts-emseq/make_cmd.py \
 pixi run python scripts-emseq/make_cmd.py \
   --workflow-config workflow/dbit_emseq_test.json \
   --stage all \
-  --runner local
+  --runner local \
+  --submit
 ```
 
-## 跑完后先看什么
+Slurm 环境：`--runner local` 改为 `--runner slurm`；详见 `doc/emseq.md`。
 
-建议先看：
+## 结果检查顺序
 
 1. `summary/sample_summary.tsv`
 2. `summary/per_spot_summary.tsv`
 3. `summary/*.heatmap.png`
 4. `qc/saturation/saturation_summary.tsv`
 
-## 文档导航
+## 文档索引
 
-首次使用 TAPS，建议阅读：
-`README -> doc/setup.md -> doc/config.md -> doc/commands.md -> doc/outputs.md -> doc/stages.md`
+### TAPS
 
-### TAPS 用户
+`README` → `doc/setup.md` → `doc/config.md` → `doc/commands.md` → `doc/outputs.md` → `doc/stages.md`
 
-- `doc/setup.md`：环境、测试数据和准备材料
-- `doc/config.md`：`workflow/*.json` 最小必改项与常用字段
-- `doc/commands.md`：运行命令与 `local/slurm` 场景
-- `doc/outputs.md`：主要产物与查看顺序
+- `doc/setup.md`：环境配置与测试数据
+- `doc/config.md`：配置文件必填字段
+- `doc/commands.md`：运行命令（`local` / `slurm`）
+- `doc/outputs.md`：结果解读
 - `doc/stages.md`：各 stage 输入输出契约
 
-### EMSeq 用户
+### EMSeq
 
-- `doc/emseq.md`：EMSeq 当前支持范围、最小配置和首次运行命令
+- `doc/emseq.md`：EMSeq 配置与使用
 
-### 维护者 / 开发者
+### 维护者
 
-- `TEST.md`：TAPS 回归检查
-- `TEST-emseq.md`：EMSeq 回归检查
+- `TEST.md`：TAPS 回归测试
+- `TEST-emseq.md`：EMSeq 回归测试
 
-### 内部材料
+### 内部
 
-- `doc/progress.md`：里程碑、风险和下一步
-- `doc/log.md`：版本变化记录
-- `doc/TODO.md`：设计备忘和待决策事项
+- `doc/progress.md`：里程碑与风险
+- `doc/log.md`：版本记录
+- `doc/TODO.md`：待办事项

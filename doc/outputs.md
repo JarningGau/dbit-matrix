@@ -1,76 +1,74 @@
 # Outputs Guide
 
-本页说明 TAPS 主线跑完后先看哪些结果，以及这些结果代表什么。`EMSeq` 独立入口在跑完 `saturation` 与 `summary` 后，同样会产出 `qc/saturation/*` 与 `summary/*`（路径与 TAPS 一致）。
+结果解读与排错指南。完整路径与 stage 契约见 `doc/stages.md`。TAPS 与 EMSeq 的 `saturation` 与 `summary` 产物路径一致。
 
-## 推荐检查顺序
+## 检查顺序
 
-1. `summary/sample_summary.tsv`
-2. `summary/per_spot_summary.tsv`
-3. `summary/*.heatmap.png`
-4. `qc/saturation/saturation_summary.tsv`
-5. `qc/saturation/saturation_curve.png`
+1. `summary/sample_summary.tsv`：样本级总览
+2. `summary/per_spot_summary.tsv`：spot 级甲基化与 reads
+3. `summary/*.heatmap.png`：可视化
+4. `qc/saturation/saturation_summary.tsv` 与 `qc/saturation/saturation_curve.png`：饱和度
 
-## 主结果清单
+## Summary 文件
 
-### summary
+### `per_spot_summary.tsv`
 
-- `work/<sample>/summary/per_spot_summary.tsv`
-- `work/<sample>/summary/sample_summary.tsv`
-- `work/<sample>/summary/reads_heatmap.png`
-- `work/<sample>/summary/cpg_site_count_heatmap.png`
-- `work/<sample>/summary/mean_methylation_heatmap.png`
+每 spot 一行，固定列：
 
-### calling
+- `X_index`、`Y_index`、`spot`
+- `mean_methylation`、`cpg_site_count`、`reads`
+
+### `sample_summary.tsv`
+
+每样本一行；缺失输入保持固定列，对应位置写 `NA`。常见列：
+
+- `raw_reads`、`barcoded_reads`、`barcoded_reads_rate`
+- `host_mapped_reads`、`host_valid_reads`、`valid_reads_rate`
+- `<spike_name>_mapped_reads`（配置 spike 时）
+- `saturation_rate`：来自 `qc/saturation/saturation_summary.tsv`；未执行 `saturation` 或无结果时为 `NA`
+
+reads 数值可能为千分位格式。
+
+## Calling 与 QC 文件
+
+### Host per-spot coverage
 
 - `work/<sample>/coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
-  不包含线粒体 contig（EMSeq 默认去除 `chrM`）
+- **EMSeq**：默认剔除线粒体 contig（默认 `chrM`，由 `call_mito_chromosomes` 配置）
+
+### Host mito 聚合
+
 - `work/<sample>/coverage/host_mito.CG.cov`
-  为线粒体 contig 的样本级汇总（EMSeq 默认由各 spot host coverage 中的 `chrM` 位点合并得到）
-- `work/<sample>/coverage/<spike_name>.CG.cov`
+- **EMSeq**：优先由 `qc/mbias/host.subsampled.sorted.bam` 经 pileup 生成；若该 BAM 不存在，则从各 spot `coverage/host/**/*.CG.cov` 汇总线粒体位点（默认 `chrM`）
+- 上游依赖：`call`；与 `mbias` 是否产出 host subsampled BAM 相关，见 `doc/stages.md`
 
-### saturation
+### Spike 聚合（可选）
 
-- `work/<sample>/qc/saturation/saturation_curve.png`
+- `work/<sample>/coverage/<spike_name>.CG.cov`（配置 `spike_in_index` 且执行对应 calling）
+
+### Saturation
+
 - `work/<sample>/qc/saturation/saturation_summary.tsv`
+- `work/<sample>/qc/saturation/saturation_curve.png`
+- `summary` 读取 `saturation_rate` 写入 `sample_summary.tsv`
 
 ### mbias QC
 
-- `work/<sample>/qc/mbias/*.mbias.tsv`
-- `work/<sample>/qc/mbias/*.mbias.png`
+- `work/<sample>/qc/mbias/*.mbias.tsv`、`.mbias.png`
+- 用于 M-bias 诊断；与 `call` 中 `host_mito` 是否优先用 subsampled BAM 相关，见 `doc/stages.md`
 
-## 关键字段解释
+## 常见问题排查
 
-`per_spot_summary.tsv` 固定包含：
-
-- `X_index`
-- `Y_index`
-- `spot`
-- `mean_methylation`
-- `cpg_site_count`
-- `reads`
-
-`sample_summary.tsv` 固定列输出样本级结果；缺失输入会写 `NA`，不会改变列结构。除甲基化汇总外，当前还包含：
-
-- `raw_reads`
-- `barcoded_reads`
-- `barcoded_reads_rate`
-- `host_mapped_reads`
-- `host_valid_reads`
-- `<spike_name>_mapped_reads`
-- `valid_reads_rate`
-- `saturation_rate`
-
-其中 `saturation_rate` 来自 `qc/saturation/saturation_summary.tsv`；若 `saturation` 未执行或无可用结果，则写 `NA`。
-
-## 常见判断
-
-- `reads` 极低且大面积为 0：优先检查 `demux` 保留率和 `split` 输入
-- spike-in 缺失：先检查 `spike_in_index` 配置和 `align/pool` 的 spike 输出
-- `host_mito.CG.cov` 缺失：检查 `call` 是否执行，以及 `coverage/host/**/*.CG.cov` 是否已经生成
-- `saturation_rate` 为 `NA`：检查 `saturation` 是否执行，以及 `coverage/host/**/*.CG.cov` 和 `split_bams/per_spot_read_counts.tsv` 是否存在
+| 现象 | 检查项 |
+|------|--------|
+| `reads` 极低或大面积为 0 | `demux` 保留率、`demux/*.stats.json`、`split` 输入 |
+| spike-in 相关缺失 | `spike_in_index`、`align`/`pool`/`call_mode` |
+| `host_mito.CG.cov` 缺失或异常 | `call` 是否成功；`qc/mbias/host.subsampled.sorted.bam` 是否存在 |
+| `saturation_rate` 为 `NA` | 是否执行 `saturation`；`coverage/host/**/*.CG.cov` 与 `split_bams/per_spot_read_counts.tsv` 是否存在 |
 
 ## 相关文档
 
-- `doc/stages.md`：每个 stage 的输入输出契约
-- `doc/commands.md`：如何只跑某个 stage
-- `TEST.md`：维护者回归检查
+- `doc/stages.md`：各 stage 输入输出契约
+- `doc/commands.md`：TAPS 单 stage 运行
+- `doc/emseq.md`：EMSeq 入口与配置
+- `TEST.md` / `TEST-emseq.md`：维护者回归

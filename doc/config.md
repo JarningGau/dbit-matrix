@@ -1,39 +1,37 @@
 # Config Guide
 
-本页说明 `workflow/*.json` 的常用配置，重点回答“首次跑自己的数据时哪些字段必须先改”。运行命令请看 `doc/commands.md`，EMSeq 独立入口请看 `doc/emseq.md`。
+配置文件 `workflow/*.json` 说明。运行命令见 `doc/commands.md`，EMSeq 见 `doc/emseq.md`。
 
-## 推荐做法
+## 配置流程
 
-1. 复制 `workflow/dbit_taps_test.json` 到你自己的配置文件。
-2. 先只修改“最小必改字段”。
-3. 先执行 `--dry-run`，确认命令展开和路径解析正确。
-4. 跑通后再调线程数、并行度和 Slurm 资源。
+1. 复制 `workflow/dbit_taps_test.json` 为新配置文件
+2. 修改必填字段
+3. 执行 `--dry-run` 验证路径解析
+4. 按需调整线程数、并行度与 Slurm 资源
 
-## 最小必改字段
+## 必填字段
 
-下面字段通常必须先改：
-
-- `sample_id`：样本名，会决定 `work/<sample>/` 目录名
+- `sample_id`：样本名，决定 `work/<sample>/` 目录
 - `r1`、`r2`：原始 FASTQ 路径
 - `barcode1_whitelist`、`barcode2_whitelist`：barcode 白名单
 - `bwa_index`：host 比对索引
-- `call_reference_file`：calling 用参考
-- `spike_in_index`：可选；有 spike-in 时建议显式设置
+- `call_reference_file`：calling 参考序列
+- `spike_in_index`：可选，配置 spike-in 时需显式设置
 
-如果你跑 `slurm`，还需要确认每个 stage 的资源字段：
+Slurm 环境需额外配置各 stage 资源：
 
 - `slurm.<stage>.partition`
 - `slurm.<stage>.mem`
 - `slurm.<stage>.cpus_per_task`
 
-## 常改字段
+## 常用字段
 
 ### 运行控制
 
 - `runner`：`local` 或 `slurm`
-- `stage`：建议完整流程显式传 `all`
+- `stage`：完整流程使用 `all`
 - `work_root`：工作目录根路径
-- `number_of_split_parts`：`fastp_split` 的 chunk 数
+- `number_of_split_parts`：`fastp_split` chunk 数
 
 ### demux
 
@@ -59,11 +57,11 @@
 - `call_r2_left_trimming` / `call_r2_right_trimming`
 - `saturation_reads_threshold`
 
-`call_r1_*_trimming` 和 `call_r2_*_trimming` 按原始 read 两端的 cycle 定义生效，对 reverse-strand 比对同样保持 left/right 端语义。
+`call_r1_*_trimming` 与 `call_r2_*_trimming` 按原始 read 两端 cycle 定义，reverse-strand 比对保持 left/right 端语义。
 
-## spike_in_index 写法
+## spike_in_index 格式
 
-支持两种写法：
+支持两种格式：
 
 1. JSON 对象：
 
@@ -81,20 +79,21 @@
 --spike-in-index puc19=/path/to/puc19.fa
 ```
 
-## EMSeq 入口的配置差异
+## EMSeq 配置差异
 
-EMSeq 当前支持 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`，应从 `workflow/dbit_emseq_test.json` 复制配置，并重点关注：
+EMSeq 从 `workflow/dbit_emseq_test.json` 复制配置，主要差异：
 
-- `fastp_split` 最小字段：`sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin`
-- `demux_extract_bc` 额外字段：`barcode1_whitelist`、`barcode2_whitelist`、`linker1`、`linker2`、`tn5`
-- `align` 额外字段：`biscuit_reference`、`biscuit_threads`、`biscuit_batch_size`、`biscuit_bin`、`sinto_bin`、`samtools_bin`
-- demux 的可调参数与 `scripts-emseq/extract_bc.py` 对齐：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
-- 下游 stage 与 TAPS 共享同一套 `work/<sample>/` 目录契约；编排入口为 `scripts-emseq/make_cmd.py`
-- Slurm 场景按 stage 分别配置 `slurm.<stage>.*`（如 `slurm.split.split_bams`、`slurm.mbias.host`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`）
+- `fastp_split`：`sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin`
+- `demux_extract_bc`：`barcode1_whitelist`、`barcode2_whitelist`、`linker1`、`linker2`、`tn5`
+- `align`：`biscuit_reference`、`biscuit_threads`、`biscuit_batch_size`、`biscuit_bin`、`sinto_bin`、`samtools_bin`
+- **`split` 必填**：`split_barcodes`
+- **`call` 必填**：`call_reference_file`、`call_jobs`
+- demux 可调参数：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
+- Slurm 按 stage 配置：`slurm.split.split_bams`、`slurm.mbias.host`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`
 
-可选字段：`mbias_script`、`mbias_mode`、`mbias_host_subsample_fraction`、`mbias_max_cycle`、`mbias_min_mapping_quality`；详见 `doc/emseq.md`。
+可选字段详见 `doc/emseq.md`。
 
-## 最小检查命令
+## 配置验证
 
 ```bash
 pixi run python scripts/make_cmd.py \
@@ -104,5 +103,4 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
-如果你看到 stage 顺序为
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`，且无路径错误，说明配置基本可用。
+输出 stage 顺序为 `fastp_split -> ... -> summary` 且无路径错误，表示配置有效。

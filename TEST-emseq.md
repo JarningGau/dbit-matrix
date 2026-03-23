@@ -1,283 +1,104 @@
 # TEST-EMSeq (Maintainer)
 
-本页是 `EMSeq` 独立入口的维护者回归文档。当前覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`。用户入口说明请看 `doc/emseq.md`。
+EMSeq 独立入口维护者回归。用户说明见 `doc/emseq.md`；输入输出契约见 `doc/stages.md`。
 
-## 当前范围
+## 范围
 
-- 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，以及 **`all`**（生成 `commands/run.sh` / `run.sbatch` 串联全流程）
-- 单步执行实现：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`
-- 单步执行实现：`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
+- 入口：`scripts-emseq/make_cmd.py`
+- Stages：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，以及 `all`（生成 `commands/run.sh` / `run.sbatch` 串联全流程）
+- 单步脚本：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`、`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
 - 样例配置：`workflow/dbit_emseq_test.json`
 
 ## 最小验收
 
-提交前建议至少执行以下 3 组检查：
+提交前至少完成：
 
-1. CLI 可用。
-2. 九个具名 stage 在 `local` 与 `slurm` 下都能正确 dry-run；并额外验证 `--stage all` 在 `local` 与 `slurm` 下 dry-run（不落盘）。
-3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary` 的本地真实生成（可逐 stage，也可 `--stage all` 生成 `run.sh` 后按需执行）。
+1. CLI `--help` 可用
+2. 九个具名 stage 在 `local` 与 `slurm` 下均能 dry-run；`--stage all` 在 `local` 与 `slurm` 下 dry-run（不落盘）
+3. 用样例配置完成一次全流程本地真实生成（可逐 stage，也可 `--stage all` 生成 `run.sh` 后执行）
 
-CLI：
+### CLI
 
 ```bash
 pixi run python scripts-emseq/make_cmd.py --help
 ```
 
-`local` dry-run：
+### Dry-run：`local`（九个 stage + `all`）
 
 ```bash
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage fastp_split \
-  --runner local \
-  --dry-run
+CFG=workflow/dbit_emseq_test.json
+STAGES="fastp_split demux_extract_bc align pool split mbias call saturation summary"
+for stage in $STAGES; do
+  pixi run python scripts-emseq/make_cmd.py \
+    --workflow-config "$CFG" \
+    --stage "$stage" \
+    --runner local \
+    --dry-run
+done
 
 pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage demux_extract_bc \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage align \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage pool \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage split \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage mbias \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage call \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage saturation \
-  --runner local \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage summary \
-  --runner local \
-  --dry-run
-```
-
-`all`（整条主线展开，不落盘）：
-
-```bash
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
+  --workflow-config "$CFG" \
   --stage all \
   --runner local \
   --dry-run
 ```
 
-`slurm` dry-run：
+### Dry-run：`slurm`（九个 stage + `all`）
 
-```bash
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage fastp_split \
-  --runner slurm \
-  --dry-run
+将上述命令中 `--runner local` 改为 `--runner slurm`。
 
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage demux_extract_bc \
-  --runner slurm \
-  --dry-run
+### 通过标准（dry-run）
 
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage align \
-  --runner slurm \
-  --dry-run
+- 命令正常展开，无缺失参数、无路径解析错误
+- 各 stage 调用对应脚本（含 `scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`）
+- 输出目录指向 `shard_fastq`、`demux`、`align_shards`、`pooled`、`split_bams`、`qc/mbias`、`pileup`、`coverage`、`qc/saturation`、`summary` 等预期位置
+- `slurm` dry-run 中工具路径解析到当前 `pixi` 环境，或显式传入 `--*-bin`
 
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage pool \
-  --runner slurm \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage split \
-  --runner slurm \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage mbias \
-  --runner slurm \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage call \
-  --runner slurm \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage saturation \
-  --runner slurm \
-  --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage summary \
-  --runner slurm \
-  --dry-run
-```
-
-`all` + `slurm` dry-run：
-
-```bash
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage all \
-  --runner slurm \
-  --dry-run
-```
-
-通过标准：
-
-- 命令正常展开
-- `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` / `mbias` / `call` / `saturation` / `summary` 分别调用对应脚本（含 `scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py` 与 `scripts/summary.py`）
-- 输出目录分别指向 `shard_fastq`、`demux`、`align_shards`、`pooled`、`split_bams`、`qc/mbias`（`mbias` stage）、`pileup`、`coverage`、`qc/saturation`（`saturation` stage）、`summary`（`summary` stage）
-- 无参数缺失、无路径解析错误
-- `slurm` dry-run 中工具路径应解析到当前 `pixi` 环境，或显式使用用户传入的 `--*-bin`
-
-## 真实生成 Smoke
+## 真实生成 Smoke（本地）
 
 ```bash
 rm -rf work/test-DNAme-EMSeq
 
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage fastp_split \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage demux_extract_bc \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage align \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage pool \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage split \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage mbias \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage call \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage saturation \
-  --runner local \
-  --submit
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage summary \
-  --runner local \
-  --submit
+CFG=workflow/dbit_emseq_test.json
+STAGES="fastp_split demux_extract_bc align pool split mbias call saturation summary"
+for stage in $STAGES; do
+  pixi run python scripts-emseq/make_cmd.py \
+    --workflow-config "$CFG" \
+    --stage "$stage" \
+    --runner local \
+    --submit
+done
 ```
 
-## 输出检查点
+### 输出检查点
 
-Smoke 通过标准：
+Smoke 通过时至少存在（路径相对于 `work/<sample>/`）：
 
-- `work/<sample>/shard_fastq/*.R1.fq.gz`
-- `work/<sample>/shard_fastq/*.R2.fq.gz`
-- `work/<sample>/shard_fastq/fastp.html`
-- `work/<sample>/shard_fastq/fastp.json`
-- `work/<sample>/demux/*.R1.demux.fq.gz`
-- `work/<sample>/demux/*.R2.demux.fq.gz`
-- `work/<sample>/demux/*.R1.spike-in.fq.gz`
-- `work/<sample>/demux/*.R2.spike-in.fq.gz`
-- `work/<sample>/demux/*.stats.json`
-- `work/<sample>/align_shards/*.cb.bam`
-- 若配置了 `spike_in_index`：`work/<sample>/align_shards/*.<spike_name>.bam`
-- `work/<sample>/pooled/pooled.byCB.bam`
-- 若配置了 `spike_in_index`：`work/<sample>/pooled/pooled.<spike_name>.sorted.bam`
-- `work/<sample>/split_bams/per_spot_read_counts.tsv`
-- `work/<sample>/split_bams/**/*.sorted.bam`
-- `work/<sample>/qc/mbias/host.subsampled.sorted.bam`（及 `.bai`，`mbias_mode` 含 `host` 时）
-- `work/<sample>/qc/mbias/host.mbias.tsv`、`host.mbias.png`（同上）
-- `work/<sample>/pileup/**/*.vcf.gz`
-- `work/<sample>/pileup/**/*.vcf.gz.tbi`
-- `work/<sample>/coverage/host/**/*.CG.cov`
-- `work/<sample>/coverage/host_mito.CG.cov`
-- 若配置了 `spike_in_index`：`work/<sample>/coverage/<spike_name>.CG.cov`
-- `work/<sample>/qc/saturation/saturation_curve.png`
-- `work/<sample>/qc/saturation/saturation_summary.tsv`
-- `work/<sample>/summary/per_spot_summary.tsv`
-- `work/<sample>/summary/sample_summary.tsv`
-- `work/<sample>/summary/reads_heatmap.png`
-- `work/<sample>/summary/cpg_site_count_heatmap.png`
-- `work/<sample>/summary/mean_methylation_heatmap.png`
+- `shard_fastq/*.R1.fq.gz`、`*.R2.fq.gz`、`fastp.html`、`fastp.json`
+- `demux/*.R1.demux.fq.gz`、`*.R2.demux.fq.gz`、`*.R1.spike-in.fq.gz`、`*.R2.spike-in.fq.gz`、`*.stats.json`
+- `align_shards/*.cb.bam`；配置 `spike_in_index` 时：`align_shards/*.<spike_name>.bam`
+- `pooled/pooled.byCB.bam`；spike：`pooled/pooled.<spike_name>.sorted.bam`
+- `split_bams/per_spot_read_counts.tsv`、`split_bams/**/*.sorted.bam`
+- `qc/mbias/host.subsampled.sorted.bam`（及 `.bai`，`mbias_mode` 含 `host` 时）、`host.mbias.tsv`、`host.mbias.png`
+- `pileup/**/*.vcf.gz`（及 `.tbi`）
+- `coverage/host/**/*.CG.cov`、`coverage/host_mito.CG.cov`；spike：`coverage/<spike_name>.CG.cov`
+- `qc/saturation/saturation_curve.png`、`saturation_summary.tsv`
+- `summary/per_spot_summary.tsv`、`sample_summary.tsv`、`*.heatmap.png`
 
-关键行为检查：
+### 关键行为检查
 
-- chunk FASTQ 命名应保持与现有 `fastp_split` 契约一致
-- `align` 应使用 `demux/*.R1.demux.fq.gz` / `*.R2.demux.fq.gz` 作为 host 输入
-- 若配置了 `spike_in_index`，`align` 应先处理 `*.spike-in.fq.gz`，再处理 host 输入
-- 若 `spike_in_index` 为空，`pool` 应仅处理 host（不生成 spike/all 相关作业）
-- `mbias` 应调用 `scripts-emseq/mbias.py`；样例配置中 `mbias_mode: host` 时应生成 `commands/06_mbias.sh`（local）
-- `mbias` 应参考 asTair 的 TOP/BOT 方式，只在 reference `CG` 位点计数；不应退回到按 read 局部二核苷酸直接判定
-- 若存在 `qc/mbias/host.subsampled.sorted.bam`，`call` 应优先用它生成 `coverage/host_mito.CG.cov`；否则 `host_mito` 由 per-spot coverage 汇总的线粒体位点得到，默认仅汇总 `chrM`
-- `coverage/host/**/*.CG.cov` 不应再包含线粒体 contig 位点，默认不应包含 `chrM`
-- EMSeq 入口应支持 workflow stage `all` 与上述九个具名 stage；`stage=all` 时 `--dry-run` 不落盘；非 dry-run 时生成 `commands/run.sh`（local）或 `commands/run.sbatch`（slurm，client-side sbatch DAG 串联；`split` 仍为两作业链式依赖）
+- chunk FASTQ 命名与 `fastp_split` 契约一致
+- `align`：host 输入为 `demux/*.demux.fq.gz`；配置 `spike_in_index` 时先 spike-in 后 host
+- `spike_in_index` 为空时 `pool` 仅处理 host
+- `mbias` 调用 `scripts-emseq/mbias.py`；样例 `mbias_mode: host` 时 local 生成 `commands/06_mbias.sh`（具体以当前编排编号为准）
+- `mbias` 为 asTair TOP/BOT 风格，仅参考 `CG` 位点计数
+- 若存在 `qc/mbias/host.subsampled.sorted.bam`，`call` 优先用它生成 `coverage/host_mito.CG.cov`；否则由 per-spot coverage 汇总线粒体位点（默认 `chrM`）
+- `coverage/host/**/*.CG.cov` 不含线粒体 contig 位点（默认不含 `chrM`）
+- `stage=all` 时 `--dry-run` 不落盘；非 dry-run 时生成 `commands/run.sh`（local）或 `run.sbatch`（slurm，client-side sbatch DAG；`split` 仍为两作业链式依赖）
 
 ## 数据说明
 
-维护者在回归前，建议先确认 `workflow/dbit_emseq_test.json` 里的 `r1` / `r2` 路径与测试目录中的实际文件一致。  
-当前仓库中的 `test-DNAme-EMSeq` 目录可见原始数据文件名为：
+回归前确认 `workflow/dbit_emseq_test.json` 中 `r1` / `r2` 与仓库内数据一致。示例原始文件：
 
 - `data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_1.fq.gz`
 - `data/raw/test-DNAme-EMSeq/test_ME11_50um_DNAm_2.fq.gz`
