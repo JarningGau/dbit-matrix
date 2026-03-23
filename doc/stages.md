@@ -6,7 +6,7 @@ TAPS 固定主流程：
 
 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 
-EMSeq 当前是独立入口，已覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`（不含 `mbias`）。首次使用请看 `doc/emseq.md`。
+EMSeq 独立入口与 TAPS 主流程一致，已覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`；`mbias` 单步实现为 `scripts-emseq/mbias.py`（EMSeq bisulfite 风格判定，与 TAPS 的 `scripts/mbias.py` 化学规则不同）。首次使用请看 `doc/emseq.md`。
 
 ## 1. `fastp_split`
 
@@ -185,6 +185,7 @@ EMSeq 当前是独立入口，已覆盖 `fastp_split -> demux_extract_bc -> alig
 - 可显式切换到 `host` 或 `all`
 - host 从 `pooled.byCB.bam` 固定比例抽样，再排序并建立索引
 - `call` 的 `host_mito` 会优先复用 `qc/mbias/host.subsampled.sorted.bam`
+- EMSeq：`scripts-emseq/mbias.py` 参考 asTair 的 TOP/BOT 方式，只在参考 `CG` 位点计数；TOP (`99/147`) 以 `C/T` 判甲基化，BOT (`83/163`) 以 `G/A` 判甲基化，与 TAPS 的 `scripts/mbias.py` 不同
 - 本步骤只输出 QC，不自动修改 trimming 或 calling 参数
 
 ## 8. `call`
@@ -196,7 +197,7 @@ EMSeq 当前是独立入口，已覆盖 `fastp_split -> demux_extract_bc -> alig
 输入：
 
 - host per-spot：`split_bams/**/*.sorted.bam`
-- host mito aggregate：`qc/mbias/host.subsampled.sorted.bam`
+- host mito aggregate：优先 `qc/mbias/host.subsampled.sorted.bam`（EMSeq：存在则据此生成 `coverage/host_mito.CG.cov`；否则从 per-spot coverage 汇总线粒体位点）
 - spike-in：`pooled/pooled.<spike_name>.sorted.bam`
 
 输出：

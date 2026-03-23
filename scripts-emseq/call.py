@@ -8,6 +8,10 @@ Produces (TAPS-compatible) outputs:
   work/<sample>/coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov
   work/<sample>/coverage/host_mito.CG.cov
   work/<sample>/coverage/<spike_name>.CG.cov
+
+``host_mito.CG.cov`` prefers ``qc/mbias/host.subsampled.sorted.bam`` (from the
+``mbias`` stage) when present; otherwise mitochondrial sites are aggregated from
+per-spot host coverage after stripping ``mito_chromosomes`` from those files.
 """
 
 from __future__ import annotations
@@ -22,11 +26,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from scripts.host_subsample_bam import (  # type: ignore
-    HOST_SUBSAMPLE_SEED,
-    build_prepare_host_subsample_commands,
-    get_host_subsample_paths,
-)
+from scripts.host_subsample_bam import HOST_SUBSAMPLE_SEED  # type: ignore
 
 
 def parse_args() -> argparse.Namespace:
@@ -128,8 +128,10 @@ def parse_args() -> argparse.Namespace:
         default="chrM",
         help=(
             "Comma-separated host contigs treated as mitochondrial. "
-            "These contigs are extracted from coverage/host/**/*.CG.cov and "
-            "merged into coverage/host_mito.CG.cov. Default: chrM."
+            "They are removed from per-spot coverage/host/**/*.CG.cov; "
+            "host_mito.CG.cov is built from qc/mbias/host.subsampled.sorted.bam "
+            "when that file exists, else aggregated from stripped mito rows. "
+            "Default: chrM."
         ),
     )
     parser.add_argument(
@@ -331,31 +333,32 @@ def format_methylation_percent(methylated: int, unmethylated: int) -> str:
     return str(int(round((methylated / total) * 100)))
 
 
-def extract_host_mito_from_cov(
+def strip_mito_from_host_spot_covs_and_collect(
     cov_root: Path,
     mito_chromosomes: frozenset[str],
-    mito_out_cov: Path,
     *,
     dry_run: bool,
-) -> None:
+) -> dict[tuple[str, int, int], list[int]]:
+    """Remove mitochondrial rows from per-spot host ``*.CG.cov`` files and aggregate them."""
     host_covs = sorted(cov_root.rglob("*.CG.cov"))
     if not host_covs:
         if dry_run:
             print(
-                f"[emseq.call] dry_run_skip extract_host_mito_from_cov (no *.CG.cov yet under "
-                f"{cov_root}; would merge mito={sorted(mito_chromosomes)} -> {mito_out_cov})"
+                f"[emseq.call] dry_run_skip strip_mito_from_host_spot_covs (no *.CG.cov under "
+                f"{cov_root})"
             )
-            return
+            return {}
         raise ValueError(f"no host coverage files found under: {cov_root}/**/*.CG.cov")
 
     print(
-        f"[emseq.call] extract_host_mito_from_cov count={len(host_covs)} mito={sorted(mito_chromosomes)}"
+        f"[emseq.call] strip_mito_from_host_spot_covs count={len(host_covs)} "
+        f"mito={sorted(mito_chromosomes)}"
     )
     if dry_run:
         print(
-            f"[emseq.call] dry_run_refresh host cov files under {cov_root} and write {mito_out_cov}"
+            f"[emseq.call] dry_run_skip in-place strip of mito contigs from per-spot cov files"
         )
-        return
+        return {}
 
     mito_rows: dict[tuple[str, int, int], list[int]] = {}
     for cov_path in host_covs:
@@ -384,6 +387,13 @@ def extract_host_mito_from_cov(
         with cov_path.open("w", encoding="utf-8") as handle:
             handle.writelines(kept_lines)
 
+    return mito_rows
+
+
+def write_host_mito_aggregated(
+    mito_rows: dict[tuple[str, int, int], list[int]],
+    mito_out_cov: Path,
+) -> None:
     mito_out_cov.parent.mkdir(parents=True, exist_ok=True)
     with mito_out_cov.open("w", encoding="utf-8") as handle:
         for chrom, start, end in sorted(mito_rows):
@@ -402,6 +412,70 @@ def extract_host_mito_from_cov(
                 )
                 + "\n"
             )
+
+
+def filter_cov_file_to_mito_chromosomes(
+    src_cov: Path,
+    dst_cov: Path,
+    mito_chromosomes: frozenset[str],
+    *,
+    dry_run: bool,
+) -> None:
+    """Keep only rows whose chrom is in ``mito_chromosomes`` (6+ column .CG.cov)."""
+    if dry_run:
+        print(
+            f"[emseq.call] dry_run_skip filter_cov_file_to_mito_chromosomes "
+            f"{src_cov} -> {dst_cov}"
+        )
+        return
+    if not src_cov.exists():
+        raise ValueError(f"missing intermediate coverage for mito filter: {src_cov}")
+    dst_cov.parent.mkdir(parents=True, exist_ok=True)
+    with src_cov.open("r", encoding="utf-8") as src_f, dst_cov.open(
+        "w", encoding="utf-8"
+    ) as dst_f:
+        for line in src_f:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 6:
+                continue
+            if fields[0] in mito_chromosomes:
+                dst_f.write(line)
+
+
+def run_host_mito_from_mbias_bam(
+    args: argparse.Namespace,
+    work_path: Path,
+    mito_chromosomes: frozenset[str],
+    mito_out_cov: Path,
+) -> None:
+    """Pileup ``qc/mbias/host.subsampled.sorted.bam`` and write aggregated mito coverage."""
+    mbias_bam = work_path / "qc" / "mbias" / "host.subsampled.sorted.bam"
+    pileup_root = work_path / "pileup"
+    tmp_cov = work_path / "coverage" / "_host_mito_from_mbias_pooled.CG.cov"
+    out_vcf_gz = pileup_root / "host_mito_from_mbias_pooled.vcf.gz"
+
+    print(f"[emseq.call] host_mito_source={mbias_bam}")
+    ensure_pileup_vcf(
+        args=args,
+        reference_file=args.reference_file,
+        bam_file=mbias_bam,
+        out_vcf_gz=out_vcf_gz,
+        threads=args.host_threads,
+    )
+    ensure_coverage_from_vcf(
+        args=args,
+        reference_file=args.reference_file,
+        vcf_gz=out_vcf_gz,
+        out_cov=tmp_cov,
+    )
+    filter_cov_file_to_mito_chromosomes(
+        tmp_cov,
+        mito_out_cov,
+        mito_chromosomes,
+        dry_run=args.dry_run,
+    )
+    if not args.dry_run and tmp_cov.exists():
+        tmp_cov.unlink()
 
 
 def run_host_spots(args: argparse.Namespace, work_path: Path) -> Path:
@@ -450,13 +524,43 @@ def run_host_mito(
     mito_chromosomes: frozenset[str],
 ) -> None:
     mito_out_cov = work_path / "coverage" / "host_mito.CG.cov"
-    extract_host_mito_from_cov(
-        host_cov_root,
-        mito_chromosomes,
-        mito_out_cov,
-        dry_run=args.dry_run,
-    )
+    mbias_bam = work_path / "qc" / "mbias" / "host.subsampled.sorted.bam"
+    host_covs = sorted(host_cov_root.rglob("*.CG.cov"))
 
+    if host_covs:
+        mito_rows = strip_mito_from_host_spot_covs_and_collect(
+            host_cov_root,
+            mito_chromosomes,
+            dry_run=args.dry_run,
+        )
+    else:
+        mito_rows = {}
+        if args.dry_run:
+            print(
+                f"[emseq.call] dry_run: no per-spot *.CG.cov under {host_cov_root} yet"
+            )
+
+    if mbias_bam.exists():
+        run_host_mito_from_mbias_bam(
+            args, work_path, mito_chromosomes, mito_out_cov
+        )
+        print(f"[emseq.call] output_host_mito={mito_out_cov}")
+        return
+
+    if args.dry_run:
+        print(
+            f"[emseq.call] dry_run: would aggregate host_mito from per-spot mito rows "
+            f"-> {mito_out_cov} (no {mbias_bam})"
+        )
+        return
+
+    if not mito_rows and not host_covs:
+        raise ValueError(
+            f"cannot build host_mito.CG.cov: no per-spot coverage under {host_cov_root} "
+            f"and missing mbias host BAM {mbias_bam}"
+        )
+
+    write_host_mito_aggregated(mito_rows, mito_out_cov)
     print(f"[emseq.call] output_host_mito={mito_out_cov}")
 
 

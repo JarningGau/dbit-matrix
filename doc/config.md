@@ -83,16 +83,16 @@
 
 ## EMSeq 入口的配置差异
 
-EMSeq 当前支持 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`，应从 `workflow/dbit_emseq_test.json` 复制配置，并重点关注：
+EMSeq 当前支持 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`，应从 `workflow/dbit_emseq_test.json` 复制配置，并重点关注：
 
 - `fastp_split` 最小字段：`sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin`
 - `demux_extract_bc` 额外字段：`barcode1_whitelist`、`barcode2_whitelist`、`linker1`、`linker2`、`tn5`
 - `align` 额外字段：`biscuit_reference`、`biscuit_threads`、`biscuit_batch_size`、`biscuit_bin`、`sinto_bin`、`samtools_bin`
 - demux 的可调参数与 `scripts-emseq/extract_bc.py` 对齐：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
 - 下游 stage 与 TAPS 共享同一套 `work/<sample>/` 目录契约；编排入口为 `scripts-emseq/make_cmd.py`
-- Slurm 场景按 stage 分别配置 `slurm.<stage>.*`（如 `slurm.split.split_bams`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`）
+- Slurm 场景按 stage 分别配置 `slurm.<stage>.*`（如 `slurm.split.split_bams`、`slurm.mbias.host`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`）
 
-`workflow/dbit_emseq_test.json` 中若出现 `mbias` 等 TAPS-only 字段，应视为不适用 EMSeq 入口；完整说明见 `doc/emseq.md`。
+可选字段：`mbias_script`、`mbias_mode`、`mbias_host_subsample_fraction`、`mbias_max_cycle`、`mbias_min_mapping_quality`；详见 `doc/emseq.md`。
 
 ## 最小检查命令
 

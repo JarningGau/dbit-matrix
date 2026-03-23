@@ -30,6 +30,11 @@
     "split_threads_write": 1,
     "split_smoke": true,
     "split_sort_jobs": 8,
+    "mbias_script": "scripts-emseq/mbias.py",
+    "mbias_mode": "host",
+    "mbias_host_subsample_fraction": 0.1,
+    "mbias_max_cycle": 150,
+    "mbias_min_mapping_quality": 1,
     "call_reference_file": "/storage/liliLab/gaojianing/resource/biscuit/mm10/genome.fa",
     "call_jobs": 24,
     "call_mode": "host",
@@ -70,6 +75,18 @@
                 "partition": "amd-ep2,intel-sc3",
                 "mem": "8G",
                 "cpus_per_task": 8
+            }
+        },
+        "mbias": {
+            "host": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "32G",
+                "cpus_per_task": 4
+            },
+            "spike": {
+                "partition": "amd-ep2,intel-sc3",
+                "mem": "16G",
+                "cpus_per_task": 2
             }
         },
         "call": {

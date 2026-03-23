@@ -6,8 +6,8 @@
 
 - 当前状态：试验性 / MVP
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`
-- 当前不包含：`mbias(质控)`
+- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- `mbias` 单步脚本：`scripts-emseq/mbias.py`（bisulfite 风格 M-bias；参考 asTair 的 TOP/BOT 方式，仅统计 reference `CG` 位点；与 TAPS 的 `scripts/mbias.py` 判定规则不同）
 
 ## 与 TAPS 的主要差异
 
@@ -52,9 +52,16 @@
 
 - `spike_in_index`
 
+可调的 mbias 参数：
+
+- `mbias_script`：默认 `scripts-emseq/mbias.py`
+- `mbias_mode`：`all` / `host` / `spike`（默认 `spike`）；`all` 或 `host` 需要 `call_reference_file`；`all` 或 `spike` 需要 `spike_in_index`
+- `mbias_host_subsample_fraction`、`mbias_max_cycle`、`mbias_min_mapping_quality`
+- Slurm：`slurm.mbias.host` / `slurm.mbias.spike`（partition / mem / cpus_per_task）
+
 可调的 call 参数：
 
-- `call_mito_chromosomes`：host 中哪些 contig 视为线粒体。默认 `chrM`；这些位点会从 `coverage/host/**/*.CG.cov` 中抽出并合并到 `coverage/host_mito.CG.cov`。
+- `call_mito_chromosomes`：host 中哪些 contig 视为线粒体。默认 `chrM`；会从 per-spot `coverage/host/**/*.CG.cov` 中剔除这些 contig；`coverage/host_mito.CG.cov` 优先由 `qc/mbias/host.subsampled.sorted.bam` 经 pileup 得到（若该 BAM 不存在，则从 per-spot 文件中汇总的线粒体位点生成）。
 
 可调的 saturation 参数（复用 `scripts/saturation.py`，在 `call` 之后运行）：
 
@@ -122,6 +129,16 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
+再检查 `mbias`（需已有 `pooled/` BAM；`mbias_mode` 为 `host` 时需配置 `call_reference_file`）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage mbias \
+  --runner local \
+  --dry-run
+```
+
 最后检查 `call`：
 
 ```bash
@@ -185,12 +202,18 @@ pixi run python scripts-emseq/make_cmd.py \
 - `work/<sample>/split_bams/**/*.sorted.bam`
 - `work/<sample>/split_bams/**/*.sorted.bam.bai`
 
+`mbias` 后（与 TAPS 相同路径；计数逻辑见 `scripts-emseq/mbias.py`）：
+
+- `work/<sample>/qc/mbias/host.subsampled.sorted.bam`（及 `.bai`）
+- `work/<sample>/qc/mbias/host.mbias.tsv`、`host.mbias.png`
+- 若含 spike：`work/<sample>/qc/mbias/<spike_name>.mbias.tsv`、`.mbias.png`
+
 `call` 后（兼容 TAPS coverage 契约）：
 
 - `work/<sample>/pileup/**/*.vcf.gz`
 - `work/<sample>/pileup/**/*.vcf.gz.tbi`
 - `work/<sample>/coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`（已移除 `call_mito_chromosomes` 指定的 contig，默认不含 `chrM`）
-- `work/<sample>/coverage/host_mito.CG.cov`（由 `coverage/host/**/*.CG.cov` 中对应 contig 汇总得到，默认仅汇总 `chrM`）
+- `work/<sample>/coverage/host_mito.CG.cov`（优先由 `qc/mbias/host.subsampled.sorted.bam` pileup 得到；否则由 per-spot coverage 汇总的线粒体位点得到，默认仅汇总 `chrM`）
 - 若配置了 `spike_in_index`：`work/<sample>/coverage/<spike_name>.CG.cov`
 
 `saturation` 后（与 TAPS 相同产物路径）：

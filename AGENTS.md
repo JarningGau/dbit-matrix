@@ -5,10 +5,10 @@
 
 ## 当前阶段
 
-- 主线固定（EMSeq 独立入口）：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`
-- 当前已闭环（EMSeq MVP）：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`call`、`saturation`、`summary`
-- 当前主里程碑：`split -> call -> saturation -> summary` 端到端最小闭环验收
-- 说明：`mbias` 仍属 TAPS 主线范围；EMSeq 入口当前不包含 `mbias`。
+- 主线固定（EMSeq 独立入口）：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- 当前已闭环（EMSeq MVP）：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`
+- 当前主里程碑：`split -> mbias -> call -> saturation -> summary` 端到端最小闭环验收
+- 说明：`mbias` 单步实现为 `scripts-emseq/mbias.py`（与 TAPS 的 `scripts/mbias.py` 化学判定不同）。
 
 ## 必须遵守
 
@@ -28,6 +28,7 @@
 - `align`：每个 chunk 一个 sbatch；单脚本内顺序执行 spike-in -> host。
 - `pool`：拆成两个 job，一个 spike-in，一个 host。
 - `split`：`split_bams` 与 `sort` 分成两个 sbatch，并用依赖关系串联。
+- `mbias`：按 host/spike 拆分 sbatch；资源配置使用 `slurm.mbias.host` / `slurm.mbias.spike`。
 - `call`：按 host/spike 拆分 sbatch（host 1 个；spike 按 `spike_name` 可为多个），资源配置保持 step-specific（如 `slurm.call.host` / `slurm.call.spike`）。
 - `saturation`：单 job 一个 sbatch；资源配置使用 `slurm.saturation`。
 - `summary`：单 job 一个 sbatch；资源配置使用 `slurm.summary`。

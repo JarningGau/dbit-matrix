@@ -8,6 +8,7 @@ This is an EMSeq-only entrypoint that supports:
 - `align`
 - `pool`
 - `split`
+- `mbias`
 - `call`
 - `saturation`
 - `summary`
@@ -33,6 +34,7 @@ STAGE_SEQUENCE = [
     "align",
     "pool",
     "split",
+    "mbias",
     "call",
     "saturation",
     "summary",
@@ -51,6 +53,7 @@ STAGE_REQUIRED_FIELDS = {
     ],
     "pool": [],
     "split": ["split_barcodes"],
+    "mbias": [],
     "call": ["call_reference_file", "call_jobs"],
     "saturation": [],
     "summary": [],
@@ -268,6 +271,34 @@ def parse_args() -> argparse.Namespace:
             "Spike-in reference in NAME=INDEX format. "
             "May be specified multiple times."
         ),
+    )
+    # M-bias stage (scripts-emseq/mbias.py; runs after split, before call).
+    parser.add_argument(
+        "--mbias-script",
+        help=(
+            "Path to EMSeq mbias script. "
+            "Default: scripts-emseq/mbias.py."
+        ),
+    )
+    parser.add_argument(
+        "--mbias-mode",
+        choices=["all", "host", "spike"],
+        help="mbias mode: host+spike, host only, or spike only. Default: spike.",
+    )
+    parser.add_argument(
+        "--mbias-host-subsample-fraction",
+        type=float,
+        help="Host subsampling fraction for mbias stage. Default: 0.1.",
+    )
+    parser.add_argument(
+        "--mbias-max-cycle",
+        type=int,
+        help="Maximum read cycle for mbias stage. Default: 150.",
+    )
+    parser.add_argument(
+        "--mbias-min-mapping-quality",
+        type=int,
+        help="Minimum mapping quality for mbias stage. Default: 1.",
     )
     # Saturation stage (reuses scripts/saturation.py; runs after call).
     parser.add_argument(
@@ -518,6 +549,42 @@ def build_split_sort_command(args: argparse.Namespace, sample_work: Path) -> str
     return quoted(command)
 
 
+def build_mbias_command(
+    args: argparse.Namespace,
+    sample_work: Path,
+    mode: str,
+    spike_name: str | None = None,
+) -> str:
+    """Build scripts-emseq/mbias.py invocation."""
+    script_path = Path(args.mbias_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--mode",
+        mode,
+        "--samtools-bin",
+        args.samtools_bin,
+        "--samtools-threads",
+        str(args.samtools_threads),
+        "--host-subsample-fraction",
+        str(args.mbias_host_subsample_fraction),
+        "--max-cycle",
+        str(args.mbias_max_cycle),
+        "--min-mapping-quality",
+        str(args.mbias_min_mapping_quality),
+    ]
+    if mode in ("all", "host"):
+        command.extend(["--reference-file", args.call_reference_file])
+    if mode in ("all", "spike"):
+        for item in args.spike_in_index:
+            command.extend(["--spike-reference", item])
+    if spike_name:
+        command.extend(["--spike-in-name", spike_name])
+    return quoted(command)
+
+
 def build_call_command(
     args: argparse.Namespace,
     sample_work: Path,
@@ -668,6 +735,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         stage_slurm_cfg, "sort", {"split_bams", "sort"}
     )
 
+    mbias_stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, "mbias")
+    mbias_host_slurm_cfg = resolve_step_slurm_cfg(
+        mbias_stage_slurm_cfg, "host", {"host", "spike"}
+    )
+    mbias_spike_slurm_cfg = resolve_step_slurm_cfg(
+        mbias_stage_slurm_cfg, "spike", {"host", "spike"}
+    )
+
     settings = {
         "runner": pick(args.runner, cfg.get("runner")),
         "stage": stage,
@@ -744,6 +819,17 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_mito_chromosomes, cfg.get("call_mito_chromosomes")
         ),
         "spike_in_index": pick(args.spike_in_index, cfg.get("spike_in_index")),
+        # M-bias stage.
+        "mbias_script": pick(args.mbias_script, cfg.get("mbias_script")),
+        "mbias_mode": pick(args.mbias_mode, cfg.get("mbias_mode")),
+        "mbias_host_subsample_fraction": pick(
+            args.mbias_host_subsample_fraction,
+            cfg.get("mbias_host_subsample_fraction"),
+        ),
+        "mbias_max_cycle": pick(args.mbias_max_cycle, cfg.get("mbias_max_cycle")),
+        "mbias_min_mapping_quality": pick(
+            args.mbias_min_mapping_quality, cfg.get("mbias_min_mapping_quality")
+        ),
         # Saturation stage.
         "saturation_script": pick(args.saturation_script, cfg.get("saturation_script")),
         "saturation_reads_threshold": pick(
@@ -924,6 +1010,33 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
 
+    settings["mbias_script"] = settings["mbias_script"] or "scripts-emseq/mbias.py"
+    settings["mbias_mode"] = settings["mbias_mode"] or "spike"
+    if settings["mbias_mode"] not in {"all", "host", "spike"}:
+        raise ValueError("mbias_mode must be one of: all, host, spike")
+    settings["mbias_host_subsample_fraction"] = (
+        float(settings["mbias_host_subsample_fraction"])
+        if settings["mbias_host_subsample_fraction"] is not None
+        else 0.1
+    )
+    if (
+        settings["mbias_host_subsample_fraction"] <= 0
+        or settings["mbias_host_subsample_fraction"] > 1
+    ):
+        raise ValueError("mbias_host_subsample_fraction must be in (0, 1]")
+    settings["mbias_max_cycle"] = (
+        int(settings["mbias_max_cycle"]) if settings["mbias_max_cycle"] is not None else 150
+    )
+    if settings["mbias_max_cycle"] <= 0:
+        raise ValueError("mbias_max_cycle must be > 0")
+    settings["mbias_min_mapping_quality"] = (
+        int(settings["mbias_min_mapping_quality"])
+        if settings["mbias_min_mapping_quality"] is not None
+        else 1
+    )
+    if settings["mbias_min_mapping_quality"] < 0:
+        raise ValueError("mbias_min_mapping_quality must be >= 0")
+
     # Step-specific slurm for split.
     settings["split_bams_slurm_partition"] = (
         pick(args.slurm_partition, split_bams_slurm_cfg.get("partition"))
@@ -980,6 +1093,29 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         or settings["slurm_cpus_per_task"]
     )
 
+    settings["mbias_host_slurm_partition"] = (
+        pick(args.slurm_partition, mbias_host_slurm_cfg.get("partition"))
+        or settings["slurm_partition"]
+    )
+    settings["mbias_host_slurm_mem"] = (
+        pick(args.slurm_mem, mbias_host_slurm_cfg.get("mem")) or settings["slurm_mem"]
+    )
+    settings["mbias_host_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, mbias_host_slurm_cfg.get("cpus_per_task"))
+        or settings["slurm_cpus_per_task"]
+    )
+    settings["mbias_spike_slurm_partition"] = (
+        pick(args.slurm_partition, mbias_spike_slurm_cfg.get("partition"))
+        or settings["slurm_partition"]
+    )
+    settings["mbias_spike_slurm_mem"] = (
+        pick(args.slurm_mem, mbias_spike_slurm_cfg.get("mem")) or settings["slurm_mem"]
+    )
+    settings["mbias_spike_slurm_cpus_per_task"] = (
+        pick(args.slurm_cpus_per_task, mbias_spike_slurm_cfg.get("cpus_per_task"))
+        or settings["slurm_cpus_per_task"]
+    )
+
     settings["slurm_output"] = settings["slurm_output"] or str(
         Path(settings["work_root"])
         / settings["sample_id"]
@@ -1008,6 +1144,19 @@ def normalize_spike_in_index(raw) -> list[str]:
             items.append(f"{name}={index}")
         return items
     raise ValueError("spike_in_index must be either an object or an array")
+
+
+def validate_mbias_settings(settings: dict) -> None:
+    """Extra validation for mbias stage (not covered by STAGE_REQUIRED_FIELDS)."""
+    mode = settings["mbias_mode"]
+    if mode in ("all", "host") and not settings.get("call_reference_file"):
+        raise ValueError(
+            "mbias stage requires call_reference_file when mbias_mode is all or host"
+        )
+    if mode in ("all", "spike") and not parse_spike_names(settings["spike_in_index"]):
+        raise ValueError(
+            "mbias stage requires spike_in_index when mbias_mode is all or spike"
+        )
 
 
 def generate_local_script(command: str, output_path: Path) -> None:
@@ -1082,6 +1231,8 @@ def main() -> int:
     args = parse_args()
     settings = resolve_settings(args)
     settings["spike_in_index"] = normalize_spike_in_index(settings["spike_in_index"])
+    if settings["stage"] == "mbias":
+        validate_mbias_settings(settings)
 
     sample_work = Path(settings["work_root"]) / settings["sample_id"]
     command_dir = sample_work / "commands"
@@ -1499,6 +1650,124 @@ def main() -> int:
                         ["bash", str(split_submit_helper_path)], check=True
                     )
                     print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "mbias":
+        command_args = argparse.Namespace(
+            samtools_bin=settings["samtools_bin"],
+            samtools_threads=settings["samtools_threads"],
+            mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
+            mbias_max_cycle=settings["mbias_max_cycle"],
+            mbias_min_mapping_quality=settings["mbias_min_mapping_quality"],
+            mbias_script=settings["mbias_script"],
+            call_reference_file=settings["call_reference_file"],
+            spike_in_index=settings["spike_in_index"],
+        )
+
+        print(f"[emseq.make_cmd] runner={settings['runner']}")
+        print(f"[emseq.make_cmd] stage={stage}")
+        print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+        print(f"[emseq.make_cmd] mbias_mode={settings['mbias_mode']}")
+
+        if settings["runner"] == "local":
+            script_path = command_dir / "06_mbias.sh"
+            command = build_mbias_command(
+                command_args,
+                sample_work,
+                settings["mbias_mode"],
+            )
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            mbias_mode = settings["mbias_mode"]
+            include_host = mbias_mode in ("all", "host")
+            include_spike = mbias_mode in ("all", "spike")
+            generated_scripts: list[Path] = []
+
+            if include_host:
+                host_script_path = command_dir / "06_mbias_host.sbatch"
+                host_job_name = f"emseq_mbias_host_{settings['sample_id']}"
+                host_command = build_mbias_command(
+                    command_args, sample_work, "host"
+                )
+                host_output = (settings["slurm_output"] or "").replace(
+                    "%x", host_job_name
+                )
+                host_error = (settings["slurm_error"] or "").replace(
+                    "%x", host_job_name
+                )
+                host_slurm_settings = {
+                    "sample_id": settings["sample_id"],
+                    "stage": stage,
+                    "slurm_partition": settings["mbias_host_slurm_partition"],
+                    "slurm_mem": settings["mbias_host_slurm_mem"],
+                    "slurm_cpus_per_task": settings["mbias_host_slurm_cpus_per_task"],
+                    "slurm_output": host_output,
+                    "slurm_error": host_error,
+                    "job_name": host_job_name,
+                }
+                print(f"[emseq.make_cmd] script={host_script_path}")
+                print(f"[emseq.make_cmd] command={host_command}")
+                if not settings["dry_run"]:
+                    generate_slurm_script(
+                        host_command, host_script_path, log_dir, host_slurm_settings
+                    )
+                    print(f"[emseq.make_cmd] generated={host_script_path}")
+                generated_scripts.append(host_script_path)
+
+            if include_spike:
+                for spike_name in parse_spike_names(settings["spike_in_index"]):
+                    spike_script_path = (
+                        command_dir / f"06_mbias_spike_{spike_name}.sbatch"
+                    )
+                    spike_job_name = (
+                        f"emseq_mbias_spike_{settings['sample_id']}_{spike_name}"
+                    )
+                    spike_command = build_mbias_command(
+                        command_args,
+                        sample_work,
+                        "spike",
+                        spike_name=spike_name,
+                    )
+                    spike_output = (settings["slurm_output"] or "").replace(
+                        "%x", spike_job_name
+                    )
+                    spike_error = (settings["slurm_error"] or "").replace(
+                        "%x", spike_job_name
+                    )
+                    spike_slurm_settings = {
+                        "sample_id": settings["sample_id"],
+                        "stage": stage,
+                        "slurm_partition": settings["mbias_spike_slurm_partition"],
+                        "slurm_mem": settings["mbias_spike_slurm_mem"],
+                        "slurm_cpus_per_task": settings["mbias_spike_slurm_cpus_per_task"],
+                        "slurm_output": spike_output,
+                        "slurm_error": spike_error,
+                        "job_name": spike_job_name,
+                    }
+                    print(f"[emseq.make_cmd] script={spike_script_path}")
+                    print(f"[emseq.make_cmd] command={spike_command}")
+                    if not settings["dry_run"]:
+                        generate_slurm_script(
+                            spike_command,
+                            spike_script_path,
+                            log_dir,
+                            spike_slurm_settings,
+                        )
+                        print(f"[emseq.make_cmd] generated={spike_script_path}")
+                    generated_scripts.append(spike_script_path)
+
+            if settings["submit"] and not settings["dry_run"]:
+                for script_path in generated_scripts:
+                    submit_script(script_path, settings["runner"])
+                print(
+                    f"[emseq.make_cmd] submitted_count={len(generated_scripts)}"
+                )
     elif stage == "call":
         spike_names = parse_spike_names(settings["spike_in_index"])
         effective_mode = settings["call_mode"]
@@ -1528,7 +1797,7 @@ def main() -> int:
         print(f"[emseq.make_cmd] spike_in_count={len(spike_names)}")
 
         if settings["runner"] == "local":
-            script_path = command_dir / "07_call.sh"
+            script_path = command_dir / "08_call.sh"
             spike_references = (
                 settings["spike_in_index"] if include_spike else []
             )
@@ -1551,7 +1820,7 @@ def main() -> int:
             generated_scripts: list[Path] = []
 
             if include_host:
-                host_script_path = command_dir / "07_call_host.sbatch"
+                host_script_path = command_dir / "08_call_host.sbatch"
                 host_job_name = f"emseq_call_host_{settings['sample_id']}"
                 host_output = (settings["slurm_output"] or "").replace(
                     "%x", host_job_name
@@ -1587,7 +1856,7 @@ def main() -> int:
             if include_spike:
                 for spike_name in spike_names:
                     spike_script_path = (
-                        command_dir / f"07_call_spike_{spike_name}.sbatch"
+                        command_dir / f"08_call_spike_{spike_name}.sbatch"
                     )
                     spike_job_name = (
                         f"emseq_call_spike_{settings['sample_id']}_{spike_name}"
@@ -1645,7 +1914,7 @@ def main() -> int:
         )
         command = build_saturation_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "06_saturation.sh"
+            script_path = command_dir / "09_saturation.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -1659,7 +1928,7 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "06_saturation.sbatch"
+            script_path = command_dir / "09_saturation.sbatch"
             job_name = f"emseq_saturation_{settings['sample_id']}"
             sat_output = (settings["slurm_output"] or "").replace("%x", job_name)
             sat_error = (settings["slurm_error"] or "").replace("%x", job_name)
@@ -1691,7 +1960,7 @@ def main() -> int:
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "08_summary.sh"
+            script_path = command_dir / "10_summary.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -1705,7 +1974,7 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "08_summary.sbatch"
+            script_path = command_dir / "10_summary.sbatch"
             job_name = f"emseq_summary_{settings['sample_id']}"
             summary_output = (settings["slurm_output"] or "").replace("%x", job_name)
             summary_error = (settings["slurm_error"] or "").replace("%x", job_name)
