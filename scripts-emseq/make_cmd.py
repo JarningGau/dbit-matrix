@@ -12,6 +12,7 @@ This is an EMSeq-only entrypoint that supports:
 - `call`
 - `saturation`
 - `summary`
+- `all` (generates `commands/run.sh` or `commands/run.sbatch` to run the full pipeline in order)
 
 It intentionally keeps EMSeq orchestration separate from the TAPS workflow
 while reusing only the stage implementations whose contracts still match the
@@ -39,7 +40,7 @@ STAGE_SEQUENCE = [
     "saturation",
     "summary",
 ]
-STAGE_CHOICES = STAGE_SEQUENCE
+STAGE_CHOICES = [*STAGE_SEQUENCE, "all"]
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -89,7 +90,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stage",
         choices=STAGE_CHOICES,
-        help="Workflow stage to generate command script for. Default: fastp_split.",
+        help=(
+            "Workflow stage to generate command script for. "
+            "Use `all` for a driver that runs every stage in order. "
+            "Default: fastp_split."
+        ),
     )
     parser.add_argument("--sample-id", help="Sample identifier.")
     parser.add_argument("--r1", help="Input R1 FASTQ(.gz).")
@@ -726,7 +731,11 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if stage not in STAGE_CHOICES:
         raise ValueError(f"unsupported stage for EMSeq entry: {stage}")
 
-    stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, stage)
+    # When stage is `all`, bootstrap Slurm defaults from the first real stage (not `all`).
+    stage_slurm_cfg = select_stage_slurm_cfg(
+        slurm_cfg_raw,
+        stage if stage in STAGE_SEQUENCE else STAGE_SEQUENCE[0],
+    )
 
     split_bams_slurm_cfg = resolve_step_slurm_cfg(
         stage_slurm_cfg, "split_bams", {"split_bams", "sort"}
@@ -1129,7 +1138,11 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         / f"{stage}_%x_%j.err"
     )
 
-    validate_required_for_stage(stage, settings)
+    if stage == "all":
+        for stage_name in STAGE_SEQUENCE:
+            validate_required_for_stage(stage_name, settings)
+    else:
+        validate_required_for_stage(stage, settings)
     return settings
 
 
@@ -1227,11 +1240,178 @@ def generate_split_slurm_submit_script(
     output_path.chmod(0o755)
 
 
+def parse_emseq_generated_paths(command_output: str) -> list[Path]:
+    """Collect paths from child `make_cmd` stdout lines."""
+    generated: list[Path] = []
+    prefix = "[emseq.make_cmd] generated="
+    for line in command_output.splitlines():
+        if line.startswith(prefix):
+            generated.append(Path(line[len(prefix) :].strip()))
+    return generated
+
+
+def build_stage_passthrough_args(argv: list[str]) -> list[str]:
+    """Strip `--stage` / `--runner` / `--submit` / `--dry-run` for subprocess invocations."""
+    passthrough: list[str] = []
+    flags_without_value = {"--split-smoke", "--submit", "--dry-run"}
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in {"--stage", "--runner"}:
+            index += 2
+            continue
+        if token.startswith("--stage=") or token.startswith("--runner="):
+            index += 1
+            continue
+        if token in {"--submit", "--dry-run"}:
+            index += 1
+            continue
+        if token in flags_without_value:
+            passthrough.append(token)
+            index += 1
+            continue
+        if token.startswith("--"):
+            passthrough.append(token)
+            if index + 1 < len(argv):
+                passthrough.append(argv[index + 1])
+            index += 2
+            continue
+        passthrough.append(token)
+        index += 1
+    return passthrough
+
+
+def generate_local_driver_script(
+    stage_scripts: list[tuple[str, list[Path]]], output_path: Path
+) -> None:
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "",
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        "",
+    ]
+    for _, scripts in stage_scripts:
+        for script_path in scripts:
+            lines.append(f'bash "$SCRIPT_DIR/{script_path.name}"')
+    lines.append("")
+    write_text(output_path, "\n".join(lines))
+    output_path.chmod(0o755)
+
+
+def generate_emseq_slurm_driver_script(
+    stage_scripts: list[tuple[str, list[Path]]],
+    output_path: Path,
+    log_dir: Path,
+    driver_settings: dict,
+) -> None:
+    """Chain stage sbatch scripts with afterok; split uses internal two-step deps."""
+    lines = [
+        "submit_with_dep() {",
+        '  local script_path="$1"',
+        '  local dep_chain="$2"',
+        "  local out",
+        '  if [[ -n "$dep_chain" ]]; then',
+        '    out="$(sbatch --dependency=afterok:${dep_chain} "$script_path")"',
+        "  else",
+        '    out="$(sbatch "$script_path")"',
+        "  fi",
+        '  echo "$out" >&2',
+        '  echo "${out##* }"',
+        "}",
+        "",
+        "join_deps() {",
+        "  local joined=''",
+        '  for item in "$@"; do',
+        '    if [[ -z "$item" ]]; then',
+        "      continue",
+        "    fi",
+        '    if [[ -z "$joined" ]]; then',
+        '      joined="$item"',
+        "    else",
+        '      joined="${joined}:$item"',
+        "    fi",
+        "  done",
+        '  echo "$joined"',
+        "}",
+        "",
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'prev_stage_deps=""',
+        "",
+    ]
+    for stage_name, scripts in stage_scripts:
+        if not scripts:
+            continue
+        lines.append(f'echo "[emseq.run.sbatch] stage={stage_name}"')
+        if stage_name == "split":
+            lines.append(
+                f'jid_split_bams="$(submit_with_dep "$SCRIPT_DIR/{scripts[0].name}" "$prev_stage_deps")"'
+            )
+            if len(scripts) > 1:
+                lines.append(
+                    f'jid_split_sort="$(submit_with_dep "$SCRIPT_DIR/{scripts[1].name}" "$jid_split_bams")"'
+                )
+                lines.append('prev_stage_deps="$jid_split_sort"')
+            else:
+                lines.append('prev_stage_deps="$jid_split_bams"')
+        else:
+            job_vars: list[str] = []
+            for index, script_path in enumerate(scripts):
+                var_name = f"jid_{stage_name}_{index}".replace("-", "_")
+                lines.append(
+                    f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
+                )
+                job_vars.append(var_name)
+            deps_join = " ".join(f"${var_name}" for var_name in job_vars)
+            lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
+        lines.append("")
+    lines.append('echo "[emseq.run.sbatch] done final_dep=${prev_stage_deps}"')
+    driver_command = "\n".join(lines)
+    job_name = driver_settings["job_name"]
+    slurm_settings = {
+        "sample_id": driver_settings["sample_id"],
+        "stage": "all",
+        "slurm_partition": driver_settings["slurm_partition"],
+        "slurm_mem": driver_settings["slurm_mem"],
+        "slurm_cpus_per_task": driver_settings["slurm_cpus_per_task"],
+        "slurm_output": driver_settings["slurm_output"],
+        "slurm_error": driver_settings["slurm_error"],
+        "job_name": job_name,
+    }
+    generate_slurm_script(driver_command, output_path, log_dir, slurm_settings)
+
+
+def emseq_driver_slurm_settings(settings: dict) -> dict:
+    """Use `slurm.summary` (or fallbacks) for the all-pipeline driver sbatch headers."""
+    summary_cfg = select_stage_slurm_cfg(settings["slurm_cfg_raw"], "summary")
+    sample_id = settings["sample_id"]
+    work_root = Path(settings["work_root"])
+    partition = summary_cfg.get("partition") or settings["slurm_partition"]
+    mem = summary_cfg.get("mem") or settings["slurm_mem"]
+    cpus = summary_cfg.get("cpus_per_task") or settings["slurm_cpus_per_task"]
+    job_name = f"emseq_all_driver_{sample_id}"
+    out_tpl = summary_cfg.get("output") or str(
+        work_root / sample_id / "logs" / "all_driver_%x_%j.out"
+    )
+    err_tpl = summary_cfg.get("error") or str(
+        work_root / sample_id / "logs" / "all_driver_%x_%j.err"
+    )
+    return {
+        "sample_id": sample_id,
+        "job_name": job_name,
+        "slurm_partition": partition,
+        "slurm_mem": mem,
+        "slurm_cpus_per_task": cpus,
+        "slurm_output": out_tpl.replace("%x", job_name),
+        "slurm_error": err_tpl.replace("%x", job_name),
+    }
+
+
 def main() -> int:
     args = parse_args()
     settings = resolve_settings(args)
     settings["spike_in_index"] = normalize_spike_in_index(settings["spike_in_index"])
-    if settings["stage"] == "mbias":
+    if settings["stage"] in ("mbias", "all"):
         validate_mbias_settings(settings)
 
     sample_work = Path(settings["work_root"]) / settings["sample_id"]
@@ -1239,6 +1419,63 @@ def main() -> int:
     log_dir = sample_work / "logs"
 
     stage = settings["stage"]
+
+    if stage == "all":
+        passthrough_args = build_stage_passthrough_args(sys.argv[1:])
+        make_cmd_path = Path(__file__).resolve()
+        stage_scripts: list[tuple[str, list[Path]]] = []
+        for stage_name in STAGE_SEQUENCE:
+            stage_argv = [
+                sys.executable,
+                str(make_cmd_path),
+                *passthrough_args,
+                "--runner",
+                settings["runner"],
+                "--stage",
+                stage_name,
+            ]
+            if settings["dry_run"]:
+                stage_argv.append("--dry-run")
+            completed = subprocess.run(
+                stage_argv, check=True, capture_output=True, text=True
+            )
+            if completed.stdout:
+                print(completed.stdout, end="")
+            if completed.stderr:
+                print(completed.stderr, end="", file=sys.stderr)
+            combined_out = (completed.stdout or "") + (completed.stderr or "")
+            stage_scripts.append(
+                (stage_name, parse_emseq_generated_paths(combined_out))
+            )
+
+        driver_path: Path
+        if settings["runner"] == "local":
+            driver_path = command_dir / "run.sh"
+            print(f"[emseq.make_cmd] script={driver_path}")
+            if not settings["dry_run"]:
+                generate_local_driver_script(stage_scripts, driver_path)
+        else:
+            driver_path = command_dir / "run.sbatch"
+            print(f"[emseq.make_cmd] script={driver_path}")
+            if not settings["dry_run"]:
+                driver_slurm = emseq_driver_slurm_settings(settings)
+                generate_emseq_slurm_driver_script(
+                    stage_scripts, driver_path, log_dir, driver_slurm
+                )
+
+        if not settings["dry_run"] and driver_path.exists():
+            print(f"[emseq.make_cmd] generated={driver_path}")
+        if settings["submit"] and not settings["dry_run"]:
+            if settings["runner"] == "slurm":
+                subprocess.run(["bash", str(driver_path)], check=True)
+                print("[emseq.make_cmd] submitted_driver=1")
+                print("[emseq.make_cmd] submit_mode=client_side_sbatch_dag")
+            else:
+                submit_script(driver_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_driver=1")
+
+        print("[emseq.make_cmd] stage=all helper generation complete")
+        return 0
 
     if stage == "fastp_split":
         base_name = "01_fastp_split"

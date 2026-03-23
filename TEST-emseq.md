@@ -5,7 +5,7 @@
 ## 当前范围
 
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`
+- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，以及 **`all`**（生成 `commands/run.sh` / `run.sbatch` 串联全流程）
 - 单步执行实现：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`
 - 单步执行实现：`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
 - 样例配置：`workflow/dbit_emseq_test.json`
@@ -15,8 +15,8 @@
 提交前建议至少执行以下 3 组检查：
 
 1. CLI 可用。
-2. 九个 stage 在 `local` 与 `slurm` 下都能正确 dry-run。
-3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary` 的本地真实生成。
+2. 九个具名 stage 在 `local` 与 `slurm` 下都能正确 dry-run；并额外验证 `--stage all` 在 `local` 与 `slurm` 下 dry-run（不落盘）。
+3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary` 的本地真实生成（可逐 stage，也可 `--stage all` 生成 `run.sh` 后按需执行）。
 
 CLI：
 
@@ -82,6 +82,16 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
+`all`（整条主线展开，不落盘）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage all \
+  --runner local \
+  --dry-run
+```
+
 `slurm` dry-run：
 
 ```bash
@@ -136,6 +146,16 @@ pixi run python scripts-emseq/make_cmd.py \
 pixi run python scripts-emseq/make_cmd.py \
   --workflow-config workflow/dbit_emseq_test.json \
   --stage summary \
+  --runner slurm \
+  --dry-run
+```
+
+`all` + `slurm` dry-run：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage all \
   --runner slurm \
   --dry-run
 ```
@@ -252,7 +272,7 @@ Smoke 通过标准：
 - `mbias` 应参考 asTair 的 TOP/BOT 方式，只在 reference `CG` 位点计数；不应退回到按 read 局部二核苷酸直接判定
 - 若存在 `qc/mbias/host.subsampled.sorted.bam`，`call` 应优先用它生成 `coverage/host_mito.CG.cov`；否则 `host_mito` 由 per-spot coverage 汇总的线粒体位点得到，默认仅汇总 `chrM`
 - `coverage/host/**/*.CG.cov` 不应再包含线粒体 contig 位点，默认不应包含 `chrM`
-- EMSeq 入口当前不应暴露 `all` 或其他非 `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` / `mbias` / `call` / `saturation` / `summary` stage
+- EMSeq 入口应支持 workflow stage `all` 与上述九个具名 stage；`stage=all` 时 `--dry-run` 不落盘；非 dry-run 时生成 `commands/run.sh`（local）或 `commands/run.sbatch`（slurm，client-side sbatch DAG 串联；`split` 仍为两作业链式依赖）
 
 ## 数据说明
 

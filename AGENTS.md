@@ -7,6 +7,7 @@
 
 - 主线固定（EMSeq 独立入口）：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 - 当前已闭环（EMSeq MVP）：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`
+- EMSeq 编排入口支持 `--stage all`：生成 `work/<sample>/commands/run.sh` 或 `run.sbatch`，按主线顺序串联各 stage（`--dry-run` 不落盘）。
 - 当前主里程碑：`split -> mbias -> call -> saturation -> summary` 端到端最小闭环验收
 - 说明：`mbias` 单步实现为 `scripts-emseq/mbias.py`（与 TAPS 的 `scripts/mbias.py` 化学判定不同）。
 

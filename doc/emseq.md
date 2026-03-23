@@ -6,7 +6,7 @@
 
 - 当前状态：试验性 / MVP
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`，以及 workflow stage **`all`**（生成 `commands/run.sh` 或 `commands/run.sbatch`，按该顺序串联各 stage；与下面 `mbias_mode` / `call_mode` 的 `all` 含义不同）
 - `mbias` 单步脚本：`scripts-emseq/mbias.py`（bisulfite 风格 M-bias；参考 asTair 的 TOP/BOT 方式，仅统计 reference `CG` 位点；与 TAPS 的 `scripts/mbias.py` 判定规则不同）
 
 ## 与 TAPS 的主要差异
@@ -76,6 +76,26 @@
 - Slurm：`slurm.summary`（partition / mem / cpus_per_task）
 
 ## 首次运行命令
+
+一键检查整条主线（推荐先 `--dry-run`，不落盘）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage all \
+  --runner local \
+  --dry-run
+```
+
+Slurm 下同样可先 dry-run，再生成 `commands/run.sbatch` 驱动（`--runner slurm` 且非 dry-run 时写入；`all` 驱动脚本的 SBATCH 资源默认取自 `slurm.summary`）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage all \
+  --runner slurm \
+  --dry-run
+```
 
 先检查 `fastp_split`：
 

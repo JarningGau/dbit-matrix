@@ -21,7 +21,7 @@
 
 - 当前状态：试验性 / MVP
 - 当前支持：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
-- 入口脚本：`scripts-emseq/make_cmd.py`
+- 入口脚本：`scripts-emseq/make_cmd.py`（`--stage all` 时生成 `work/<sample>/commands/run.sh` 或 `run.sbatch`，按顺序串联上述各 stage）
 - 说明页面：`doc/emseq.md`
 - `mbias` 参考 asTair 的 TOP/BOT 方式，只统计 reference `CG` 位点
 - `call` 阶段默认将 `chrM` 从 `coverage/host/**/*.CG.cov` 中移除，并汇总为 `coverage/host_mito.CG.cov`
@@ -71,6 +71,21 @@ pixi run python scripts/make_cmd.py \
 ```
 
 如需提交到 Slurm，把 `--runner local` 改为 `--runner slurm`。
+
+EMSeq 也可一键展开整条主线（先 dry-run，再生成驱动脚本或 `--submit`）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage all \
+  --runner local \
+  --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage all \
+  --runner local
+```
 
 ## 跑完后先看什么
 
