@@ -1,13 +1,13 @@
 # TEST-EMSeq (Maintainer)
 
-本页是 `EMSeq` 独立入口的维护者回归文档。当前覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation`，不包含 `summary` 的后续链路。用户入口说明请看 `doc/emseq.md`。
+本页是 `EMSeq` 独立入口的维护者回归文档。当前覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`。用户入口说明请看 `doc/emseq.md`。
 
 ## 当前范围
 
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`call`、`saturation`
+- 当前支持 stage：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`call`、`saturation`、`summary`
 - 单步执行实现：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`
-- 单步执行实现：`scripts-emseq/call.py`、`scripts/saturation.py`
+- 单步执行实现：`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
 - 样例配置：`workflow/dbit_emseq_test.json`
 
 ## 最小验收
@@ -15,8 +15,8 @@
 提交前建议至少执行以下 3 组检查：
 
 1. CLI 可用。
-2. 七个 stage 在 `local` 与 `slurm` 下都能正确 dry-run。
-3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation` 的本地真实生成。
+2. 八个 stage 在 `local` 与 `slurm` 下都能正确 dry-run。
+3. 用样例配置完成一次 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary` 的本地真实生成。
 
 CLI：
 
@@ -68,6 +68,12 @@ pixi run python scripts-emseq/make_cmd.py \
   --stage saturation \
   --runner local \
   --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage summary \
+  --runner local \
+  --dry-run
 ```
 
 `slurm` dry-run：
@@ -114,13 +120,19 @@ pixi run python scripts-emseq/make_cmd.py \
   --stage saturation \
   --runner slurm \
   --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage summary \
+  --runner slurm \
+  --dry-run
 ```
 
 通过标准：
 
 - 命令正常展开
-- `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` / `call` / `saturation` 分别调用对应脚本（含 `scripts-emseq/call.py` 与 `scripts/saturation.py`）
-- 输出目录分别指向 `shard_fastq`、`demux`、`align_shards`、`pooled`、`split_bams`、`pileup`、`coverage`、`qc/saturation`（`saturation` stage）
+- `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` / `call` / `saturation` / `summary` 分别调用对应脚本（含 `scripts-emseq/call.py`、`scripts/saturation.py` 与 `scripts/summary.py`）
+- 输出目录分别指向 `shard_fastq`、`demux`、`align_shards`、`pooled`、`split_bams`、`pileup`、`coverage`、`qc/saturation`（`saturation` stage）、`summary`（`summary` stage）
 - 无参数缺失、无路径解析错误
 - `slurm` dry-run 中工具路径应解析到当前 `pixi` 环境，或显式使用用户传入的 `--*-bin`
 
@@ -170,6 +182,12 @@ pixi run python scripts-emseq/make_cmd.py \
   --stage saturation \
   --runner local \
   --submit
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage summary \
+  --runner local \
+  --submit
 ```
 
 ## 输出检查点
@@ -198,6 +216,11 @@ Smoke 通过标准：
 - 若配置了 `spike_in_index`：`work/<sample>/coverage/<spike_name>.CG.cov`
 - `work/<sample>/qc/saturation/saturation_curve.png`
 - `work/<sample>/qc/saturation/saturation_summary.tsv`
+- `work/<sample>/summary/per_spot_summary.tsv`
+- `work/<sample>/summary/sample_summary.tsv`
+- `work/<sample>/summary/reads_heatmap.png`
+- `work/<sample>/summary/cpg_site_count_heatmap.png`
+- `work/<sample>/summary/mean_methylation_heatmap.png`
 
 关键行为检查：
 
@@ -207,7 +230,7 @@ Smoke 通过标准：
 - 若 `spike_in_index` 为空，`pool` 应仅处理 host（不生成 spike/all 相关作业）
 - `coverage/host_mito.CG.cov` 应由 `coverage/host/**/*.CG.cov` 中的线粒体 contig 位点汇总得到，默认仅汇总 `chrM`
 - `coverage/host/**/*.CG.cov` 不应再包含线粒体 contig 位点，默认不应包含 `chrM`
-- EMSeq 入口当前不应暴露 `all` 或其他非 `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` / `call` / `saturation` stage
+- EMSeq 入口当前不应暴露 `all` 或其他非 `fastp_split` / `demux_extract_bc` / `align` / `pool` / `split` / `call` / `saturation` / `summary` stage
 
 ## 数据说明
 

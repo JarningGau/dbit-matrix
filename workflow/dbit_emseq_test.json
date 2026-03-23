@@ -39,7 +39,8 @@
         "lambda": "/mnt/e/LiLab_HL/resource/biscuit/lambda/genome.fa"
     },
     "saturation_script": "scripts/saturation.py",
-    "saturation_reads_threshold": 100,
+    "saturation_reads_threshold": 500,
+    "summary_script": "scripts/summary.py",
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
@@ -89,6 +90,11 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "16G",
             "cpus_per_task": 2
+        },
+        "summary": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
         }
     }
 }

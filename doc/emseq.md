@@ -6,8 +6,8 @@
 
 - 当前状态：试验性 / MVP
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation`
-- 当前不包含：`mbias(质控) -> summary`
+- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`
+- 当前不包含：`mbias(质控)`
 
 ## 与 TAPS 的主要差异
 
@@ -62,7 +62,11 @@
 - `saturation_reads_threshold`：HQ spot 的 reads 阈值，默认 `1e6`
 - Slurm：`slurm.saturation`（partition / mem / cpus_per_task）
 
-`workflow/dbit_emseq_test.json` 中若出现 `summary` 等后续阶段字段，应视为预留字段，不表示当前已经支持这些 stage。
+可调的 summary 参数（复用 `scripts/summary.py`，在 `saturation` 之后运行）：
+
+- `summary_script`：默认 `scripts/summary.py`
+- `spike_in_index`：用于向 `summary` 传递 `--spike-in-name`（与 `spike_in_index` 的 key 一致）；未配置时由 `summary` 从 `coverage/` 下发现 spike 覆盖文件
+- Slurm：`slurm.summary`（partition / mem / cpus_per_task）
 
 ## 首次运行命令
 
@@ -138,6 +142,16 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
+再检查 `summary`（需已有 `split_bams/per_spot_read_counts.tsv`、`demux/*.stats.json`、`qc/saturation/saturation_summary.tsv` 与 `coverage/` 下的 coverage 文件）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage summary \
+  --runner local \
+  --dry-run
+```
+
 ## 预期输出
 
 `fastp_split` 后：
@@ -183,3 +197,11 @@ pixi run python scripts-emseq/make_cmd.py \
 
 - `work/<sample>/qc/saturation/saturation_curve.png`
 - `work/<sample>/qc/saturation/saturation_summary.tsv`
+
+`summary` 后（与 TAPS 相同产物路径）：
+
+- `work/<sample>/summary/per_spot_summary.tsv`
+- `work/<sample>/summary/sample_summary.tsv`
+- `work/<sample>/summary/reads_heatmap.png`
+- `work/<sample>/summary/cpg_site_count_heatmap.png`
+- `work/<sample>/summary/mean_methylation_heatmap.png`

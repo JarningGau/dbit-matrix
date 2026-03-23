@@ -10,6 +10,7 @@ This is an EMSeq-only entrypoint that supports:
 - `split`
 - `call`
 - `saturation`
+- `summary`
 
 It intentionally keeps EMSeq orchestration separate from the TAPS workflow
 while reusing only the stage implementations whose contracts still match the
@@ -34,6 +35,7 @@ STAGE_SEQUENCE = [
     "split",
     "call",
     "saturation",
+    "summary",
 ]
 STAGE_CHOICES = STAGE_SEQUENCE
 STAGE_REQUIRED_FIELDS = {
@@ -51,6 +53,7 @@ STAGE_REQUIRED_FIELDS = {
     "split": ["split_barcodes"],
     "call": ["call_reference_file", "call_jobs"],
     "saturation": [],
+    "summary": [],
 }
 
 
@@ -280,6 +283,14 @@ def parse_args() -> argparse.Namespace:
         help=(
             "HQ spot threshold (reads) for scripts/saturation.py. "
             "Default: 1e6."
+        ),
+    )
+    # Summary stage (reuses scripts/summary.py; runs after saturation).
+    parser.add_argument(
+        "--summary-script",
+        help=(
+            "Path to summary script. "
+            "Default: scripts/summary.py."
         ),
     )
     parser.add_argument(
@@ -561,6 +572,20 @@ def build_saturation_command(args: argparse.Namespace, sample_work: Path) -> str
     return quoted(command)
 
 
+def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
+    """Build scripts/summary.py invocation (spike names from spike_in_index)."""
+    script_path = Path(args.summary_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+    ]
+    for spike_name in parse_spike_names(args.spike_in_index):
+        command.extend(["--spike-in-name", spike_name])
+    return quoted(command)
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -725,6 +750,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.saturation_reads_threshold,
             cfg.get("saturation_reads_threshold"),
         ),
+        # Summary stage.
+        "summary_script": pick(args.summary_script, cfg.get("summary_script")),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -894,6 +921,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["saturation_reads_threshold"] <= 0:
         raise ValueError("saturation_reads_threshold must be > 0")
+
+    settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
 
     # Step-specific slurm for split.
     settings["split_bams_slurm_partition"] = (
@@ -1642,6 +1671,52 @@ def main() -> int:
                 "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
                 "slurm_output": sat_output,
                 "slurm_error": sat_error,
+                "job_name": job_name,
+            }
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if not settings["dry_run"]:
+                generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"] and not settings["dry_run"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "summary":
+        command_args = argparse.Namespace(
+            summary_script=settings["summary_script"],
+            spike_in_index=settings["spike_in_index"],
+        )
+        command = build_summary_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "08_summary.sh"
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            script_path = command_dir / "08_summary.sbatch"
+            job_name = f"emseq_summary_{settings['sample_id']}"
+            summary_output = (settings["slurm_output"] or "").replace("%x", job_name)
+            summary_error = (settings["slurm_error"] or "").replace("%x", job_name)
+            slurm_settings = {
+                "sample_id": settings["sample_id"],
+                "stage": stage,
+                "slurm_partition": settings["slurm_partition"],
+                "slurm_mem": settings["slurm_mem"],
+                "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                "slurm_output": summary_output,
+                "slurm_error": summary_error,
                 "job_name": job_name,
             }
             print(f"[emseq.make_cmd] runner={settings['runner']}")

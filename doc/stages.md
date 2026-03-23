@@ -6,7 +6,7 @@ TAPS 固定主流程：
 
 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 
-EMSeq 当前是独立入口，已覆盖 `fastp_split -> demux_extract_bc -> align`。首次使用请看 `doc/emseq.md`。
+EMSeq 当前是独立入口，已覆盖 `fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation -> summary`（不含 `mbias`）。首次使用请看 `doc/emseq.md`。
 
 ## 1. `fastp_split`
 

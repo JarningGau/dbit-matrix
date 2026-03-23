@@ -1,6 +1,6 @@
 # Outputs Guide
 
-本页说明 TAPS 主线跑完后先看哪些结果，以及这些结果代表什么。`EMSeq` 现在已覆盖到 `call`（会产出 `coverage`），但仍不产出 `saturation` 或 `summary` 结果。
+本页说明 TAPS 主线跑完后先看哪些结果，以及这些结果代表什么。`EMSeq` 独立入口在跑完 `saturation` 与 `summary` 后，同样会产出 `qc/saturation/*` 与 `summary/*`（路径与 TAPS 一致）。
 
 ## 推荐检查顺序
 
