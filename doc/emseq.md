@@ -6,8 +6,8 @@
 
 - 当前状态：试验性 / MVP
 - 入口脚本：`scripts-emseq/make_cmd.py`
-- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call`
-- 当前不包含：`mbias(质控) -> saturation -> summary`
+- 当前支持 stage：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation`
+- 当前不包含：`mbias(质控) -> summary`
 
 ## 与 TAPS 的主要差异
 
@@ -56,7 +56,13 @@
 
 - `call_mito_chromosomes`：host 中哪些 contig 视为线粒体。默认 `chrM`；这些位点会从 `coverage/host/**/*.CG.cov` 中抽出并合并到 `coverage/host_mito.CG.cov`。
 
-`workflow/dbit_emseq_test.json` 中若出现 `saturation`、`summary` 等后续阶段字段，应视为预留字段，不表示当前已经支持这些 stage。
+可调的 saturation 参数（复用 `scripts/saturation.py`，在 `call` 之后运行）：
+
+- `saturation_script`：默认 `scripts/saturation.py`
+- `saturation_reads_threshold`：HQ spot 的 reads 阈值，默认 `1e6`
+- Slurm：`slurm.saturation`（partition / mem / cpus_per_task）
+
+`workflow/dbit_emseq_test.json` 中若出现 `summary` 等后续阶段字段，应视为预留字段，不表示当前已经支持这些 stage。
 
 ## 首次运行命令
 
@@ -122,6 +128,16 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
+再检查 `saturation`（需已有 `split_bams/per_spot_read_counts.tsv` 与 `coverage/host/**/*.CG.cov`）：
+
+```bash
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage saturation \
+  --runner local \
+  --dry-run
+```
+
 ## 预期输出
 
 `fastp_split` 后：
@@ -162,3 +178,8 @@ pixi run python scripts-emseq/make_cmd.py \
 - `work/<sample>/coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`（已移除 `call_mito_chromosomes` 指定的 contig，默认不含 `chrM`）
 - `work/<sample>/coverage/host_mito.CG.cov`（由 `coverage/host/**/*.CG.cov` 中对应 contig 汇总得到，默认仅汇总 `chrM`）
 - 若配置了 `spike_in_index`：`work/<sample>/coverage/<spike_name>.CG.cov`
+
+`saturation` 后（与 TAPS 相同产物路径）：
+
+- `work/<sample>/qc/saturation/saturation_curve.png`
+- `work/<sample>/qc/saturation/saturation_summary.tsv`

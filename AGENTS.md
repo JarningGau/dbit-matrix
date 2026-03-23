@@ -5,10 +5,10 @@
 
 ## 当前阶段
 
-- 主线固定（EMSeq 独立入口）：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call`
-- 当前已闭环（EMSeq MVP）：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`call`
-- 当前主里程碑：`split -> call` 端到端最小闭环验收
-- 说明：`mbias/saturation/summary` 属于 TAPS 主线范围；EMSeq 入口当前不包含这些 stage。
+- 主线固定（EMSeq 独立入口）：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation`
+- 当前已闭环（EMSeq MVP）：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`call`、`saturation`
+- 当前主里程碑：`split -> call -> saturation` 端到端最小闭环验收
+- 说明：`mbias/summary` 属于 TAPS 主线范围；EMSeq 入口当前不包含这些 stage。
 
 ## 必须遵守
 
@@ -29,6 +29,7 @@
 - `pool`：拆成两个 job，一个 spike-in，一个 host。
 - `split`：`split_bams` 与 `sort` 分成两个 sbatch，并用依赖关系串联。
 - `call`：按 host/spike 拆分 sbatch（host 1 个；spike 按 `spike_name` 可为多个），资源配置保持 step-specific（如 `slurm.call.host` / `slurm.call.spike`）。
+- `saturation`：单 job 一个 sbatch；资源配置使用 `slurm.saturation`。
 - stage 资源配置采用 step-specific 结构，不同阶段不要混用一套参数。
 
 ## 关键契约

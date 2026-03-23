@@ -20,7 +20,7 @@
 ### EMSeq 独立入口
 
 - 当前状态：试验性 / MVP
-- 当前支持：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call`
+- 当前支持：`fastp_split -> demux_extract_bc -> align -> pool -> split -> call -> saturation`
 - 入口脚本：`scripts-emseq/make_cmd.py`
 - 说明页面：`doc/emseq.md`
 - `call` 阶段默认将 `chrM` 从 `coverage/host/**/*.CG.cov` 中移除，并汇总为 `coverage/host_mito.CG.cov`

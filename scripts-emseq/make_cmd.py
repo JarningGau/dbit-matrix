@@ -9,6 +9,7 @@ This is an EMSeq-only entrypoint that supports:
 - `pool`
 - `split`
 - `call`
+- `saturation`
 
 It intentionally keeps EMSeq orchestration separate from the TAPS workflow
 while reusing only the stage implementations whose contracts still match the
@@ -25,7 +26,15 @@ import sys
 from pathlib import Path
 
 
-STAGE_SEQUENCE = ["fastp_split", "demux_extract_bc", "align", "pool", "split", "call"]
+STAGE_SEQUENCE = [
+    "fastp_split",
+    "demux_extract_bc",
+    "align",
+    "pool",
+    "split",
+    "call",
+    "saturation",
+]
 STAGE_CHOICES = STAGE_SEQUENCE
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
@@ -41,6 +50,7 @@ STAGE_REQUIRED_FIELDS = {
     "pool": [],
     "split": ["split_barcodes"],
     "call": ["call_reference_file", "call_jobs"],
+    "saturation": [],
 }
 
 
@@ -254,6 +264,22 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Spike-in reference in NAME=INDEX format. "
             "May be specified multiple times."
+        ),
+    )
+    # Saturation stage (reuses scripts/saturation.py; runs after call).
+    parser.add_argument(
+        "--saturation-script",
+        help=(
+            "Path to saturation script. "
+            "Default: scripts/saturation.py."
+        ),
+    )
+    parser.add_argument(
+        "--saturation-reads-threshold",
+        type=float,
+        help=(
+            "HQ spot threshold (reads) for scripts/saturation.py. "
+            "Default: 1e6."
         ),
     )
     parser.add_argument(
@@ -521,6 +547,20 @@ def build_call_command(
     return quoted(command)
 
 
+def build_saturation_command(args: argparse.Namespace, sample_work: Path) -> str:
+    """Build scripts/saturation.py invocation."""
+    script_path = Path(args.saturation_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--reads-threshold",
+        str(args.saturation_reads_threshold),
+    ]
+    return quoted(command)
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -679,6 +719,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_mito_chromosomes, cfg.get("call_mito_chromosomes")
         ),
         "spike_in_index": pick(args.spike_in_index, cfg.get("spike_in_index")),
+        # Saturation stage.
+        "saturation_script": pick(args.saturation_script, cfg.get("saturation_script")),
+        "saturation_reads_threshold": pick(
+            args.saturation_reads_threshold,
+            cfg.get("saturation_reads_threshold"),
+        ),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -839,6 +885,15 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if settings["host_subsample_seed"] < 0:
         raise ValueError("host_subsample_seed must be >= 0")
     settings["call_mito_chromosomes"] = settings["call_mito_chromosomes"] or "chrM"
+
+    settings["saturation_script"] = settings["saturation_script"] or "scripts/saturation.py"
+    settings["saturation_reads_threshold"] = (
+        float(settings["saturation_reads_threshold"])
+        if settings["saturation_reads_threshold"] is not None
+        else 1_000_000.0
+    )
+    if settings["saturation_reads_threshold"] <= 0:
+        raise ValueError("saturation_reads_threshold must be > 0")
 
     # Step-specific slurm for split.
     settings["split_bams_slurm_partition"] = (
@@ -1554,6 +1609,52 @@ def main() -> int:
                 print(
                     f"[emseq.make_cmd] submitted_count={len(generated_scripts)}"
                 )
+    elif stage == "saturation":
+        command_args = argparse.Namespace(
+            saturation_script=settings["saturation_script"],
+            saturation_reads_threshold=settings["saturation_reads_threshold"],
+        )
+        command = build_saturation_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "06_saturation.sh"
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            script_path = command_dir / "06_saturation.sbatch"
+            job_name = f"emseq_saturation_{settings['sample_id']}"
+            sat_output = (settings["slurm_output"] or "").replace("%x", job_name)
+            sat_error = (settings["slurm_error"] or "").replace("%x", job_name)
+            slurm_settings = {
+                "sample_id": settings["sample_id"],
+                "stage": stage,
+                "slurm_partition": settings["slurm_partition"],
+                "slurm_mem": settings["slurm_mem"],
+                "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                "slurm_output": sat_output,
+                "slurm_error": sat_error,
+                "job_name": job_name,
+            }
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if not settings["dry_run"]:
+                generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"] and not settings["dry_run"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
     else:
         raise ValueError(f"unsupported stage for EMSeq entry: {stage}")
 
