@@ -99,6 +99,14 @@ def parse_args() -> argparse.Namespace:
         "--barcode2-whitelist",
         help="Whitelist path for barcodeB, used by demux stage.",
     )
+    parser.add_argument(
+        "--linker-bc",
+        help="Linker sequence between barcode2 and barcode1 for demux stage.",
+    )
+    parser.add_argument(
+        "--insert-left",
+        help="Insert-left anchor sequence for demux stage (equivalent to previous --tn5).",
+    )
     parser.add_argument("--linker1", help="Linker1 sequence for demux stage.")
     parser.add_argument("--linker2", help="Linker2 sequence for demux stage.")
     parser.add_argument("--tn5", help="Tn5 sequence for demux stage.")
@@ -363,12 +371,10 @@ def build_demux_chunk_command(
             args.barcode2_whitelist,
             "-o",
             str(out_prefix),
-            "--linker1",
-            args.linker1,
-            "--linker2",
-            args.linker2,
-            "--tn5",
-            args.tn5,
+            "--linker-bc",
+            args.linker_bc,
+            "--insert-left",
+            args.insert_left,
             "--linker-edit-distance",
             str(args.linker_edit_distance),
             "--barcode-hamming-distance",
@@ -417,9 +423,8 @@ def build_demux_local_batch_command(args: argparse.Namespace, sample_work: Path)
         f"-b1 {shlex.quote(args.barcode1_whitelist)} "
         f"-b2 {shlex.quote(args.barcode2_whitelist)} "
         f"-o \"$demux_dir\"/${{chunk}} "
-        f"--linker1 {shlex.quote(args.linker1)} "
-        f"--linker2 {shlex.quote(args.linker2)} "
-        f"--tn5 {shlex.quote(args.tn5)} "
+        f"--linker-bc {shlex.quote(args.linker_bc)} "
+        f"--insert-left {shlex.quote(args.insert_left)} "
         f"--linker-edit-distance {int(args.linker_edit_distance)} "
         f"--barcode-hamming-distance {int(args.barcode_hamming_distance)} "
         f"--gzip-level {int(args.gzip_level)}\n"
@@ -1038,6 +1043,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "barcode2_whitelist": pick(
             args.barcode2_whitelist, cfg.get("barcode2_whitelist")
         ),
+        "linker_bc": pick(
+            args.linker_bc,
+            cfg.get("linker_bc", cfg.get("linker2")),
+        ),
+        "insert_left": pick(
+            args.insert_left,
+            cfg.get("insert_left", cfg.get("tn5")),
+        ),
         "linker1": pick(args.linker1, cfg.get("linker1")),
         "linker2": pick(args.linker2, cfg.get("linker2")),
         "tn5": pick(args.tn5, cfg.get("tn5")),
@@ -1225,6 +1238,16 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         settings["linker2"] or "ATCCACGTGCTTGAGAGGCCAGAGCATTCG"
     )
     settings["tn5"] = settings["tn5"] or "CATCGGCGTACGACTAGATGTGTATAAGAGACAG"
+    settings["linker_bc"] = (
+        settings["linker_bc"]
+        or settings["linker2"]
+        or "ATCCACGTGCTTGAGAGGCCAGAGCATTCG"
+    )
+    settings["insert_left"] = (
+        settings["insert_left"]
+        or settings["tn5"]
+        or "CATCGGCGTACGACTAGATGTGTATAAGAGACAG"
+    )
     settings["linker_edit_distance"] = (
         int(settings["linker_edit_distance"])
         if settings["linker_edit_distance"] is not None
@@ -1860,9 +1883,8 @@ def main() -> int:
         command_args = argparse.Namespace(
             barcode1_whitelist=settings["barcode1_whitelist"],
             barcode2_whitelist=settings["barcode2_whitelist"],
-            linker1=settings["linker1"],
-            linker2=settings["linker2"],
-            tn5=settings["tn5"],
+            linker_bc=settings["linker_bc"],
+            insert_left=settings["insert_left"],
             linker_edit_distance=settings["linker_edit_distance"],
             barcode_hamming_distance=settings["barcode_hamming_distance"],
             gzip_level=settings["gzip_level"],

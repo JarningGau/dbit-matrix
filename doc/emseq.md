@@ -14,7 +14,8 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 ## 与 TAPS 的主要差异
 
 - 编排入口：`scripts-emseq/make_cmd.py`（非 `scripts/make_cmd.py`）
-- `demux_extract_bc`：`scripts-emseq/extract_bc.py`；`R1` 结构：`linker1-barcodeB-linker2-barcodeA-others(15 bp)-Tn5-insert`
+- `demux_extract_bc`：`scripts/extract_bc.py`
+- demux 使用 `linker_bc` 定位 barcode（barcode 长度来自 whitelist），再从 `bc1_end` 之后搜索 `insert_left` 并 trim
 - `align`：`scripts-emseq/aligner.py`（`biscuit align`），输出契约与 TAPS 一致（host：`*.cb.bam`；spike：`*.<spike_name>.bam`）
 - `call`：默认将 `call_mito_chromosomes`（默认 `chrM`）从 per-spot `coverage/host/**/*.CG.cov` 剔除；`coverage/host_mito.CG.cov` 优先由 `qc/mbias/host.subsampled.sorted.bam` 经 pileup 生成，否则从 per-spot coverage 汇总线粒体位点
 
@@ -26,7 +27,7 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 |------|----------|
 | 通用 | `sample_id`、`r1`、`r2`、`work_root` |
 | `fastp_split` | `fastp_threads`、`number_of_split_parts`、`fastp_bin` |
-| `demux_extract_bc` | `barcode1_whitelist`、`barcode2_whitelist`、`linker1`、`linker2`、`tn5` |
+| `demux_extract_bc` | `barcode1_whitelist`、`barcode2_whitelist`、`linker_bc`、`insert_left` |
 | `align` | `biscuit_reference`、`biscuit_threads`、`biscuit_batch_size`、`biscuit_bin`、`sinto_bin`、`samtools_bin` |
 | `pool` | `samtools_threads`、`host_sort_mem`（按需） |
 | `split` | **`split_barcodes`**（及 `split_cb_tag`、`split_smoke` 按需） |

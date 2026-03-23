@@ -52,10 +52,9 @@ pixi run samtools --version | head -n 1
 - 样例 workflow：`workflow/dbit_taps_test.json`
 
 ## 文库结构
+- demux stage 只依赖最小定位信息：
+  - `linker_bc`（barcode2 与 barcode1 之间的 linker 序列）
+  - `insert_left`（insert 上游 anchor，等价于旧 `tn5/Tn5 mosaic end`）
 
-TAPS 当前假定：
-
-- R1：`barcodeB-linker2-barcodeA-linker1-Tn5-insert`
+不同文库（TAPS/EMSeq）中 `linker_bc` 左右 barcode 与 `insert_left` 的相对位置满足上述最小约束即可；中间片段不再做结构校验。
 - R2：`insert`
-
-EMSeq 的文库结构和最小配置说明见 `doc/emseq.md`。

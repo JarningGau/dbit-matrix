@@ -13,6 +13,8 @@
     "linker1": "TAAGTGTTGGTTTTTTGTATTT",
     "linker2": "ATTTATGTGTTTGAGAGGTTAGAGTATTTG",
     "tn5": "TATTGGTGTATGATTAGATGTGTATAAGAGATAG",
+    "linker_bc": "ATTTATGTGTTTGAGAGGTTAGAGTATTTG",
+    "insert_left": "TATTGGTGTATGATTAGATGTGTATAAGAGATAG",
     "linker_edit_distance": 1,
     "barcode_hamming_distance": 0,
     "gzip_level": 1,

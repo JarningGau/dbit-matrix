@@ -47,9 +47,9 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 - matched 与 spike-in 必须分流
 - read name 改写为 `@barcodeA+barcodeB:original_name`
 - 统计文件包含保留率与拒绝原因
-- TAPS：`scripts/extract_bc.py`，`R1 = barcodeB-linker2-barcodeA-linker1-Tn5-insert`
-- EMSeq：`scripts-emseq/extract_bc.py`，`R1 = linker1-barcodeB-linker2-barcodeA-others(15 bp)-Tn5-insert`
-- EMSeq `others(15 bp)` 为内部固定约束，不暴露为 CLI 参数
+- TAPS/EMSeq：`scripts/extract_bc.py`
+- 使用 `linker_bc` 定位 barcode：`barcode2(linker_bc左侧)` 与 `barcode1(linker_bc右侧)`（barcode 长度由 whitelist 推导）
+- insert 定位：从 `bc1_end` 之后开始搜索 `insert_left`，定位到后对 R1 进行 trim；不再校验中间结构（如 `linker1` / 固定 `others(15 bp)`）
 
 ## 3. `align`
 

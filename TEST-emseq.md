@@ -6,7 +6,7 @@ EMSeq 独立入口维护者回归。用户说明见 `doc/emseq.md`；输入输�
 
 - 入口：`scripts-emseq/make_cmd.py`
 - Stages：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，以及 `all`（生成 `commands/run.sh` / `run.sbatch` 串联全流程）
-- 单步脚本：`scripts/fastp_split.py`、`scripts-emseq/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`、`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
+- 单步脚本：`scripts/fastp_split.py`、`scripts/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`、`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
 - 样例配置：`workflow/dbit_emseq_test.json`
 
 ## 最小验收

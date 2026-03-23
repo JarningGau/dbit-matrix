@@ -35,7 +35,8 @@ Slurm 环境需额外配置各 stage 资源：
 
 ### demux
 
-- `linker1`、`linker2`、`tn5`
+- `linker_bc`：barcode2 与 barcode1 之间的 linker
+- `insert_left`：insert 上游 anchor（等价于旧 `tn5` / `Tn5 mosaic end`）
 - `linker_edit_distance`
 - `barcode_hamming_distance`
 - `gzip_level`
@@ -84,7 +85,7 @@ Slurm 环境需额外配置各 stage 资源：
 EMSeq 从 `workflow/dbit_emseq_test.json` 复制配置，主要差异：
 
 - `fastp_split`：`sample_id`、`r1`、`r2`、`work_root`、`fastp_threads`、`number_of_split_parts`、`fastp_bin`
-- `demux_extract_bc`：`barcode1_whitelist`、`barcode2_whitelist`、`linker1`、`linker2`、`tn5`
+- `demux_extract_bc`：`barcode1_whitelist`、`barcode2_whitelist`、`linker_bc`、`insert_left`
 - `align`：`biscuit_reference`、`biscuit_threads`、`biscuit_batch_size`、`biscuit_bin`、`sinto_bin`、`samtools_bin`
 - **`split` 必填**：`split_barcodes`
 - **`call` 必填**：`call_reference_file`、`call_jobs`

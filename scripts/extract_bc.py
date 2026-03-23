@@ -17,7 +17,7 @@ from fuzzysearch import find_near_matches
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Locate linker2/Tn5 on R1, extract barcodeA/barcodeB, "
+            "Locate barcode-linked linker and insert anchor on R1, extract barcodes, "
             "filter by whitelist, and output paired FASTQ."
         )
     )
@@ -46,19 +46,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--linker1",
-        default="GTGGCCGATGTTTCG",
-        help="Expected linker1 sequence.",
+        "--linker-bc",
+        required=True,
+        help="Expected linker sequence between barcode2 and barcode1.",
     )
     parser.add_argument(
-        "--linker2",
-        default="ATCCACGTGCTTGAGAGGCCAGAGCATTCG",
-        help="Expected linker2 sequence.",
-    )
-    parser.add_argument(
-        "--tn5",
-        default="CATCGGCGTACGACTAGATGTGTATAAGAGACAG",
-        help="Expected Tn5 mosaic end sequence on R1.",
+        "--insert-left",
+        required=True,
+        help="Expected insert-left anchor sequence on R1 (equivalent to previous --tn5).",
     )
     parser.add_argument(
         "--linker-edit-distance",
@@ -358,9 +353,8 @@ def main() -> int:
         raise ValueError("--linker-edit-distance must be >= 0")
     if args.barcode_hamming_distance < 0:
         raise ValueError("--barcode-hamming-distance must be >= 0")
-    linker1 = args.linker1.upper()
-    linker2 = args.linker2.upper()
-    tn5 = args.tn5.upper()
+    linker_bc = args.linker_bc.upper()
+    insert_left = args.insert_left.upper()
 
     bc1_allow = read_whitelist(args.barcode1_whitelist)
     bc2_allow = read_whitelist(args.barcode2_whitelist)
@@ -386,13 +380,13 @@ def main() -> int:
         "short_r1": 0,
         "structure_mismatch": 0,
         "linker2_not_found": 0,
-        "linker1_mismatch": 0,
         "tn5_not_found": 0,
         "barcode1_not_in_whitelist": 0,
         "barcode2_not_in_whitelist": 0,
     }
 
-    prefix_len = bc2_len + len(linker2) + bc1_len + len(linker1) + len(tn5)
+    # Minimal length needed to extract both barcodes and the insert anchor motif.
+    prefix_len = bc2_len + len(linker_bc) + bc1_len + len(insert_left)
     t0 = time.monotonic()
     t_last = t0
     reads_last = 0
@@ -442,14 +436,19 @@ def main() -> int:
                     report_progress()
                     continue
 
-                linker2_window_start = 0
-                linker2_window_end = min(len(s1_u), bc2_len + len(linker2) + 12)
+                linker_bc_window_start = 0
+                # Keep the window small for performance, but large enough to handle
+                # the TAPS/EMSeq-like prefixes where the barcode-linked linker
+                # is not necessarily at the read start.
+                linker_bc_window_end = min(
+                    len(s1_u), bc2_len + len(linker_bc) + 12 + 50
+                )
                 linker2_pos = find_linker2(
                     s1_u,
-                    linker2,
+                    linker_bc,
                     max_edit_distance=args.linker_edit_distance,
-                    window_start=linker2_window_start,
-                    window_end=linker2_window_end,
+                    window_start=linker_bc_window_start,
+                    window_end=linker_bc_window_end,
                 )
                 if linker2_pos is None:
                     reject_counts["structure_mismatch"] += 1
@@ -461,11 +460,8 @@ def main() -> int:
                 linker2_start, linker2_end = linker2_pos
                 bc2_start = linker2_start - bc2_len
                 bc1_end = linker2_end + bc1_len
-                linker1_start = bc1_end
-                linker1_end = linker1_start + len(linker1)
-                if bc2_start < 0 or linker1_end > len(s1_u):
+                if bc2_start < 0 or bc1_end > len(s1_u):
                     reject_counts["structure_mismatch"] += 1
-                    reject_counts["linker1_mismatch"] += 1
                     r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
                     r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
                     report_progress()
@@ -473,38 +469,11 @@ def main() -> int:
 
                 barcode2_obs = s1_u[bc2_start:linker2_start]
                 barcode1_obs = s1_u[linker2_end:bc1_end]
-                linker1_obs = s1_u[linker1_start:linker1_end]
-                # linker1 fast path: exact first, then mismatch-only, then full edit.
-                linker1_ok = linker1_obs == linker1
-                if not linker1_ok and args.linker_edit_distance > 0:
-                    if (
-                        hamming_distance(
-                            linker1_obs, linker1, stop_at=args.linker_edit_distance
-                        )
-                        <= args.linker_edit_distance
-                    ):
-                        linker1_ok = True
-                    elif (
-                        levenshtein_distance(
-                            linker1_obs,
-                            linker1,
-                            max_dist=args.linker_edit_distance,
-                        )
-                        <= args.linker_edit_distance
-                    ):
-                        linker1_ok = True
-                if not linker1_ok:
-                    reject_counts["structure_mismatch"] += 1
-                    reject_counts["linker1_mismatch"] += 1
-                    r1_spike_out.write(f"{h1}\n{s1}\n{p1}\n{q1}\n")
-                    r2_spike_out.write(f"{h2}\n{s2}\n{p2}\n{q2}\n")
-                    report_progress()
-                    continue
 
                 tn5_pos = find_tn5(
                     s1_u,
-                    tn5,
-                    after_pos=linker1_end,
+                    insert_left,
+                    after_pos=bc1_end,
                     max_edit_distance=args.linker_edit_distance,
                 )
                 if tn5_pos is None:
