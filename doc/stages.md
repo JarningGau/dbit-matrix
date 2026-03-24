@@ -51,6 +51,17 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 - 使用 `linker_bc` 定位 barcode：`barcode2(linker_bc左侧)` 与 `barcode1(linker_bc右侧)`（barcode 长度由 whitelist 推导）
 - insert 定位：从 `bc1_end` 之后开始搜索 `insert_left`，定位到后对 R1 进行 trim；不再校验中间结构（如 `linker1` / 固定 `others(15 bp)`）
 
+**DBiT-RNA (MVP) 约定**：
+- 入口：`scripts-rna/make_cmd.py`
+- 实现：`scripts-rna/extract_bc.py`
+- 输入直接使用原始 `r1/r2`（不经过 `fastp_split`）
+- RNA 不使用 chunk 概念（单样本单对 clean FASTQ）
+- R1 结构：`BC2-linker_bc-BC1-UMI_left-UMI`
+- 输出：
+  - `demux/<sample>.R1.clean.fq.gz`（序列为 `BC2+BC1+UMI`）
+  - `demux/<sample>.R2.clean.fq.gz`（cDNA）
+  - `demux/<sample>.stats.json`
+
 ## 3. `align`
 
 **功能**：将 demux 后 reads 分别比对至 spike-in 与 host 参考序列
@@ -69,6 +80,17 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 - host 输入必须为 `*.demux.fq.gz`
 - spike-in 输入必须为 `*.spike-in.fq.gz`
 - EMSeq 使用 `scripts-emseq/aligner.py`（`biscuit align`），输出契约一致
+
+**DBiT-RNA (MVP) 约定**：
+- 入口：`scripts-rna/make_cmd.py`
+- 实现：`scripts-rna/align.py`
+- 输入：`demux/<sample>.R1.clean.fq.gz`、`demux/<sample>.R2.clean.fq.gz`
+- 输出：`solo/`（STARsolo matrix 产物目录）
+- 附加输出：
+  - `solo/star.Solo.out/Gene/raw/barcodes_pos.tsv`
+  - `solo/star.Solo.out/Gene/filtered/barcodes_pos.tsv`
+  - `barcodes_pos.tsv` 列为 `barcode\tx\ty`，`x/y` 为 whitelist 行号 0-based 坐标
+- 当前实现为 STARsolo（matrix-only），不输出 BAM
 
 ## 4. `pool`
 

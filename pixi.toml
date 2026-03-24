@@ -13,6 +13,7 @@ bwa = ">=0.7.19,<0.8"
 sinto = ">=0.9.0,<0.10"
 samtools = ">=1.23,<2"
 biscuit = ">=1.7.1.20250908,<2"
+star = ">=2.7.11b,<3"
 
 [tasks]
 make-cmd-dry-run = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --dry-run"

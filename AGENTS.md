@@ -55,6 +55,7 @@
 
 - commit 信息写“为什么做”，不要只写“改了什么”。
 - 每次提交只聚焦一个主题。
+- 提交信息中不要混入中文。
 - 建议主题行（subject）格式统一为“范围/阶段 + 为什么（一句话）”，优先用当前工作流阶段做前缀，便于回溯与检索：
   - `EMSeq <stage>: <why>`（例如 `EMSeq call: ...` / `EMSeq split: ...`）
   - 或 `docs: <why>`、`workflow(emseq): <why>`、`scripts-emseq: <why>` 等（范围清晰即可）

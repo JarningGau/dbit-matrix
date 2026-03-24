@@ -1,0 +1,34 @@
+{
+    "runner": "local",
+    "stage": "demux_extract_bc",
+    "sample_id": "test-DBiT-RNA",
+    "r1": "data/raw/test-mRNA/MP21_20um_RNA_2.fastq.gz",
+    "r2": "data/raw/test-mRNA/MP21_20um_RNA_1.fastq.gz",
+    "work_root": "work",
+    "barcode1_whitelist": "configs/barcodes_50a.tsv",
+    "barcode2_whitelist": "configs/barcodes_50a.tsv",
+    "linker_bc": "ATCCACGTGCTTGAGAGGCCAGAGCATTCG",
+    "umi_left": "GTGGCCGATGTTTCG",
+    "umi_len": 10,
+    "barcode_hamming_distance": 1,
+    "linker_edit_distance": 1,
+    "gzip_level": 1,
+    "star_bin": "STAR",
+    "star_genome_dir": "/mnt/d/resource/star/mm10-2020-A",
+    "solo_cb_whitelist": "None",
+    "solo_cell_filter": "EmptyDrops_CR",
+    "out_tmp_dir": "/home/jarning/solotmp",
+    "align_threads": 8,
+    "slurm": {
+        "demux_extract_bc": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
+        },
+        "align": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
+        }
+    }
+}

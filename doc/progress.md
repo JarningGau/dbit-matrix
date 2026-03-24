@@ -8,6 +8,12 @@ EMSeq 独立入口主线已闭环：
 
 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 
+DBiT-RNA MVP 已接入独立入口（当前范围）：
+
+`demux_extract_bc -> align`
+
+RNA 当前 `align` 已从占位 BAM 迁移为 STARsolo matrix-only 输出（`work/<sample>/solo/`），并采用非 chunk 模式。
+
 ## 已完成（主线）
 
 - `fastp_split`

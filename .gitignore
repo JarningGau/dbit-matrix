@@ -8,6 +8,7 @@ work/
 workflow/*
 !workflow/dbit_emseq_test.json
 !workflow/dbit_taps_test.json
+!workflow/dbit_rna_test.json
 
 # Python cache/build artifacts
 __pycache__/
