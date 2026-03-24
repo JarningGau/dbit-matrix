@@ -36,10 +36,13 @@
     "mbias_min_mapping_quality": 1,
     "call_reference_file": "/storage/liliLab/gaojianing/resource/biscuit/mm10/genome.fa",
     "call_jobs": 24,
-    "call_mode": "host",
+    "call_mode": "all",
     "call_host_threads": 1,
     "call_spike_threads": 1,
-    "spike_in_index": {},
+    "spike_in_index": {
+        "lambda": "/storage/liliLab/gaojianing/resource/biscuit/lambda/genome.fa",
+        "puc19": "/storage/liliLab/gaojianing/resource/biscuit/puc19/genome.fa"
+    },
     "saturation_script": "scripts/saturation.py",
     "saturation_reads_threshold": 100000,
     "summary_script": "scripts/summary.py",
