@@ -4,6 +4,11 @@ data/
 # Runtime outputs and generated command files
 work/
 
+# Workflow JSON: only test fixtures are tracked
+workflow/*
+!workflow/dbit_emseq_test.json
+!workflow/dbit_taps_test.json
+
 # Python cache/build artifacts
 __pycache__/
 *.py[cod]
