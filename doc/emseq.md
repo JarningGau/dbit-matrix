@@ -40,7 +40,7 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 - **demux**：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
 - **align**：`spike_in_index`（对象或 `NAME=INDEX` 列表）
 - **mbias**：`mbias_host_subsample_fraction`、`mbias_max_cycle`、`mbias_min_mapping_quality`；Slurm：`slurm.mbias.host` / `slurm.mbias.spike`
-- **call**：`call_host_threads`、`call_spike_threads`、`call_host_subsample_fraction`、`call_host_subsample_seed`（`host_mito` BAM 回退用）；Slurm：`slurm.call.host` / `slurm.call.spike`
+- **call**：`call_host_threads`、`call_spike_threads`、`call_left_trimming` / `call_right_trimming`（传给 `biscuit pileup` 的 `-5` / `-3`，按每条 read 的 5'/3' 端距；**不能**像 TAPS 的 `call_r1_*` / `call_r2_*` 那样分 R1/R2）、`call_host_subsample_fraction`、`call_host_subsample_seed`（`host_mito` BAM 回退用）；Slurm：`slurm.call.host` / `slurm.call.spike`
 - **saturation**：`saturation_reads_threshold`；Slurm：`slurm.saturation`
 - **summary**：Slurm：`slurm.summary`
 - **`all` + `slurm`**：`run.sbatch` SBATCH 头默认取自 `slurm.summary`

@@ -42,6 +42,8 @@
     "call_mode": "host",
     "call_host_threads": 1,
     "call_spike_threads": 1,
+    "call_left_trimming": 3,
+    "call_right_trimming": 3,
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/biscuit/lambda/genome.fa"
     },

@@ -277,6 +277,26 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--call-left-trimming",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "If set, biscuit pileup -5 N (read 5' end distance). "
+            "If omitted, use workflow default or biscuit built-in default."
+        ),
+    )
+    parser.add_argument(
+        "--call-right-trimming",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "If set, biscuit pileup -3 N (read 3' end distance). "
+            "If omitted, use workflow default or biscuit built-in default."
+        ),
+    )
+    parser.add_argument(
         "--spike-in-index",
         action="append",
         default=None,
@@ -627,6 +647,10 @@ def build_call_command(
         "--mito-chromosomes",
         args.call_mito_chromosomes,
     ]
+    if args.call_left_trimming is not None:
+        command.extend(["--call-left-trimming", str(args.call_left_trimming)])
+    if args.call_right_trimming is not None:
+        command.extend(["--call-right-trimming", str(args.call_right_trimming)])
     if spike_references:
         for item in spike_references:
             command.extend(["--spike-reference", item])
@@ -840,6 +864,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "call_mito_chromosomes": pick(
             args.call_mito_chromosomes, cfg.get("call_mito_chromosomes")
         ),
+        "call_left_trimming": pick(
+            args.call_left_trimming, cfg.get("call_left_trimming")
+        ),
+        "call_right_trimming": pick(
+            args.call_right_trimming, cfg.get("call_right_trimming")
+        ),
         "spike_in_index": pick(args.spike_in_index, cfg.get("spike_in_index")),
         # M-bias stage.
         "mbias_script": pick(args.mbias_script, cfg.get("mbias_script")),
@@ -1014,6 +1044,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["call_spike_threads"] <= 0:
         raise ValueError("call_spike_threads must be > 0")
+
+    for trim_key in ("call_left_trimming", "call_right_trimming"):
+        if settings[trim_key] is not None:
+            settings[trim_key] = int(settings[trim_key])
+            if settings[trim_key] < 0:
+                raise ValueError(f"{trim_key} must be >= 0")
 
     settings["host_subsample_fraction"] = (
         float(settings["host_subsample_fraction"])
@@ -2045,6 +2081,8 @@ def main() -> int:
             call_bgzip_bin=settings["call_bgzip_bin"],
             call_tabix_bin=settings["call_tabix_bin"],
             call_mito_chromosomes=settings["call_mito_chromosomes"],
+            call_left_trimming=settings["call_left_trimming"],
+            call_right_trimming=settings["call_right_trimming"],
             biscuit_bin=settings["biscuit_bin"],
             spike_in_index=settings["spike_in_index"],
         )

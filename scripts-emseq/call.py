@@ -135,6 +135,26 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--call-left-trimming",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "If set, pass -5 N to biscuit pileup (minimum distance to read 5' end). "
+            "If omitted, biscuit default applies."
+        ),
+    )
+    parser.add_argument(
+        "--call-right-trimming",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "If set, pass -3 N to biscuit pileup (minimum distance to read 3' end). "
+            "If omitted, biscuit default applies."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print commands only; do not execute calling.",
@@ -215,11 +235,19 @@ def ensure_pileup_vcf(
         "-c",
         "-u",
         "-p",
-        "-@",
-        str(threads),
-        reference_file,
-        str(bam_file),
     ]
+    if args.call_left_trimming is not None:
+        pileup_cmd.extend(["-5", str(args.call_left_trimming)])
+    if args.call_right_trimming is not None:
+        pileup_cmd.extend(["-3", str(args.call_right_trimming)])
+    pileup_cmd.extend(
+        [
+            "-@",
+            str(threads),
+            reference_file,
+            str(bam_file),
+        ]
+    )
     bgzip_cmd = [args.bgzip_bin, "-@", "1", "-c"]
 
     print(f"[emseq.call] pileup_bam={bam_file} -> {out_vcf_gz}")
@@ -628,6 +656,10 @@ def main() -> int:
         raise ValueError("--host-subsample-seed must be >= 0")
     if args.host_subsample_fraction <= 0 or args.host_subsample_fraction > 1:
         raise ValueError("--host-subsample-fraction must be in (0, 1]")
+    if args.call_left_trimming is not None and args.call_left_trimming < 0:
+        raise ValueError("--call-left-trimming must be >= 0")
+    if args.call_right_trimming is not None and args.call_right_trimming < 0:
+        raise ValueError("--call-right-trimming must be >= 0")
 
     work_path = Path(args.work_path)
     mito_chromosomes = parse_chromosome_csv(args.mito_chromosomes)

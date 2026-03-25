@@ -89,6 +89,7 @@ EMSeq 从 `workflow/dbit_emseq_test.json` 复制配置，主要差异：
 - `align`：`biscuit_reference`、`biscuit_threads`、`biscuit_batch_size`、`biscuit_bin`、`sinto_bin`、`samtools_bin`
 - **`split` 必填**：`split_barcodes`
 - **`call` 必填**：`call_reference_file`、`call_jobs`
+- **`call` 可选**：`call_left_trimming` / `call_right_trimming` → `biscuit pileup -5` / `-3`（每条 read 的 5'/3' 端最小距离；与 TAPS 的 `call_r1_*` / `call_r2_*` 不同，**不能**按 R1/R2 分别设置）。省略时不传对应 flag，使用 biscuit 内置默认。
 - demux 可调参数：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
 - Slurm 按 stage 配置：`slurm.split.split_bams`、`slurm.mbias.host`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`
 
