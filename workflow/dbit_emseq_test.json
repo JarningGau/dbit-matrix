@@ -116,6 +116,11 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "8G",
             "cpus_per_task": 1
+        },
+        "aggregate": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
         }
     }
 }
