@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Flatten host per-spot .CG.cov rows into two sorted headerless TSV tables."""
+"""Flatten host per-spot .CG.cov rows into two sorted headerless TSV tables.
+
+This script is designed to keep Python memory usage roughly constant by:
+- streaming `aggregated_cg_by_id.tsv` directly to disk (no full in-memory rows list)
+- delegating coordinate-based ordering of `aggregated_cg_by_pos.tsv` to GNU `sort`
+  (with a configurable memory cap via `-S`).
+"""
 
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 from pathlib import Path
 
 SUFFIX = ".CG.cov"
@@ -28,6 +36,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print resolved paths and row counts; do not write output files.",
     )
+    parser.add_argument(
+        "--sort-mem",
+        default="8G",
+        help=(
+            "Memory limit passed to GNU `sort -S` when generating "
+            "`aggregated_cg_by_pos.tsv`. Default: 8G."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -38,8 +54,12 @@ def spot_id_from_cov_path(cov_path: Path) -> str:
     return name[: -len(SUFFIX)]
 
 
-def collect_rows(cov_paths: list[Path]) -> list[tuple[str, str, int, int, int, int]]:
-    rows: list[tuple[str, str, int, int, int, int]] = []
+def iter_parsed_rows(cov_paths: list[Path]):
+    """Yield parsed (spot_id, chrom, start, end, mc, c_unmeth) rows.
+
+    Note: to keep memory usage constant, callers should consume this iterator
+    in a streaming fashion (no `list()` / `sorted()` of all rows).
+    """
     for cov_path in cov_paths:
         spot_id = spot_id_from_cov_path(cov_path)
         with cov_path.open("r", encoding="utf-8") as handle:
@@ -58,24 +78,60 @@ def collect_rows(cov_paths: list[Path]) -> list[tuple[str, str, int, int, int, i
                     c_unmeth = int(fields[5])
                 except ValueError:
                     continue
-                rows.append((spot_id, chrom, start, end, mc, c_unmeth))
-    return rows
+                yield (spot_id, chrom, start, end, mc, c_unmeth)
 
 
-def write_tsv(path: Path, ordered: list[tuple[str, str, int, int, int, int]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for spot_id, chrom, start, end, mc, c_unmeth in ordered:
+def write_by_id(out_by_id: Path, cov_paths: list[Path]) -> int:
+    out_by_id.parent.mkdir(parents=True, exist_ok=True)
+    row_count = 0
+    with out_by_id.open("w", encoding="utf-8") as handle:
+        for spot_id, chrom, start, end, mc, c_unmeth in iter_parsed_rows(cov_paths):
             handle.write(
                 f"{spot_id}\t{chrom}\t{start}\t{end}\t{mc}\t{c_unmeth}\n"
             )
+            row_count += 1
+    return row_count
+
+
+def run_sort_by_pos(out_by_pos: Path, out_by_id: Path, sort_mem: str) -> None:
+    """External sort for `aggregated_cg_by_pos.tsv`.
+
+    Key: (chr, start, end, id) where:
+    - id   = col1
+    - chr  = col2
+    - start= col3 (numeric)
+    - end  = col4 (numeric)
+    """
+    sort_env = dict(os.environ)
+    # Make sort order deterministic across locales; Python string ordering is codepoint-based.
+    sort_env["LC_ALL"] = "C"
+
+    sort_cmd = [
+        "sort",
+        "-t",
+        "\t",
+        "-k2,2",
+        "-k3,3n",
+        "-k4,4n",
+        "-k1,1",
+        "-S",
+        sort_mem,
+        "-o",
+        str(out_by_pos),
+        str(out_by_id),
+    ]
+    print(f"[aggregate] run: {' '.join(sort_cmd)}")
+    subprocess.run(sort_cmd, check=True, env=sort_env)
 
 
 def main() -> int:
     args = parse_args()
     work_path = Path(args.work_path)
     host_cov_root = work_path / "coverage" / "host"
-    cov_paths = sorted(host_cov_root.rglob(f"*{SUFFIX}"))
+    cov_paths = sorted(
+        host_cov_root.rglob(f"*{SUFFIX}"),
+        key=lambda p: spot_id_from_cov_path(p),
+    )
     out_by_id = work_path / "coverage" / OUT_BY_ID
     out_by_pos = work_path / "coverage" / OUT_BY_POS
 
@@ -85,18 +141,26 @@ def main() -> int:
     print(f"[aggregate] out_by_id={out_by_id}")
     print(f"[aggregate] out_by_pos={out_by_pos}")
 
-    rows = collect_rows(cov_paths)
-    print(f"[aggregate] row_count={len(rows)}")
-
-    by_id = sorted(rows, key=lambda r: (r[0], r[1], r[2], r[3]))
-    by_pos = sorted(rows, key=lambda r: (r[1], r[2], r[3], r[0]))
+    row_count = 0
+    if args.dry_run:
+        # Count rows without materializing them in memory.
+        for _ in iter_parsed_rows(cov_paths):
+            row_count += 1
+    else:
+        row_count = write_by_id(out_by_id, cov_paths)
+    print(f"[aggregate] row_count={row_count}")
 
     if args.dry_run:
         print("[aggregate] dry_run=1 skip_write")
+        # Show the planned external sort invocation (still no file writes).
+        print(
+            "[aggregate] dry_run=1 skip sort; planned: "
+            f"sort -t $'\\t' -k2,2 -k3,3n -k4,4n -k1,1 -S {args.sort_mem} "
+            f"-o {out_by_pos} {out_by_id}"
+        )
         return 0
 
-    write_tsv(out_by_id, by_id)
-    write_tsv(out_by_pos, by_pos)
+    run_sort_by_pos(out_by_pos, out_by_id, sort_mem=args.sort_mem)
     print("[aggregate] done")
     return 0
 

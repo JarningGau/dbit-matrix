@@ -366,6 +366,14 @@ def parse_args() -> argparse.Namespace:
         help="Path to aggregate script. Default: scripts/aggregate.py.",
     )
     parser.add_argument(
+        "--aggregate-sort-mem",
+        help=(
+            "Memory limit for GNU `sort -S` in aggregate stage "
+            "(passed to scripts/aggregate.py via `--sort-mem`). "
+            "Default comes from workflow config `aggregate_sort_mem` or 8G."
+        ),
+    )
+    parser.add_argument(
         "--submit",
         action="store_true",
         help="Submit immediately after generating command file.",
@@ -703,6 +711,9 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
         "--work-path",
         str(sample_work),
     ]
+    sort_mem = getattr(args, "sort_mem", None)
+    if sort_mem:
+        command.extend(["--sort-mem", str(sort_mem)])
     return quoted(command)
 
 
@@ -912,6 +923,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         # Summary stage.
         "summary_script": pick(args.summary_script, cfg.get("summary_script")),
         "aggregate_script": pick(args.aggregate_script, cfg.get("aggregate_script")),
+        "aggregate_sort_mem": pick(
+            args.aggregate_sort_mem,
+            cfg.get("aggregate_sort_mem", "8G"),
+        ),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -2322,6 +2337,7 @@ def main() -> int:
     elif stage == "aggregate":
         command_args = argparse.Namespace(
             aggregate_script=settings["aggregate_script"],
+            sort_mem=settings["aggregate_sort_mem"],
         )
         command = build_aggregate_command(command_args, sample_work)
         if settings["runner"] == "local":

@@ -31,6 +31,7 @@
     "split_threads_write": 1,
     "split_smoke": true,
     "split_sort_jobs": 8,
+    "aggregate_sort_mem": "8G",
     "mbias_mode": "all",
     "mbias_host_subsample_fraction": 0.1,
     "mbias_max_cycle": 150,

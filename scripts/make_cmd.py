@@ -309,6 +309,14 @@ def parse_args() -> argparse.Namespace:
         help="Path to aggregate script. Default: scripts/aggregate.py.",
     )
     parser.add_argument(
+        "--aggregate-sort-mem",
+        help=(
+            "Memory limit for GNU `sort -S` in aggregate stage "
+            "(passed to scripts/aggregate.py via `--sort-mem`). "
+            "Default comes from workflow config `aggregate_sort_mem` or 8G."
+        ),
+    )
+    parser.add_argument(
         "--spike-in-index",
         action="append",
         default=None,
@@ -662,6 +670,9 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
         "--work-path",
         str(sample_work),
     ]
+    sort_mem = getattr(args, "sort_mem", None)
+    if sort_mem:
+        command.extend(["--sort-mem", str(sort_mem)])
     return quoted(command)
 
 
@@ -1150,6 +1161,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         ),
         "summary_script": pick(args.summary_script, cfg.get("summary_script")),
         "aggregate_script": pick(args.aggregate_script, cfg.get("aggregate_script")),
+        "aggregate_sort_mem": pick(
+            args.aggregate_sort_mem,
+            cfg.get("aggregate_sort_mem", "8G"),
+        ),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
@@ -2427,6 +2442,7 @@ def main() -> int:
     elif settings["stage"] == "aggregate":
         command_args = argparse.Namespace(
             aggregate_script=settings["aggregate_script"],
+            sort_mem=settings["aggregate_sort_mem"],
         )
         command = build_aggregate_command(command_args, sample_work)
         if settings["runner"] == "local":

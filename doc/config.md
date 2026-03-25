@@ -58,6 +58,7 @@ Slurm 环境需额外配置各 stage 资源：
 - `call_r2_left_trimming` / `call_r2_right_trimming`
 - `saturation_reads_threshold`
 - `aggregate_script`：可选，覆盖默认 `scripts/aggregate.py`
+- `aggregate_sort_mem`：可选，传给 `scripts/aggregate.py` 中 GNU `sort -S` 的内存上限（默认 `8G`）
 
 `call_r1_*_trimming` 与 `call_r2_*_trimming` 按原始 read 两端 cycle 定义，reverse-strand 比对保持 left/right 端语义。
 
