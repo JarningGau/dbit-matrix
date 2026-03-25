@@ -378,3 +378,36 @@ pixi run python scripts/summary.py \
 - reads 数值字段应为千分位格式，百分比字段应为 `XX.XX%` 格式
 - `valid_reads_rate` 应满足 `host_valid_reads/raw_reads`
 - 3 张 heatmap 应来自 `per_spot_summary.tsv` 中的 `X_index`、`Y_index` 和对应指标列
+
+### `aggregate`（实验性）
+
+```bash
+pixi run python scripts/aggregate.py --help
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage aggregate \
+  --runner local \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage aggregate \
+  --runner slurm \
+  --dry-run
+```
+
+单步 smoke（需在 `call` 之后存在 `coverage/host/**/*.CG.cov`）：
+
+```bash
+pixi run python scripts/aggregate.py \
+  --work-path work/test-DNAme-TAPS \
+  --dry-run
+```
+
+检查点：
+
+- 不写表头；每行固定 6 列：`id`、`chr`、`start`、`end`、`mC`、`C`（契约见 `doc/stages.md` §11）
+- `coverage/aggregated_cg_by_id.tsv` 按 `id`、`chr`、`start`、`end` 排序
+- `coverage/aggregated_cg_by_pos.tsv` 按 `chr`、`start`、`end`、`id` 排序
+- `--stage all` 的 stage 顺序不变，且不包含 `aggregate`

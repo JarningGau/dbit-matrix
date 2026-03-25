@@ -154,6 +154,26 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
+### `aggregate`（实验性）
+
+不纳入 `all`；需显式指定 stage。
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage aggregate \
+  --runner local \
+  --dry-run
+```
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage aggregate \
+  --runner slurm \
+  --dry-run
+```
+
 ## 常见组合
 
 只验证 Slurm 命令是否能正确展开：

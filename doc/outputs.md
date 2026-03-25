@@ -46,6 +46,10 @@ reads 数值可能为千分位格式。
 
 - `work/<sample>/coverage/<spike_name>.CG.cov`（配置 `spike_in_index` 且执行对应 calling）
 
+### `aggregate` 扁平表（实验性，可选）
+
+- `work/<sample>/coverage/aggregated_cg_by_id.tsv`、`aggregated_cg_by_pos.tsv`：由 `aggregate` stage 从 `coverage/host/**/*.CG.cov` 生成；**无表头**，列顺序与含义见 `doc/stages.md` §11
+
 ### Saturation
 
 - `work/<sample>/qc/saturation/saturation_summary.tsv`

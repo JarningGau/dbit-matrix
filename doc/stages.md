@@ -237,3 +237,29 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 - 包含 host、host_mito、各 spike-in 与 `saturation_rate` 汇总
 - reads 数值按千分位格式输出
 - 缺失输入保持固定列并写 `NA`
+
+## 11. `aggregate`（实验性）
+
+**功能**：将 host per-spot 的 `.CG.cov` 行扁平汇总为两个无表头 TSV（不按坐标跨文件合并；同一 CpG 在不同 spot 文件中仍各占一行）。
+
+**状态**：不纳入 `--stage all`；需显式 `--stage aggregate`。
+
+**输入**：
+
+- `coverage/host/**/*.CG.cov`（与 `call` 产物相同；Bismark-like 六列：`chr`、起始终止坐标、甲基化百分比、`mC`、`C`）
+
+**输出**（均在 `coverage/`，**无表头行**）：
+
+- `aggregated_cg_by_id.tsv`：行序按 `id`（spot，见下）、`chr`、`start`、`end`
+- `aggregated_cg_by_pos.tsv`：行序按 `chr`、`start`、`end`、`id`
+
+**列约定**（两文件相同，制表符分隔，顺序固定）：
+
+1. `id`：来源文件名去掉 `.CG.cov` 后缀（例如 `45_21`）
+2. `chr`
+3. `start`（整数）
+4. `end`（整数）
+5. `mC`：对应 `.cov` 第 5 列（TAPS `methy_caller` 中为甲基化计数）
+6. `C`：对应 `.cov` 第 6 列（非甲基化计数）
+
+**编排**：`scripts/make_cmd.py --stage aggregate` 生成本地 `commands/10_aggregate.sh` 或 Slurm `commands/10_aggregate.sbatch`；等价单步：`scripts/aggregate.py --work-path <work>`。

@@ -49,7 +49,7 @@ Slurm 环境需额外配置各 stage 资源：
 - `split_barcodes`
 - `split_smoke`：`true` 时最多输出 16 个非空 spot
 
-### mbias / call / saturation / summary
+### mbias / call / saturation / summary / aggregate（实验）
 
 - `mbias_mode`：`spike`、`host`、`all`
 - `mbias_host_subsample_fraction`
@@ -57,6 +57,7 @@ Slurm 环境需额外配置各 stage 资源：
 - `call_r1_left_trimming` / `call_r1_right_trimming`
 - `call_r2_left_trimming` / `call_r2_right_trimming`
 - `saturation_reads_threshold`
+- `aggregate_script`：可选，覆盖默认 `scripts/aggregate.py`
 
 `call_r1_*_trimming` 与 `call_r2_*_trimming` 按原始 read 两端 cycle 定义，reverse-strand 比对保持 left/right 端语义。
 

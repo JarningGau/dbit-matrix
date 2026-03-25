@@ -21,7 +21,9 @@ STAGE_SEQUENCE = [
     "saturation",
     "summary",
 ]
-STAGE_CHOICES = [*STAGE_SEQUENCE, "all"]
+STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "all"]
+# Stages that may appear as top-level keys under workflow `slurm` (nested mode).
+SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate"}
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -36,6 +38,7 @@ STAGE_REQUIRED_FIELDS = {
     "call": ["call_reference_file", "call_chromosomes"],
     "saturation": [],
     "summary": [],
+    "aggregate": [],
 }
 
 
@@ -300,6 +303,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--summary-script",
         help="Path to summary script. Default: scripts/summary.py.",
+    )
+    parser.add_argument(
+        "--aggregate-script",
+        help="Path to aggregate script. Default: scripts/aggregate.py.",
     )
     parser.add_argument(
         "--spike-in-index",
@@ -647,6 +654,17 @@ def build_mbias_command(
     return quoted(command)
 
 
+def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.aggregate_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+    ]
+    return quoted(command)
+
+
 def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
     script_path = Path(args.summary_script)
     command = [
@@ -758,7 +776,7 @@ def validate_required_for_stage(stage: str, settings: dict) -> None:
 
 
 def select_stage_slurm_cfg(slurm_cfg_raw: dict, stage: str) -> dict:
-    if any(key in slurm_cfg_raw for key in STAGE_SEQUENCE):
+    if any(key in slurm_cfg_raw for key in SLURM_NEST_STAGE_KEYS):
         stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
     else:
         # Backward compatibility: legacy flat slurm config.
@@ -990,10 +1008,13 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if not isinstance(slurm_cfg_raw, dict):
         raise ValueError("workflow config key 'slurm' must be an object")
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
-    stage_slurm_cfg = select_stage_slurm_cfg(
-        slurm_cfg_raw,
-        stage if stage in STAGE_SEQUENCE else STAGE_SEQUENCE[0],
-    )
+    if stage == "all":
+        slurm_stage_key = STAGE_SEQUENCE[0]
+    elif stage in STAGE_SEQUENCE or stage == "aggregate":
+        slurm_stage_key = stage
+    else:
+        slurm_stage_key = STAGE_SEQUENCE[0]
+    stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, slurm_stage_key)
     split_bams_slurm_cfg = resolve_step_slurm_cfg(
         stage_slurm_cfg,
         "split_bams",
@@ -1128,6 +1149,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             cfg.get("saturation_reads_threshold"),
         ),
         "summary_script": pick(args.summary_script, cfg.get("summary_script")),
+        "aggregate_script": pick(args.aggregate_script, cfg.get("aggregate_script")),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
@@ -1416,6 +1438,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if settings["saturation_reads_threshold"] <= 0:
         raise ValueError("saturation_reads_threshold must be > 0")
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
+    settings["aggregate_script"] = (
+        settings["aggregate_script"] or "scripts/aggregate.py"
+    )
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -2394,6 +2419,45 @@ def main() -> int:
                     ),
                     slurm_error=settings["slurm_error"].replace(
                         "%x", f"dbit_summary_{settings['sample_id']}"
+                    ),
+                    module_line="",
+                )
+                generate_slurm_script(command, script_path, log_dir, slurm_args)
+            generated_scripts.append(script_path)
+    elif settings["stage"] == "aggregate":
+        command_args = argparse.Namespace(
+            aggregate_script=settings["aggregate_script"],
+        )
+        command = build_aggregate_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "10_aggregate.sh"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            script_path = command_dir / "10_aggregate.sbatch"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if not settings["dry_run"]:
+                slurm_args = argparse.Namespace(
+                    job_name=f"dbit_aggregate_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=settings["slurm_output"].replace(
+                        "%x", f"dbit_aggregate_{settings['sample_id']}"
+                    ),
+                    slurm_error=settings["slurm_error"].replace(
+                        "%x", f"dbit_aggregate_{settings['sample_id']}"
                     ),
                     module_line="",
                 )
