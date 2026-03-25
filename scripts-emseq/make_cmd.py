@@ -12,6 +12,7 @@ This is an EMSeq-only entrypoint that supports:
 - `call`
 - `saturation`
 - `summary`
+- `aggregate` (experimental; optional, not part of `--stage all`; reuses `scripts/aggregate.py`)
 - `all` (generates `commands/run.sh` or `commands/run.sbatch` to run the full pipeline in order)
 
 It intentionally keeps EMSeq orchestration separate from the TAPS workflow
@@ -40,7 +41,9 @@ STAGE_SEQUENCE = [
     "saturation",
     "summary",
 ]
-STAGE_CHOICES = [*STAGE_SEQUENCE, "all"]
+# Stages that may appear as top-level keys under workflow `slurm` (nested mode).
+SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate"}
+STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "all"]
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -58,6 +61,7 @@ STAGE_REQUIRED_FIELDS = {
     "call": ["call_reference_file", "call_jobs"],
     "saturation": [],
     "summary": [],
+    "aggregate": [],
 }
 
 
@@ -356,6 +360,10 @@ def parse_args() -> argparse.Namespace:
             "Path to summary script. "
             "Default: scripts/summary.py."
         ),
+    )
+    parser.add_argument(
+        "--aggregate-script",
+        help="Path to aggregate script. Default: scripts/aggregate.py.",
     )
     parser.add_argument(
         "--submit",
@@ -687,6 +695,17 @@ def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
     return quoted(command)
 
 
+def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.aggregate_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+    ]
+    return quoted(command)
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -713,7 +732,7 @@ def validate_required_for_stage(stage: str, settings: dict) -> None:
 
 
 def select_stage_slurm_cfg(slurm_cfg_raw: dict, stage: str) -> dict:
-    if any(key in slurm_cfg_raw for key in STAGE_SEQUENCE):
+    if any(key in slurm_cfg_raw for key in SLURM_NEST_STAGE_KEYS):
         stage_slurm_cfg = slurm_cfg_raw.get(stage, {})
     else:
         stage_slurm_cfg = slurm_cfg_raw
@@ -760,11 +779,13 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if stage not in STAGE_CHOICES:
         raise ValueError(f"unsupported stage for EMSeq entry: {stage}")
 
-    # When stage is `all`, bootstrap Slurm defaults from the first real stage (not `all`).
-    stage_slurm_cfg = select_stage_slurm_cfg(
-        slurm_cfg_raw,
-        stage if stage in STAGE_SEQUENCE else STAGE_SEQUENCE[0],
-    )
+    if stage == "all":
+        slurm_stage_key = STAGE_SEQUENCE[0]
+    elif stage in STAGE_SEQUENCE or stage == "aggregate":
+        slurm_stage_key = stage
+    else:
+        slurm_stage_key = STAGE_SEQUENCE[0]
+    stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, slurm_stage_key)
 
     split_bams_slurm_cfg = resolve_step_slurm_cfg(
         stage_slurm_cfg, "split_bams", {"split_bams", "sort"}
@@ -890,6 +911,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         ),
         # Summary stage.
         "summary_script": pick(args.summary_script, cfg.get("summary_script")),
+        "aggregate_script": pick(args.aggregate_script, cfg.get("aggregate_script")),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -1077,6 +1099,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         raise ValueError("saturation_reads_threshold must be > 0")
 
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
+    settings["aggregate_script"] = settings["aggregate_script"] or "scripts/aggregate.py"
 
     settings["mbias_script"] = settings["mbias_script"] or "scripts-emseq/mbias.py"
     settings["mbias_mode"] = settings["mbias_mode"] or "spike"
@@ -2283,6 +2306,51 @@ def main() -> int:
                 "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
                 "slurm_output": summary_output,
                 "slurm_error": summary_error,
+                "job_name": job_name,
+            }
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if not settings["dry_run"]:
+                generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"] and not settings["dry_run"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "aggregate":
+        command_args = argparse.Namespace(
+            aggregate_script=settings["aggregate_script"],
+        )
+        command = build_aggregate_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "11_aggregate.sh"
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            script_path = command_dir / "11_aggregate.sbatch"
+            job_name = f"emseq_aggregate_{settings['sample_id']}"
+            aggregate_output = (settings["slurm_output"] or "").replace("%x", job_name)
+            aggregate_error = (settings["slurm_error"] or "").replace("%x", job_name)
+            slurm_settings = {
+                "sample_id": settings["sample_id"],
+                "stage": stage,
+                "slurm_partition": settings["slurm_partition"],
+                "slurm_mem": settings["slurm_mem"],
+                "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                "slurm_output": aggregate_output,
+                "slurm_error": aggregate_error,
                 "job_name": job_name,
             }
             print(f"[emseq.make_cmd] runner={settings['runner']}")

@@ -7,6 +7,7 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 - **状态**：主线已闭环，接口与产物契约已固定，性能参数可持续调优
 - **入口**：`scripts-emseq/make_cmd.py`
 - **主流程**：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- **可选 `aggregate`（实验性）**：不纳入 `--stage all`；显式 `--stage aggregate` 复用 `scripts/aggregate.py`，从 `coverage/host/**/*.CG.cov` 写出 `coverage/aggregated_cg_by_{id,pos}.tsv`（契约见 `doc/stages.md` §11）
 - **`--stage all`**：生成 `work/<sample>/commands/run.sh`（`local`）或 `run.sbatch`（`slurm`），按序串联；与 `mbias_mode` / `call_mode` 的 `all` 取值含义不同
 - **`mbias`**：`scripts-emseq/mbias.py`（bisulfite 风格；参考 asTair TOP/BOT，仅统计参考 `CG`；与 TAPS 规则不同）
 - **`summary` / `saturation`**：复用 `scripts/summary.py`、`scripts/saturation.py`，产物路径与 TAPS 一致
@@ -43,6 +44,7 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 - **call**：`call_host_threads`、`call_spike_threads`、`call_left_trimming` / `call_right_trimming`（传给 `biscuit pileup` 的 `-5` / `-3`，按每条 read 的 5'/3' 端距；**不能**像 TAPS 的 `call_r1_*` / `call_r2_*` 那样分 R1/R2）、`call_host_subsample_fraction`、`call_host_subsample_seed`（`host_mito` BAM 回退用）；Slurm：`slurm.call.host` / `slurm.call.spike`
 - **saturation**：`saturation_reads_threshold`；Slurm：`slurm.saturation`
 - **summary**：Slurm：`slurm.summary`
+- **aggregate**（实验性）：`aggregate_script`（默认 `scripts/aggregate.py`）；Slurm：`slurm.aggregate`
 - **`all` + `slurm`**：`run.sbatch` SBATCH 头默认取自 `slurm.summary`
 
 ## 常用命令
@@ -67,7 +69,7 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
-单 stage：`--stage` 改为 `fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`；Slurm 时 `--runner local` 改为 `--runner slurm`。
+单 stage：`--stage` 改为 `fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，或实验性 `aggregate`；Slurm 时 `--runner local` 改为 `--runner slurm`。
 
 非 dry-run 且 `--submit` 时按 runner 执行或提交生成的脚本。`split` 在 Slurm 下为两段作业链式依赖，见 `doc/stages.md`。
 

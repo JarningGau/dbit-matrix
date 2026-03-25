@@ -262,4 +262,4 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 5. `mC`：对应 `.cov` 第 5 列（TAPS `methy_caller` 中为甲基化计数）
 6. `C`：对应 `.cov` 第 6 列（非甲基化计数）
 
-**编排**：`scripts/make_cmd.py --stage aggregate` 生成本地 `commands/10_aggregate.sh` 或 Slurm `commands/10_aggregate.sbatch`；等价单步：`scripts/aggregate.py --work-path <work>`。
+**编排**：TAPS：`scripts/make_cmd.py --stage aggregate` 生成本地 `commands/10_aggregate.sh` 或 Slurm `commands/10_aggregate.sbatch`；EMSeq：`scripts-emseq/make_cmd.py --stage aggregate` 生成本地 `commands/11_aggregate.sh` 或 Slurm `commands/11_aggregate.sbatch`（`summary` 已占用 `10_*` 前缀）。等价单步：`scripts/aggregate.py --work-path <work>`。

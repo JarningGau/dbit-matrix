@@ -5,8 +5,8 @@ EMSeq 独立入口维护者回归。用户说明见 `doc/emseq.md`；输入输�
 ## 范围
 
 - 入口：`scripts-emseq/make_cmd.py`
-- Stages：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，以及 `all`（生成 `commands/run.sh` / `run.sbatch` 串联全流程）
-- 单步脚本：`scripts/fastp_split.py`、`scripts/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`、`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`
+- Stages：`fastp_split`、`demux_extract_bc`、`align`、`pool`、`split`、`mbias`、`call`、`saturation`、`summary`，实验性 `aggregate`（不纳入 `--stage all`），以及 `all`（生成 `commands/run.sh` / `run.sbatch` 串联全流程）
+- 单步脚本：`scripts/fastp_split.py`、`scripts/extract_bc.py`、`scripts-emseq/aligner.py`、`scripts/pool.py`、`scripts/split_bams.py`、`scripts/bam_sort_parallel.py`、`scripts-emseq/mbias.py`、`scripts-emseq/call.py`、`scripts/saturation.py`、`scripts/summary.py`、`scripts/aggregate.py`（`aggregate` stage）
 - 样例配置：`workflow/dbit_emseq_test.json`
 
 ## 最小验收
@@ -14,7 +14,7 @@ EMSeq 独立入口维护者回归。用户说明见 `doc/emseq.md`；输入输�
 提交前至少完成：
 
 1. CLI `--help` 可用
-2. 九个具名 stage 在 `local` 与 `slurm` 下均能 dry-run；`--stage all` 在 `local` 与 `slurm` 下 dry-run（不落盘）
+2. 主线九个 stage 与实验性 `aggregate` 在 `local` 与 `slurm` 下均能 dry-run；`--stage all` 在 `local` 与 `slurm` 下 dry-run（不落盘；`all` 不含 `aggregate`）
 3. 用样例配置完成一次全流程本地真实生成（可逐 stage，也可 `--stage all` 生成 `run.sh` 后执行）
 
 ### CLI
@@ -23,11 +23,11 @@ EMSeq 独立入口维护者回归。用户说明见 `doc/emseq.md`；输入输�
 pixi run python scripts-emseq/make_cmd.py --help
 ```
 
-### Dry-run：`local`（九个 stage + `all`）
+### Dry-run：`local`（主线九个 stage + `aggregate` + `all`）
 
 ```bash
 CFG=workflow/dbit_emseq_test.json
-STAGES="fastp_split demux_extract_bc align pool split mbias call saturation summary"
+STAGES="fastp_split demux_extract_bc align pool split mbias call saturation summary aggregate"
 for stage in $STAGES; do
   pixi run python scripts-emseq/make_cmd.py \
     --workflow-config "$CFG" \
@@ -43,7 +43,7 @@ pixi run python scripts-emseq/make_cmd.py \
   --dry-run
 ```
 
-### Dry-run：`slurm`（九个 stage + `all`）
+### Dry-run：`slurm`（主线九个 stage + `aggregate` + `all`）
 
 将上述命令中 `--runner local` 改为 `--runner slurm`。
 
@@ -95,6 +95,35 @@ Smoke 通过时至少存在（路径相对于 `work/<sample>/`）：
 - 若存在 `qc/mbias/host.subsampled.sorted.bam`，`call` 优先用它生成 `coverage/host_mito.CG.cov`；否则由 per-spot coverage 汇总线粒体位点（默认 `chrM`）
 - `coverage/host/**/*.CG.cov` 不含线粒体 contig 位点（默认不含 `chrM`）
 - `stage=all` 时 `--dry-run` 不落盘；非 dry-run 时生成 `commands/run.sh`（local）或 `run.sbatch`（slurm，client-side sbatch DAG；`split` 仍为两作业链式依赖）
+- `--stage all` 的顺序不变，且不包含 `aggregate`
+
+### `aggregate`（实验性）
+
+```bash
+pixi run python scripts/aggregate.py --help
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage aggregate \
+  --runner local \
+  --dry-run
+
+pixi run python scripts-emseq/make_cmd.py \
+  --workflow-config workflow/dbit_emseq_test.json \
+  --stage aggregate \
+  --runner slurm \
+  --dry-run
+```
+
+单步 smoke（需在 `call` 之后存在 `coverage/host/**/*.CG.cov`）：
+
+```bash
+pixi run python scripts/aggregate.py \
+  --work-path work/test-DNAme-EMSeq \
+  --dry-run
+```
+
+检查点：契约与排序规则见 `doc/stages.md` §11；编排产物为 `commands/11_aggregate.sh` 或 `11_aggregate.sbatch`。
 
 ## 数据说明
 

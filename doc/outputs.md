@@ -48,7 +48,7 @@ reads 数值可能为千分位格式。
 
 ### `aggregate` 扁平表（实验性，可选）
 
-- `work/<sample>/coverage/aggregated_cg_by_id.tsv`、`aggregated_cg_by_pos.tsv`：由 `aggregate` stage 从 `coverage/host/**/*.CG.cov` 生成；**无表头**，列顺序与含义见 `doc/stages.md` §11
+- `work/<sample>/coverage/aggregated_cg_by_id.tsv`、`aggregated_cg_by_pos.tsv`：由 TAPS 或 EMSeq 编排的 `aggregate` stage（`scripts/make_cmd.py` / `scripts-emseq/make_cmd.py`）从 `coverage/host/**/*.CG.cov` 生成；**无表头**，列顺序与含义见 `doc/stages.md` §11
 
 ### Saturation
 
