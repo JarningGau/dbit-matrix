@@ -128,26 +128,45 @@ def main() -> int:
     args = parse_args()
     work_path = Path(args.work_path)
     host_cov_root = work_path / "coverage" / "host"
-    cov_paths = sorted(
-        host_cov_root.rglob(f"*{SUFFIX}"),
-        key=lambda p: spot_id_from_cov_path(p),
-    )
     out_by_id = work_path / "coverage" / OUT_BY_ID
     out_by_pos = work_path / "coverage" / OUT_BY_POS
 
     print(f"[aggregate] work_path={work_path}")
     print(f"[aggregate] host_cov_glob={host_cov_root}/**/*{SUFFIX}")
-    print(f"[aggregate] cov_file_count={len(cov_paths)}")
     print(f"[aggregate] out_by_id={out_by_id}")
     print(f"[aggregate] out_by_pos={out_by_pos}")
 
+    by_id_exists = out_by_id.exists()
+    if by_id_exists:
+        print(f"[aggregate] out_by_id_exists=1 path={out_by_id}")
+    else:
+        print(f"[aggregate] out_by_id_exists=0 path={out_by_id}")
+
     row_count = 0
     if args.dry_run:
-        # Count rows without materializing them in memory.
-        for _ in iter_parsed_rows(cov_paths):
-            row_count += 1
+        if by_id_exists:
+            print("[aggregate] dry_run=1 skip_read_cov; will use existing out_by_id")
+            row_count = 0
+        else:
+            cov_paths = sorted(
+                host_cov_root.rglob(f"*{SUFFIX}"),
+                key=lambda p: spot_id_from_cov_path(p),
+            )
+            print(f"[aggregate] cov_file_count={len(cov_paths)}")
+            # Count rows without materializing them in memory.
+            for _ in iter_parsed_rows(cov_paths):
+                row_count += 1
     else:
-        row_count = write_by_id(out_by_id, cov_paths)
+        if by_id_exists:
+            print("[aggregate] skip_write_by_id (existing file)")
+            row_count = 0
+        else:
+            cov_paths = sorted(
+                host_cov_root.rglob(f"*{SUFFIX}"),
+                key=lambda p: spot_id_from_cov_path(p),
+            )
+            print(f"[aggregate] cov_file_count={len(cov_paths)}")
+            row_count = write_by_id(out_by_id, cov_paths)
     print(f"[aggregate] row_count={row_count}")
 
     if args.dry_run:
