@@ -92,6 +92,14 @@ def parse_args() -> argparse.Namespace:
         help="Inline slurm json (optional). Usually from workflow config slurm key.",
     )
     parser.add_argument(
+        "--slurm-output",
+        help="Override Slurm stdout log path for all generated sbatch jobs (optional).",
+    )
+    parser.add_argument(
+        "--slurm-error",
+        help="Override Slurm stderr log path for all generated sbatch jobs (optional).",
+    )
+    parser.add_argument(
         "--submit", action="store_true", help="Submit generated script immediately."
     )
     parser.add_argument(
@@ -126,6 +134,8 @@ def resolve_settings(args: argparse.Namespace) -> argparse.Namespace:
     )
     args.out_tmp_dir = pick(args.out_tmp_dir, cfg.get("out_tmp_dir"))
     args.align_threads = pick(args.align_threads, cfg.get("align_threads"), 1)
+    args.slurm_output = pick(args.slurm_output, cfg.get("slurm_output"))
+    args.slurm_error = pick(args.slurm_error, cfg.get("slurm_error"))
 
     slurm_cfg = cfg.get("slurm", {})
     if args.slurm:
@@ -211,7 +221,29 @@ def build_align_command(args: argparse.Namespace, sample_work: Path) -> str:
         cmd.extend(["--out-tmp-dir", args.out_tmp_dir])
     return quoted(cmd)
 
-def slurm_header(job_name: str, slurm_cfg: dict) -> str:
+
+def default_slurm_log_paths(sample_work: Path, log_stem: str) -> tuple[str, str]:
+    log_root = sample_work / "logs"
+    out = str(log_root / f"{log_stem}_%x_%j.out")
+    err = str(log_root / f"{log_stem}_%x_%j.err")
+    return out, err
+
+
+def resolve_slurm_log_paths(
+    cli_output: str | None,
+    cli_error: str | None,
+    stage_cfg: dict,
+    default_out: str,
+    default_err: str,
+) -> tuple[str, str]:
+    out = pick(cli_output, stage_cfg.get("output")) or default_out
+    err = pick(cli_error, stage_cfg.get("error")) or default_err
+    return out, err
+
+
+def slurm_header(
+    job_name: str, slurm_cfg: dict, slurm_output: str, slurm_error: str
+) -> str:
     lines = [
         "#!/usr/bin/env bash",
         f"#SBATCH --job-name={job_name}",
@@ -222,6 +254,8 @@ def slurm_header(job_name: str, slurm_cfg: dict) -> str:
         lines.append(f"#SBATCH --mem={slurm_cfg['mem']}")
     if slurm_cfg.get("cpus_per_task"):
         lines.append(f"#SBATCH --cpus-per-task={slurm_cfg['cpus_per_task']}")
+    lines.append(f"#SBATCH --output={slurm_output}")
+    lines.append(f"#SBATCH --error={slurm_error}")
     lines.extend(["set -euo pipefail", ""])
     return "\n".join(lines)
 
@@ -233,9 +267,17 @@ def make_local_stage_script(path: Path, command: str, dry_run: bool) -> Path:
 
 
 def make_slurm_stage_script(
-    path: Path, command: str, job_name: str, slurm_cfg: dict, dry_run: bool
+    path: Path,
+    command: str,
+    job_name: str,
+    slurm_cfg: dict,
+    slurm_output: str,
+    slurm_error: str,
+    dry_run: bool,
 ) -> Path:
-    script = slurm_header(job_name, slurm_cfg) + command + "\n"
+    if not dry_run:
+        Path(slurm_output).parent.mkdir(parents=True, exist_ok=True)
+    script = slurm_header(job_name, slurm_cfg, slurm_output, slurm_error) + command + "\n"
     write_script(path, script, dry_run)
     return path
 
@@ -248,22 +290,36 @@ def generate_single_stage(args: argparse.Namespace, stage: str, dry_run: bool) -
         command = build_demux_command(args, sample_work)
         if args.runner == "local":
             return make_local_stage_script(commands_dir / "01_demux_extract_bc.sh", command, dry_run)
+        demux_cfg = args.slurm.get("demux_extract_bc", {})
+        def_out, def_err = default_slurm_log_paths(sample_work, "demux_extract_bc")
+        out, err = resolve_slurm_log_paths(
+            args.slurm_output, args.slurm_error, demux_cfg, def_out, def_err
+        )
         return make_slurm_stage_script(
             commands_dir / "01_demux_extract_bc.sbatch",
             command,
             f"{args.sample_id}.rna.demux",
-            args.slurm.get("demux_extract_bc", {}),
+            demux_cfg,
+            out,
+            err,
             dry_run,
         )
     if stage == "align":
         command = build_align_command(args, sample_work)
         if args.runner == "local":
             return make_local_stage_script(commands_dir / "02_align.sh", command, dry_run)
+        align_cfg = args.slurm.get("align", {})
+        def_out, def_err = default_slurm_log_paths(sample_work, "align")
+        out, err = resolve_slurm_log_paths(
+            args.slurm_output, args.slurm_error, align_cfg, def_out, def_err
+        )
         return make_slurm_stage_script(
             commands_dir / "02_align.sbatch",
             command,
             f"{args.sample_id}.rna.align",
-            args.slurm.get("align", {}),
+            align_cfg,
+            out,
+            err,
             dry_run,
         )
     raise ValueError(f"Unsupported stage: {stage}")
@@ -281,13 +337,29 @@ def generate_all(args: argparse.Namespace, dry_run: bool) -> Path:
         write_script(run_path, "\n".join(body), dry_run)
         return run_path
 
-    run_lines = slurm_header(f"{args.sample_id}.rna.run", args.slurm.get("align", {})).splitlines()
+    run_cfg = args.slurm.get("run", {})
+    driver_def_out, driver_def_err = default_slurm_log_paths(sample_work, "rna_run")
+    driver_out, driver_err = resolve_slurm_log_paths(
+        args.slurm_output,
+        args.slurm_error,
+        run_cfg,
+        driver_def_out,
+        driver_def_err,
+    )
+    run_lines = slurm_header(
+        f"{args.sample_id}.rna.run",
+        args.slurm.get("align", {}),
+        driver_out,
+        driver_err,
+    ).splitlines()
     run_lines.append(f"jid1=$(sbatch {shlex.quote(str(stage_paths[0]))} | awk '{{print $4}}')")
     run_lines.append(
         f"sbatch --dependency=afterok:$jid1 {shlex.quote(str(stage_paths[1]))}"
     )
     run_lines.append("")
     run_path = commands_dir / "run.sbatch"
+    if not dry_run:
+        Path(driver_out).parent.mkdir(parents=True, exist_ok=True)
     write_script(run_path, "\n".join(run_lines), dry_run)
     return run_path
 

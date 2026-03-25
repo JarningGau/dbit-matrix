@@ -54,6 +54,7 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 **DBiT-RNA (MVP) 约定**：
 - 入口：`scripts-rna/make_cmd.py`
 - 实现：`scripts-rna/extract_bc.py`
+- `runner=slurm` 时：`#SBATCH --output` / `--error` 默认写入 `work/<sample>/logs/`（本 stage 为 `demux_extract_bc_%x_%j.out` / `.err`）。`align` 为 `align_%x_%j`；`--stage all` 的 driver `run.sbatch` 为 `rna_run_%x_%j`。可在 workflow 的 `slurm.<stage>.output` / `error`、`slurm.run.output` / `error` 或顶层 `slurm_output` / `slurm_error`、CLI `--slurm-output` / `--slurm-error` 覆盖。
 - 输入直接使用原始 `r1/r2`（不经过 `fastp_split`）
 - RNA 不使用 chunk 概念（单样本单对 clean FASTQ）
 - R1 结构：`BC2-linker_bc-BC1-UMI_left-UMI`
@@ -84,6 +85,7 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 **DBiT-RNA (MVP) 约定**：
 - 入口：`scripts-rna/make_cmd.py`
 - 实现：`scripts-rna/align.py`
+- Slurm 标准输出/错误路径约定见上文 RNA `demux_extract_bc` 小节（本 stage 日志前缀为 `align_`）。
 - 输入：`demux/<sample>.R1.clean.fq.gz`、`demux/<sample>.R2.clean.fq.gz`
 - 输出：`solo/`（STARsolo matrix 产物目录）
 - 附加输出：

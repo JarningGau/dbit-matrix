@@ -56,6 +56,7 @@ pixi run python scripts-rna/make_cmd.py \
 - `align` 调用 `scripts-rna/align.py`
 - 输出目录指向 `demux`、`solo`、`commands` 等预期位置
 - `stage=all` 在 dry-run 下不落盘
+- `runner=slurm` 且**非** `--dry-run` 生成脚本时：各 `.sbatch` 含 `#SBATCH --output` / `--error`，默认 `work/<sample>/logs/<stem>_%x_%j.out` / `.err`（`demux_extract_bc`、`align`；`run.sbatch` driver 为 `rna_run_`）；需要时校验 `logs/` 已创建
 
 ## 真实生成 Smoke（本地）
 
