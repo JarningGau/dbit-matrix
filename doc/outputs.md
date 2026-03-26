@@ -50,6 +50,10 @@ reads 数值可能为千分位格式。
 
 - `work/<sample>/coverage/aggregated_cg_by_id.tsv`、`aggregated_cg_by_pos.tsv`：由 TAPS 或 EMSeq 编排的 `aggregate` stage（`scripts/make_cmd.py` / `scripts-emseq/make_cmd.py`）从 `coverage/host/**/*.CG.cov` 生成；**无表头**，列顺序与含义见 `doc/stages.md` §11
 
+### `methscan_prepare`（实验性，可选）
+
+- `work/<sample>/coverage/host_prepare/`：由 `methscan prepare`（经 `scripts/methscan_prepare.py`、pixi 工作区 `envs/methscan`）从 `coverage/host/**/*.CG.cov` 生成；仅 host，契约见 `doc/stages.md` §12
+
 ### Saturation
 
 - `work/<sample>/qc/saturation/saturation_summary.tsv`

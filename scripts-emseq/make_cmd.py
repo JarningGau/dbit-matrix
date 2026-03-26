@@ -13,6 +13,7 @@ This is an EMSeq-only entrypoint that supports:
 - `saturation`
 - `summary`
 - `aggregate` (experimental; optional, not part of `--stage all`; reuses `scripts/aggregate.py`)
+- `methscan_prepare` (experimental; optional, not part of `--stage all`; host `*.CG.cov` via `scripts/methscan_prepare.py`)
 - `all` (generates `commands/run.sh` or `commands/run.sbatch` to run the full pipeline in order)
 
 It intentionally keeps EMSeq orchestration separate from the TAPS workflow
@@ -42,8 +43,8 @@ STAGE_SEQUENCE = [
     "summary",
 ]
 # Stages that may appear as top-level keys under workflow `slurm` (nested mode).
-SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate"}
-STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "all"]
+SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate", "methscan_prepare"}
+STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "methscan_prepare", "all"]
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -62,6 +63,7 @@ STAGE_REQUIRED_FIELDS = {
     "saturation": [],
     "summary": [],
     "aggregate": [],
+    "methscan_prepare": [],
 }
 
 
@@ -371,6 +373,19 @@ def parse_args() -> argparse.Namespace:
             "Memory limit for GNU `sort -S` in aggregate stage "
             "(passed to scripts/aggregate.py via `--sort-mem`). "
             "Default comes from workflow config `aggregate_sort_mem` or 8G."
+        ),
+    )
+    parser.add_argument(
+        "--methscan-prepare-script",
+        help=(
+            "Path to methscan_prepare wrapper. Default: scripts/methscan_prepare.py."
+        ),
+    )
+    parser.add_argument(
+        "--methscan-pixi-manifest",
+        help=(
+            "Directory with pixi.toml for methscan (passed to --pixi-manifest). "
+            "Default: envs/methscan under repo root."
         ),
     )
     parser.add_argument(
@@ -717,6 +732,20 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
     return quoted(command)
 
 
+def build_methscan_prepare_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.methscan_prepare_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+    ]
+    manifest = getattr(args, "methscan_pixi_manifest", None)
+    if manifest:
+        command.extend(["--pixi-manifest", str(manifest)])
+    return quoted(command)
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -792,7 +821,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     if stage == "all":
         slurm_stage_key = STAGE_SEQUENCE[0]
-    elif stage in STAGE_SEQUENCE or stage == "aggregate":
+    elif stage in STAGE_SEQUENCE or stage in ("aggregate", "methscan_prepare"):
         slurm_stage_key = stage
     else:
         slurm_stage_key = STAGE_SEQUENCE[0]
@@ -926,6 +955,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "aggregate_sort_mem": pick(
             args.aggregate_sort_mem,
             cfg.get("aggregate_sort_mem", "8G"),
+        ),
+        "methscan_prepare_script": pick(
+            args.methscan_prepare_script,
+            cfg.get("methscan_prepare_script"),
+        ),
+        "methscan_pixi_manifest": pick(
+            args.methscan_pixi_manifest,
+            cfg.get("methscan_pixi_manifest"),
         ),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
@@ -1115,6 +1152,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
     settings["aggregate_script"] = settings["aggregate_script"] or "scripts/aggregate.py"
+    settings["methscan_prepare_script"] = (
+        settings["methscan_prepare_script"] or "scripts/methscan_prepare.py"
+    )
 
     settings["mbias_script"] = settings["mbias_script"] or "scripts-emseq/mbias.py"
     settings["mbias_mode"] = settings["mbias_mode"] or "spike"
@@ -2367,6 +2407,52 @@ def main() -> int:
                 "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
                 "slurm_output": aggregate_output,
                 "slurm_error": aggregate_error,
+                "job_name": job_name,
+            }
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if not settings["dry_run"]:
+                generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"] and not settings["dry_run"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "methscan_prepare":
+        command_args = argparse.Namespace(
+            methscan_prepare_script=settings["methscan_prepare_script"],
+            methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
+        )
+        command = build_methscan_prepare_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "12_methscan_prepare.sh"
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            script_path = command_dir / "12_methscan_prepare.sbatch"
+            job_name = f"emseq_methscan_prepare_{settings['sample_id']}"
+            methscan_output = (settings["slurm_output"] or "").replace("%x", job_name)
+            methscan_error = (settings["slurm_error"] or "").replace("%x", job_name)
+            slurm_settings = {
+                "sample_id": settings["sample_id"],
+                "stage": stage,
+                "slurm_partition": settings["slurm_partition"],
+                "slurm_mem": settings["slurm_mem"],
+                "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                "slurm_output": methscan_output,
+                "slurm_error": methscan_error,
                 "job_name": job_name,
             }
             print(f"[emseq.make_cmd] runner={settings['runner']}")

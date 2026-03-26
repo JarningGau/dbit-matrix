@@ -21,9 +21,9 @@ STAGE_SEQUENCE = [
     "saturation",
     "summary",
 ]
-STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "all"]
+STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "methscan_prepare", "all"]
 # Stages that may appear as top-level keys under workflow `slurm` (nested mode).
-SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate"}
+SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate", "methscan_prepare"}
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -39,6 +39,7 @@ STAGE_REQUIRED_FIELDS = {
     "saturation": [],
     "summary": [],
     "aggregate": [],
+    "methscan_prepare": [],
 }
 
 
@@ -314,6 +315,19 @@ def parse_args() -> argparse.Namespace:
             "Memory limit for GNU `sort -S` in aggregate stage "
             "(passed to scripts/aggregate.py via `--sort-mem`). "
             "Default comes from workflow config `aggregate_sort_mem` or 8G."
+        ),
+    )
+    parser.add_argument(
+        "--methscan-prepare-script",
+        help=(
+            "Path to methscan_prepare wrapper. Default: scripts/methscan_prepare.py."
+        ),
+    )
+    parser.add_argument(
+        "--methscan-pixi-manifest",
+        help=(
+            "Directory with pixi.toml for methscan (passed to --pixi-manifest). "
+            "Default: envs/methscan under repo root."
         ),
     )
     parser.add_argument(
@@ -676,6 +690,20 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
     return quoted(command)
 
 
+def build_methscan_prepare_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.methscan_prepare_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+    ]
+    manifest = getattr(args, "methscan_pixi_manifest", None)
+    if manifest:
+        command.extend(["--pixi-manifest", str(manifest)])
+    return quoted(command)
+
+
 def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
     script_path = Path(args.summary_script)
     command = [
@@ -1021,7 +1049,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
     if stage == "all":
         slurm_stage_key = STAGE_SEQUENCE[0]
-    elif stage in STAGE_SEQUENCE or stage == "aggregate":
+    elif stage in STAGE_SEQUENCE or stage in ("aggregate", "methscan_prepare"):
         slurm_stage_key = stage
     else:
         slurm_stage_key = STAGE_SEQUENCE[0]
@@ -1164,6 +1192,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "aggregate_sort_mem": pick(
             args.aggregate_sort_mem,
             cfg.get("aggregate_sort_mem", "8G"),
+        ),
+        "methscan_prepare_script": pick(
+            args.methscan_prepare_script,
+            cfg.get("methscan_prepare_script"),
+        ),
+        "methscan_pixi_manifest": pick(
+            args.methscan_pixi_manifest,
+            cfg.get("methscan_pixi_manifest"),
         ),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
@@ -1455,6 +1491,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
     settings["aggregate_script"] = (
         settings["aggregate_script"] or "scripts/aggregate.py"
+    )
+    settings["methscan_prepare_script"] = (
+        settings["methscan_prepare_script"] or "scripts/methscan_prepare.py"
     )
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
@@ -2474,6 +2513,46 @@ def main() -> int:
                     ),
                     slurm_error=settings["slurm_error"].replace(
                         "%x", f"dbit_aggregate_{settings['sample_id']}"
+                    ),
+                    module_line="",
+                )
+                generate_slurm_script(command, script_path, log_dir, slurm_args)
+            generated_scripts.append(script_path)
+    elif settings["stage"] == "methscan_prepare":
+        command_args = argparse.Namespace(
+            methscan_prepare_script=settings["methscan_prepare_script"],
+            methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
+        )
+        command = build_methscan_prepare_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "11_methscan_prepare.sh"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            script_path = command_dir / "11_methscan_prepare.sbatch"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if not settings["dry_run"]:
+                slurm_args = argparse.Namespace(
+                    job_name=f"dbit_methscan_prepare_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=settings["slurm_output"].replace(
+                        "%x", f"dbit_methscan_prepare_{settings['sample_id']}"
+                    ),
+                    slurm_error=settings["slurm_error"].replace(
+                        "%x", f"dbit_methscan_prepare_{settings['sample_id']}"
                     ),
                     module_line="",
                 )

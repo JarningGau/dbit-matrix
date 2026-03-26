@@ -263,3 +263,19 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 6. `C`：对应 `.cov` 第 6 列（非甲基化计数）
 
 **编排**：TAPS：`scripts/make_cmd.py --stage aggregate` 生成本地 `commands/10_aggregate.sh` 或 Slurm `commands/10_aggregate.sbatch`；EMSeq：`scripts-emseq/make_cmd.py --stage aggregate` 生成本地 `commands/11_aggregate.sh` 或 Slurm `commands/11_aggregate.sbatch`（`summary` 已占用 `10_*` 前缀）。等价单步：`scripts/aggregate.py --work-path <work>`。
+
+## 12. `methscan_prepare`（实验性）
+
+**功能**：在独立 pixi 工作区（默认仓库内 `envs/methscan`）中运行 `methscan prepare`，将 host per-spot 的 Bismark-like `*.CG.cov` 转为 methscan 可用的 prepared 输出（仅 host，不含 spike）。
+
+**状态**：不纳入 `--stage all`；需显式 `--stage methscan_prepare`。
+
+**输入**：
+
+- `coverage/host/**/*.CG.cov`（与 `call` 产物相同）
+
+**输出**：
+
+- `coverage/host_prepare/`（由 `methscan prepare` 写入；具体文件以 methscan 版本为准）
+
+**编排**：TAPS：`scripts/make_cmd.py --stage methscan_prepare` → `commands/11_methscan_prepare.sh` / `11_methscan_prepare.sbatch`；EMSeq：`scripts-emseq/make_cmd.py --stage methscan_prepare` → `commands/12_methscan_prepare.sh` / `12_methscan_prepare.sbatch`。等价单步：`scripts/methscan_prepare.py --work-path <work>`（可选 `--pixi-manifest <dir>` 覆盖默认 `envs/methscan`）。

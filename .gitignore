@@ -32,3 +32,8 @@ venv/
 .vscode/
 
 notebook/
+envs/*
+!envs/methscan/
+envs/methscan/*
+!envs/methscan/pixi.toml
+!envs/methscan/pixi.lock

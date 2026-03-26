@@ -410,4 +410,32 @@ pixi run python scripts/aggregate.py \
 - 不写表头；每行固定 6 列：`id`、`chr`、`start`、`end`、`mC`、`C`（契约见 `doc/stages.md` §11）
 - `coverage/aggregated_cg_by_id.tsv` 按 `id`、`chr`、`start`、`end` 排序
 - `coverage/aggregated_cg_by_pos.tsv` 按 `chr`、`start`、`end`、`id` 排序
-- `--stage all` 的 stage 顺序不变，且不包含 `aggregate`
+- `--stage all` 的 stage 顺序不变，且不包含 `aggregate` 或 `methscan_prepare`
+
+### `methscan_prepare`（实验性）
+
+```bash
+pixi run python scripts/methscan_prepare.py --help
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage methscan_prepare \
+  --runner local \
+  --dry-run
+
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage methscan_prepare \
+  --runner slurm \
+  --dry-run
+```
+
+单步 smoke（需在 `call` 之后存在 `coverage/host/**/*.CG.cov`，且本机已安装 `pixi` 与 `envs/methscan` 工作区）：
+
+```bash
+pixi run python scripts/methscan_prepare.py \
+  --work-path work/test-DNAme-TAPS \
+  --dry-run
+```
+
+检查点：契约见 `doc/stages.md` §12；编排产物为 `commands/11_methscan_prepare.sh` 或 `11_methscan_prepare.sbatch`。

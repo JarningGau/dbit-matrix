@@ -17,7 +17,7 @@
 
 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 
-`--stage all` 按序串联各 stage；所有 stage 支持 `--dry-run`。EMSeq / TAPS 另有实验性 `aggregate`（扁平汇总 per-spot `*.CG.cov`），需显式 `--stage aggregate`，不纳入 `--stage all`（见 `doc/stages.md` §11）。
+`--stage all` 按序串联各 stage；所有 stage 支持 `--dry-run`。EMSeq / TAPS 另有实验性 `aggregate`（扁平汇总 per-spot `*.CG.cov`）与 `methscan_prepare`（host `*.CG.cov` → `methscan prepare`），需显式对应 `--stage`，不纳入 `--stage all`（契约见 `doc/stages.md` §11–§12）。
 
 ## 主要产物
 

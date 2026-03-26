@@ -174,6 +174,26 @@ pixi run python scripts/make_cmd.py \
   --dry-run
 ```
 
+### `methscan_prepare`（实验性）
+
+不纳入 `all`；需显式指定 stage。依赖已存在的 `coverage/host/**/*.CG.cov`。
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage methscan_prepare \
+  --runner local \
+  --dry-run
+```
+
+```bash
+pixi run python scripts/make_cmd.py \
+  --workflow-config workflow/dbit_taps_test.json \
+  --stage methscan_prepare \
+  --runner slurm \
+  --dry-run
+```
+
 ## 常见组合
 
 只验证 Slurm 命令是否能正确展开：
