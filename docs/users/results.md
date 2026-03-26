@@ -18,6 +18,12 @@ Useful methylation outputs:
 - `coverage/host_mito.CG.cov`
 - `coverage/<spike_name>.CG.cov` when spike-ins are configured
 
+Optional advanced outputs:
+
+- `coverage/aggregated_cg_by_id.tsv`
+- `coverage/aggregated_cg_by_pos.tsv`
+- `coverage/host_prepare/`
+
 ## Common Checks For RNA
 
 Start with:
@@ -35,6 +41,12 @@ Check these first:
 - input FASTQ paths are correct
 - whitelist and reference paths are correct
 - the workflow entry script matches the assay type
+
+For methylation workflows, also check:
+
+- `host_mito.CG.cov` exists when host calling completed
+- spike results are present only when spike-in references were configured
+- `saturation_rate` stays `NA` when `saturation` was not run or had no usable inputs
 
 ## Where To Look Next
 

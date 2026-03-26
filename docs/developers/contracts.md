@@ -201,6 +201,46 @@ Contract:
 - `per_spot_summary.tsv` is one row per spot
 - `sample_summary.tsv` is one row per sample
 - missing upstream inputs should preserve fixed columns and write `NA`
+- `per_spot_summary.tsv` keeps fixed columns for `X_index`, `Y_index`, `spot`, `mean_methylation`, `cpg_site_count`, and `reads`
+
+## Optional TAPS And EMSeq Stages
+
+### `aggregate`
+
+Purpose: flatten host per-spot `.CG.cov` rows into aggregated TSV outputs.
+
+Input:
+
+- `coverage/host/**/*.CG.cov`
+
+Outputs:
+
+- `coverage/aggregated_cg_by_id.tsv`
+- `coverage/aggregated_cg_by_pos.tsv`
+
+Contract:
+
+- outputs are headerless TSV files
+- both outputs keep the same six logical fields: `id`, `chr`, `start`, `end`, `mC`, `C`
+- `aggregated_cg_by_id.tsv` is sorted by `id`, then position
+- `aggregated_cg_by_pos.tsv` is sorted by position, then `id`
+
+### `methscan_prepare`
+
+Purpose: convert host coverage outputs into `methscan prepare` inputs.
+
+Input:
+
+- `coverage/host/**/*.CG.cov`
+
+Output:
+
+- `coverage/host_prepare/`
+
+Contract:
+
+- this is host-only
+- this stage is explicit and not part of `--stage all`
 
 ## EMSeq-Specific Additions
 
@@ -226,6 +266,7 @@ Outputs:
 Contract:
 
 - RNA does not use chunk inputs
+- in Slurm mode, default stage logs are written under `work/<sample>/logs/`
 
 ### `align`
 
@@ -244,3 +285,4 @@ Contract:
 
 - RNA currently produces STARsolo matrix outputs
 - RNA does not produce methylation BAM or `.CG.cov` outputs
+- in Slurm mode, default stage logs are written under `work/<sample>/logs/`

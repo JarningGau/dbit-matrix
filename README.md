@@ -9,7 +9,7 @@ DBiT-Matrix is a workflow repository for DBiT-style spatial omics data processin
 All workflows are configured with [`workflow/*.json`](workflow/) and run through `pixi`.
 
 - Current version: `1.6.0`
-- Version log: [`doc/log.md`](doc/log.md)
+- Version log: [`docs/maintenance/changelog.md`](docs/maintenance/changelog.md)
 
 ## Current Status
 
@@ -63,6 +63,7 @@ User-facing output checks: [Results guide](docs/users/results.md)
 ### Users
 
 - [User overview](docs/users/overview.md)
+- [Environment and inputs](docs/users/setup.md)
 - [TAPS user guide](docs/users/taps.md)
 - [EMSeq user guide](docs/users/emseq.md)
 - [RNA user guide](docs/users/rna.md)
@@ -73,14 +74,16 @@ User-facing output checks: [Results guide](docs/users/results.md)
 - [Architecture](docs/developers/architecture.md)
 - [Stage contracts](docs/developers/contracts.md)
 - [Config reference](docs/developers/config-reference.md)
+- [Runner reference](docs/developers/runner-reference.md)
 - [Doc system](docs/developers/doc-system.md)
 
 ### Maintenance
 
+- [Changelog](docs/maintenance/changelog.md)
 - [TAPS regression](docs/maintenance/taps-regression.md)
 - [EMSeq regression](docs/maintenance/emseq-regression.md)
 - [RNA regression](docs/maintenance/rna-regression.md)
 
 ### Legacy
 
-Legacy Chinese docs are preserved in [`doc/`](doc/). New work should target [`docs/`](docs/).
+Legacy Chinese docs are still preserved in [`doc/`](doc/) during migration. New work should target [`docs/`](docs/).

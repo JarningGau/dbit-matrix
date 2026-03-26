@@ -1,5 +1,9 @@
 # Archive
 
-Legacy documentation is preserved in the top-level [`doc/`](../../doc/) directory.
+This directory stores archived notes and legacy material that should not appear in the main user or maintainer reading path.
 
-That material is retained for reference and backward compatibility during the migration to the English documentation system in [`docs/`](../).
+Current archive content includes:
+
+- internal progress tracking
+- design notes that are not active public contracts
+- migration-era legacy references

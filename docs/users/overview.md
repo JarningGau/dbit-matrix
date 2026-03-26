@@ -22,6 +22,7 @@ Supported workflows:
 
 ## Workflow Guides
 
+- [Environment and inputs](setup.md)
 - [TAPS user guide](taps.md)
 - [EMSeq user guide](emseq.md)
 - [RNA user guide](rna.md)

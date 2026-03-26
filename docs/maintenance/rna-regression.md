@@ -47,3 +47,5 @@ Expected result:
 ## When To Go Deeper
 
 If a stage implementation changed, validate that stage directly and compare outputs against the current contract in [docs/developers/contracts.md](../developers/contracts.md).
+
+For command-generation behavior changes, also check [docs/developers/runner-reference.md](../developers/runner-reference.md).

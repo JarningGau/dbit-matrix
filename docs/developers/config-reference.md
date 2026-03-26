@@ -18,6 +18,7 @@ This document defines the workflow configuration surface for developers.
 - `work_root`: working directory root
 - `runner`: `local` or `slurm`
 - `stage`: named stage or `all`
+- `number_of_split_parts`: chunk count for `fastp_split` when the workflow uses chunking
 
 ### Demux
 
@@ -52,6 +53,10 @@ Calling fields:
 - `call_r1_right_trimming`
 - `call_r2_left_trimming`
 - `call_r2_right_trimming`
+
+Notes:
+
+- TAPS trimming is defined separately for R1 and R2 ends
 
 ## EMSeq Fields
 
@@ -88,6 +93,11 @@ QC fields:
 - `mbias_max_cycle`
 - `mbias_min_mapping_quality`
 
+Notes:
+
+- EMSeq trimming uses `call_left_trimming` and `call_right_trimming`
+- EMSeq does not split trimming by R1 and R2
+
 ## RNA Fields
 
 Core fields:
@@ -106,6 +116,22 @@ Core fields:
 
 - a JSON object
 - a `NAME=INDEX` list
+
+Example object:
+
+```json
+"spike_in_index": {
+  "lambda": "/path/to/lambda.fa",
+  "puc19": "/path/to/puc19.fa"
+}
+```
+
+Example repeated CLI form:
+
+```bash
+--spike-in-index lambda=/path/to/lambda.fa \
+--spike-in-index puc19=/path/to/puc19.fa
+```
 
 ## Optional Advanced Stages
 
@@ -131,3 +157,5 @@ Slurm resources should remain stage-specific. Examples:
 - `slurm.summary`
 
 Do not collapse unrelated stages into one shared resource block.
+
+For RNA, stage logs default to `work/<sample>/logs/` and can be overridden through workflow or CLI log settings.
