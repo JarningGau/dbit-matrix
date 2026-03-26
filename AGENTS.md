@@ -1,72 +1,108 @@
+# AGENTS.md
 
-开发过程请遵循：
-- 第一性原理
-- 奥卡姆剃刀原则
+Use these rules when working in this repository.
 
-## 当前阶段
+## Core Principles
 
-- 主线固定（EMSeq 独立入口）：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
-- 当前已闭环（EMSeq）：上述各 stage 均已接入；接口与产物契约已固定，性能与经验参数可持续调优
-- EMSeq 编排入口支持 `--stage all`：生成 `work/<sample>/commands/run.sh` 或 `run.sbatch`，按主线顺序串联各 stage（`--dry-run` 不落盘）。
-- 当前主里程碑：端到端回归与文档/契约一致性（`TEST-emseq.md`、`doc/stages.md` 等）
-- 说明：`mbias` 单步实现为 `scripts-emseq/mbias.py`（与 TAPS 的 `scripts/mbias.py` 化学判定不同）。
+- Start from first principles.
+- Prefer the simplest solution that preserves the required contract.
+- Build the MVP first. Extend only when the MVP is stable.
+- Make one main change per iteration.
 
-## 必须遵守
+## Current Workflow Status
 
-- 先做 MVP，再做扩展；不要先设计全量方案。
-- 每次迭代只引入一个主要变化点。
-- `scripts/*.py` 与 `scripts-emseq/*.py` 负责单步功能；workflow 编排入口：TAPS 用 `scripts/make_cmd.py`，EMSeq 用 `scripts-emseq/make_cmd.py`。
-- 单步脚本保持薄封装，参数显式、行为可预测。
-- 所有阶段必须支持 `--dry-run`。
-- 所有运行参数优先放到 `workflow/*.json`。
-- 新增依赖后必须更新 `pixi.lock`。
+- EMSeq mainline is fixed:
+  `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- EMSeq `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
+- `aggregate` and `methscan_prepare` are optional explicit stages and are not part of `--stage all`.
+- `scripts-emseq/mbias.py` is the EMSeq `mbias` implementation and is different from TAPS `scripts/mbias.py`.
 
-## Slurm 规则
+## Engineering Rules
 
-- Slurm 使用 `pixi` 环境，不依赖 `module load`。
-- 不在 sbatch 模板中写与当前阶段无关的通用参数。
-- `demux_extract_bc`：每个 chunk 一个 sbatch。
-- `align`：每个 chunk 一个 sbatch；单脚本内顺序执行 spike-in -> host。
-- `pool`：拆成两个 job，一个 spike-in，一个 host。
-- `split`：`split_bams` 与 `sort` 分成两个 sbatch，并用依赖关系串联。
-- `mbias`：按 host/spike 拆分 sbatch；资源配置使用 `slurm.mbias.host` / `slurm.mbias.spike`。
-- `call`：按 host/spike 拆分 sbatch（host 1 个；spike 按 `spike_name` 可为多个），资源配置保持 step-specific（如 `slurm.call.host` / `slurm.call.spike`）。
-- `saturation`：单 job 一个 sbatch；资源配置使用 `slurm.saturation`。
-- `summary`：单 job 一个 sbatch；资源配置使用 `slurm.summary`。
-- stage 资源配置采用 step-specific 结构，不同阶段不要混用一套参数。
+- Keep single-stage scripts thin, explicit, and predictable.
+- Put workflow parameters in `workflow/*.json` whenever possible.
+- Every stage must support `--dry-run`.
+- Update `pixi.lock` whenever dependencies change.
+- Do not change an input/output contract silently.
 
-## 关键契约
+## Entrypoints
 
-- 文档里的输入输出契约必须与代码一致；改契约时同步更新 `README.md` 与下游依赖。
-- `demux`：输出 host demux 与 spike-in FASTQ（`*.demux.fq.gz` 与 `*.spike-in.fq.gz`）；统计文件必须包含保留率和拒绝原因。
-- `align`：host 输入 `*.demux.fq.gz`，spike-in 输入 `*.spike-in.fq.gz`；输出分别为 `<chunk>.cb.bam` 与 `<chunk>.<spike_name>.bam`。
-- `align`：`spike_in_index` 统一支持对象或 `NAME=INDEX` 列表。
-- `pool`：host 最终输出 `pooled/pooled.byCB.bam`；spike-in 输出 `pooled/pooled.<spike_name>.sorted.bam`。
-- `split`：输入 `pooled/pooled.byCB.bam`，按 `CB:Z:<x>+<y>` 解析 spot。
-- `split`：smoke 模式最多输出 16 个非空 spot BAM。
+- TAPS workflow driver: `scripts/make_cmd.py`
+- EMSeq workflow driver: `scripts-emseq/make_cmd.py`
+- RNA workflow driver: `scripts-rna/make_cmd.py`
+- Single-stage implementations live in:
+  - `scripts/*.py`
+  - `scripts-emseq/*.py`
+  - `scripts-rna/*.py`
 
-## 变更前后检查
+## Slurm Rules
 
-- 功能变更后同步更新 `README.md` 与对应回归文档（TAPS：`TEST.md`；EMSeq：`TEST-emseq.md`）。
-- 推进一个阶段后，同步更新 README 中的“当前进度 / 当前里程碑”。
-- 提交前至少执行：CLI `--help` 检查 + workflow dry-run 回归。
+- Use the `pixi` environment. Do not rely on `module load`.
+- Keep Slurm settings stage-specific. Do not reuse one generic resource block for unrelated stages.
+- Do not add unrelated generic options to sbatch templates.
+- Required stage layout:
+  - `demux_extract_bc`: one sbatch per chunk
+  - `align`: one sbatch per chunk; run spike-in before host inside the script
+  - `pool`: separate host and spike-in jobs
+  - `split`: `split_bams` and `sort` must be separate sbatch jobs with dependencies
+  - `mbias`: split host and spike jobs; use `slurm.mbias.host` and `slurm.mbias.spike`
+  - `call`: split host and spike jobs; use `slurm.call.host` and `slurm.call.spike`
+  - `saturation`: one sbatch; use `slurm.saturation`
+  - `summary`: one sbatch; use `slurm.summary`
 
-## 提交规则
+## Key Contracts
 
-- commit 信息写“为什么做”，不要只写“改了什么”。
-- 每次提交只聚焦一个主题。
-- 提交信息中不要混入中文。
-- 建议主题行（subject）格式统一为“范围/阶段 + 为什么（一句话）”，优先用当前工作流阶段做前缀，便于回溯与检索：
-  - `EMSeq <stage>: <why>`（例如 `EMSeq call: ...` / `EMSeq split: ...`）
-  - 或 `docs: <why>`、`workflow(emseq): <why>`、`scripts-emseq: <why>` 等（范围清晰即可）
-- subject 避免空泛词（如 update/refine/tweak）；尽量写清“要解决的问题/要保障的约束”，例如：
-  - “preserve downstream BAM contracts / keep dry-run shell-safe / keep resource settings step-specific”
-- 当同一提交同时涉及代码 + workflow 配置 + 文档时，subject 只写**主因**；其余放 body，用于说明“哪些契约被保持/同步了”。
-- body（可选但推荐）用最少文字回答三件事：
-  - 为什么要改（动机/问题）
-  - 不变量/约束（哪些输入输出契约不能破；性能/资源边界）
-  - 如何验证（至少：CLI `--help` + workflow `--dry-run`）
-- 任何“输入输出契约变化”必须在 body 显式写出，并同步更新 `README.md` 与下游依赖；若为破坏性变更，明确标注 `BREAKING:`。
-- 避免噪音行淹没关键信息（例如与变更动机无关的自动署名行）；commit 信息以“可复用的决策记录”为准。
-- 不回退或覆盖未明确授权的改动；遇到异常先确认。
+- `demux` writes host demux FASTQ and spike-in FASTQ:
+  - `*.demux.fq.gz`
+  - `*.spike-in.fq.gz`
+- `demux` stats must include retention information and reject reasons.
+- `align` reads host input from `*.demux.fq.gz` and spike-in input from `*.spike-in.fq.gz`.
+- `align` writes:
+  - host: `<chunk>.cb.bam`
+  - spike-in: `<chunk>.<spike_name>.bam`
+- `spike_in_index` must support either a JSON object or a `NAME=INDEX` list.
+- `pool` writes:
+  - host: `pooled/pooled.byCB.bam`
+  - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
+- `split` reads `pooled/pooled.byCB.bam` and parses spots from `CB:Z:<x>+<y>`.
+- `split --smoke` writes at most 16 non-empty spot BAMs.
 
+## Documentation Rules
+
+- Write new documentation in English.
+- Use the new `docs/` tree as the source of truth for active docs.
+- Treat `doc/` as legacy reference unless a task explicitly targets it.
+- Update the right doc when behavior changes:
+  - `README.md`: homepage, workflow status, top-level navigation
+  - `docs/users/`: user-facing run guides
+  - `docs/developers/contracts.md`: stage contracts
+  - `docs/developers/config-reference.md`: config fields and runner rules
+  - `docs/maintenance/`: maintainer regression procedures
+- Do not duplicate one normative fact across multiple docs. Link to the source-of-truth page instead.
+
+## Required Checks
+
+Before finishing a change, run at least:
+
+- relevant CLI `--help`
+- relevant workflow `--dry-run`
+
+If contracts changed, also update the matching docs in the same change.
+
+## Commit Style
+
+- Use [Conventional Commits](https://www.conventionalcommits.org/): `type: short description`
+- Common types: `feat`, `fix`, `refactor`, `docs`, `chore`, `data`, `analysis`
+- Write commit messages in English
+- Write the subject line in imperative mood, lowercase, with no trailing period
+- Keep the subject line under 72 characters
+- One commit should focus on one reason
+- Use the body only when the why is not obvious from the subject
+- Separate the body from the subject with a blank line
+- If the contract changed, say so explicitly in the body
+- Use `BREAKING:` in the body for breaking changes
+
+## Safety
+
+- Do not overwrite or revert user changes without explicit permission.
+- If unexpected changes conflict with your task, stop and confirm before proceeding.
