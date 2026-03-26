@@ -2,6 +2,12 @@
 
 版本变更记录。当前支持范围与入口以 `README.md` 为准。
 
+## 1.5.1
+
+- 重建英文文档系统，按用户 / 开发者 / 维护者拆分到 `docs/` 目录
+- `README.md` 改为英文首页与导航页，旧 `TEST*.md` 改为维护文档入口跳转
+- `AGENTS.md` 改为英文简版规则，并统一提交规范为 Conventional Commits
+
 ## 1.5.0
 
 - 新增 EMSeq 独立入口：`scripts-emseq/make_cmd.py`，主线闭环为 `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
