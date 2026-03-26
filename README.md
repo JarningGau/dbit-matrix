@@ -1,63 +1,38 @@
 # DBiT-Matrix
 
-空间组学数据分析工作流。当前支持 **TAPS**、**EMSeq** 与 **RNA**（MVP：`demux_extract_bc -> align`）入口，共享 `work/<sample>/` 目录结构与下游产物路径。
+DBiT-Matrix is a workflow repository for DBiT-style spatial omics data processing. It currently provides three entrypoints:
 
-- 版本：`1.5.0`
-- 变更记录：`doc/log.md`
+- `TAPS` for methylation workflows
+- `EMSeq` for methylation workflows
+- `RNA` for transcriptomics workflows
 
-## 入口选择
+All workflows are configured with [`workflow/*.json`](workflow/) and run through `pixi`.
 
-| 入口   | 编排脚本                | 配置示例                      |
-|--------|------------------------|-------------------------------|
-| TAPS   | `scripts/make_cmd.py`      | `workflow/dbit_taps_test.json`   |
-| EMSeq  | `scripts-emseq/make_cmd.py` | `workflow/dbit_emseq_test.json`  |
-| RNA    | `scripts-rna/make_cmd.py` | `workflow/dbit_rna_test.json` |
+## Current Status
 
-主流程：
+- `TAPS`: main methylation workflow available
+- `EMSeq`: main methylation workflow available
+- `RNA`: current scope is `demux_extract_bc -> align`
 
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
-
-`--stage all` 按序串联各 stage；所有 stage 支持 `--dry-run`。EMSeq / TAPS 另有实验性 `aggregate`（扁平汇总 per-spot `*.CG.cov`）与 `methscan_prepare`（host `*.CG.cov` → `methscan prepare`），需显式对应 `--stage`，不纳入 `--stage all`（契约见 `doc/stages.md` §11–§12）。`methscan_prepare` 可在 workflow 中配置 `methscan_prepare_chunksize`（bp，默认 `10000000`，与 `methscan prepare` 一致）。
-
-## 主要产物
-
-`work/<sample>/` 下的核心输出：
-
-- `summary/sample_summary.tsv`、`summary/per_spot_summary.tsv`、`summary/*.heatmap.png`
-- `qc/saturation/saturation_curve.png`、`qc/saturation/saturation_summary.tsv`
-- `coverage/host/**/*.CG.cov`、`coverage/host_mito.CG.cov`、`coverage/<spike_name>.CG.cov`（可选）
-
-字段说明与排错指南见 `doc/outputs.md`。
-
-## 快速开始
-
-### TAPS
-
-1. `pixi install`
-2. 复制 `workflow/dbit_taps_test.json`，配置必填字段：`sample_id`、`r1`、`r2`、参考路径、barcode 白名单
-3. 验证配置后提交：
+## Install
 
 ```bash
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage all \
-  --runner local \
-  --dry-run
-
-pixi run python scripts/make_cmd.py \
-  --workflow-config workflow/dbit_taps_test.json \
-  --stage all \
-  --runner local \
-  --submit
+pixi install
 ```
 
-Slurm 环境：`--runner local` 改为 `--runner slurm`。
+## Choose A Workflow
 
-### EMSeq
+| Workflow | Entrypoint | Start here |
+| --- | --- | --- |
+| `TAPS` | `scripts/make_cmd.py` | [TAPS user guide](docs/users/taps.md) |
+| `EMSeq` | `scripts-emseq/make_cmd.py` | [EMSeq user guide](docs/users/emseq.md) |
+| `RNA` | `scripts-rna/make_cmd.py` | [RNA user guide](docs/users/rna.md) |
 
-1. `pixi install`
-2. 复制 `workflow/dbit_emseq_test.json`，按 `doc/emseq.md` 配置必填字段（含 `split_barcodes`、`call_reference_file`、`call_jobs`）
-3. 验证配置后提交：
+General orientation for users: [User overview](docs/users/overview.md)
+
+## First Run Pattern
+
+Start with a dry-run before submitting a real job:
 
 ```bash
 pixi run python scripts-emseq/make_cmd.py \
@@ -65,71 +40,44 @@ pixi run python scripts-emseq/make_cmd.py \
   --stage all \
   --runner local \
   --dry-run
-
-pixi run python scripts-emseq/make_cmd.py \
-  --workflow-config workflow/dbit_emseq_test.json \
-  --stage all \
-  --runner local \
-  --submit
 ```
 
-Slurm 环境：`--runner local` 改为 `--runner slurm`；详见 `doc/emseq.md`。
+Use the workflow-specific guide above to select the correct entry script and config template.
 
-### RNA (MVP)
+## Main Outputs
 
-1. `pixi install`
-2. 复制 `workflow/dbit_rna_test.json` 并配置：`sample_id`、`r1`、`r2`、barcode 白名单、`linker_bc`、`umi_left`、`umi_len`、`star_genome_dir`、`gtf`
-3. 先做 dry-run 再提交：
+Outputs are written under `work/<sample>/`. Common downstream files include:
 
-```bash
-pixi run python scripts-rna/make_cmd.py \
-  --workflow-config workflow/dbit_rna_test.json \
-  --stage all \
-  --runner local \
-  --dry-run
+- `summary/sample_summary.tsv`
+- `summary/per_spot_summary.tsv`
+- `qc/saturation/saturation_summary.tsv`
+- workflow-specific files under `coverage/`, `qc/`, `solo/`, and `commands/`
 
-pixi run python scripts-rna/make_cmd.py \
-  --workflow-config workflow/dbit_rna_test.json \
-  --stage all \
-  --runner local \
-  --submit
-```
+User-facing output checks: [Results guide](docs/users/results.md)
 
-Slurm 环境：`--runner local` 改为 `--runner slurm`。
+## Documentation
 
-RNA MVP 说明：`align` 使用 STARsolo（10xv2-like `CB_UMI_Simple`），输出为 `work/<sample>/solo/` 下的 matrix 结果，并在 `Gene/raw` 与 `Gene/filtered` 目录写出 `barcodes_pos.tsv`（列 `barcode\\tx\\ty`，0-based）；RNA 入口不使用 chunk 概念。
+### Users
 
-## 结果检查顺序
+- [User overview](docs/users/overview.md)
+- [TAPS user guide](docs/users/taps.md)
+- [EMSeq user guide](docs/users/emseq.md)
+- [RNA user guide](docs/users/rna.md)
+- [Results guide](docs/users/results.md)
 
-1. `summary/sample_summary.tsv`
-2. `summary/per_spot_summary.tsv`
-3. `summary/*.heatmap.png`
-4. `qc/saturation/saturation_summary.tsv`
+### Developers
 
-## 文档索引
+- [Architecture](docs/developers/architecture.md)
+- [Stage contracts](docs/developers/contracts.md)
+- [Config reference](docs/developers/config-reference.md)
+- [Doc system](docs/developers/doc-system.md)
 
-### TAPS
+### Maintenance
 
-`README` → `doc/setup.md` → `doc/config.md` → `doc/commands.md` → `doc/outputs.md` → `doc/stages.md`
+- [TAPS regression](docs/maintenance/taps-regression.md)
+- [EMSeq regression](docs/maintenance/emseq-regression.md)
+- [RNA regression](docs/maintenance/rna-regression.md)
 
-- `doc/setup.md`：环境配置与测试数据
-- `doc/config.md`：配置文件必填字段
-- `doc/commands.md`：运行命令（`local` / `slurm`）
-- `doc/outputs.md`：结果解读
-- `doc/stages.md`：各 stage 输入输出契约
+### Legacy
 
-### EMSeq
-
-- `doc/emseq.md`：EMSeq 配置与使用
-
-### 维护者
-
-- `TEST.md`：TAPS 回归测试
-- `TEST-emseq.md`：EMSeq 回归测试
-- `TEST-rna.md`：RNA 回归测试
-
-### 内部
-
-- `doc/progress.md`：里程碑与风险
-- `doc/log.md`：版本记录
-- `doc/TODO.md`：待办事项
+Legacy Chinese docs are preserved in [`doc/`](doc/). New work should target [`docs/`](docs/).
