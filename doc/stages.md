@@ -278,4 +278,4 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 
 - `coverage/host_prepare/`（由 `methscan prepare` 写入；具体文件以 methscan 版本为准）
 
-**编排**：TAPS：`scripts/make_cmd.py --stage methscan_prepare` → `commands/11_methscan_prepare.sh` / `11_methscan_prepare.sbatch`；EMSeq：`scripts-emseq/make_cmd.py --stage methscan_prepare` → `commands/12_methscan_prepare.sh` / `12_methscan_prepare.sbatch`。等价单步：`scripts/methscan_prepare.py --work-path <work>`（可选 `--pixi-manifest <dir>` 覆盖默认 `envs/methscan`）。
+**编排**：TAPS：`scripts/make_cmd.py --stage methscan_prepare` → `commands/11_methscan_prepare.sh` / `11_methscan_prepare.sbatch`；EMSeq：`scripts-emseq/make_cmd.py --stage methscan_prepare` → `commands/12_methscan_prepare.sh` / `12_methscan_prepare.sbatch`。等价单步：`scripts/methscan_prepare.py --work-path <work>`（可选 `--pixi-manifest <dir>` 覆盖默认 `envs/methscan`；`--chunksize` 默认 `10000000`，与 `methscan prepare` 一致；workflow 键 `methscan_prepare_chunksize` 或 CLI `--methscan-prepare-chunksize` 可覆盖）。

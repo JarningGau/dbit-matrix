@@ -13,6 +13,9 @@ def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+METHSCAN_DEFAULT_CHUNKSIZE = 10_000_000
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -37,6 +40,16 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Print resolved paths and command; do not run pixi.",
+    )
+    parser.add_argument(
+        "--chunksize",
+        type=int,
+        default=METHSCAN_DEFAULT_CHUNKSIZE,
+        metavar="N",
+        help=(
+            "Passed to `methscan prepare --chunksize` (bp per chromosome chunk). "
+            f"Default: {METHSCAN_DEFAULT_CHUNKSIZE} (methscan default, 10 Mbp)."
+        ),
     )
     return parser.parse_args()
 
@@ -67,6 +80,10 @@ def main() -> int:
         )
         return 1
 
+    if args.chunksize < 1:
+        print("error: --chunksize must be >= 1", file=sys.stderr)
+        return 1
+
     cmd: list[str] = [
         "pixi",
         "run",
@@ -76,12 +93,15 @@ def main() -> int:
         str(out_dir),
         "--input-format",
         "bismark",
+        "--chunksize",
+        str(args.chunksize),
     ]
     if args.dry_run:
         print(f"cwd={manifest}")
         print("command=" + " ".join(cmd))
         print(f"input_count={len(cov_files)}")
         print(f"output_dir={out_dir}")
+        print(f"chunksize={args.chunksize}")
         return 0
 
     out_dir.mkdir(parents=True, exist_ok=True)

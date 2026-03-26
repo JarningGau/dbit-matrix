@@ -61,6 +61,7 @@ Slurm 环境需额外配置各 stage 资源：
 - `aggregate_sort_mem`：可选，传给 `scripts/aggregate.py` 中 GNU `sort -S` 的内存上限（默认 `8G`）
 - `methscan_prepare_script`：可选，覆盖默认 `scripts/methscan_prepare.py`
 - `methscan_pixi_manifest`：可选，含 `pixi.toml` 的目录，传给 `methscan_prepare.py` 的 `--pixi-manifest`（默认仓库内 `envs/methscan`）
+- `methscan_prepare_chunksize`：可选，传给 `methscan prepare --chunksize`（bp，默认 `10000000`，与 methscan 默认一致）
 
 `call_r1_*_trimming` 与 `call_r2_*_trimming` 按原始 read 两端 cycle 定义，reverse-strand 比对保持 left/right 端语义。
 
@@ -95,7 +96,7 @@ EMSeq 从 `workflow/dbit_emseq_test.json` 复制配置，主要差异：
 - **`call` 必填**：`call_reference_file`、`call_jobs`
 - **`call` 可选**：`call_left_trimming` / `call_right_trimming` → `biscuit pileup -5` / `-3`（每条 read 的 5'/3' 端最小距离；与 TAPS 的 `call_r1_*` / `call_r2_*` 不同，**不能**按 R1/R2 分别设置）。省略时不传对应 flag，使用 biscuit 内置默认。
 - demux 可调参数：`linker_edit_distance`、`barcode_hamming_distance`、`gzip_level`
-- Slurm 按 stage 配置：`slurm.split.split_bams`、`slurm.mbias.host`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`；实验性 `aggregate`：`slurm.aggregate`、`aggregate_script`；实验性 `methscan_prepare`：`slurm.methscan_prepare`、`methscan_prepare_script`
+- Slurm 按 stage 配置：`slurm.split.split_bams`、`slurm.mbias.host`、`slurm.call.host`、`slurm.saturation`、`slurm.summary`；实验性 `aggregate`：`slurm.aggregate`、`aggregate_script`；实验性 `methscan_prepare`：`slurm.methscan_prepare`、`methscan_prepare_script`、`methscan_prepare_chunksize`（可选）
 
 可选字段详见 `doc/emseq.md`。
 

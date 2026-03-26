@@ -438,4 +438,4 @@ pixi run python scripts/methscan_prepare.py \
   --dry-run
 ```
 
-检查点：契约见 `doc/stages.md` §12；编排产物为 `commands/11_methscan_prepare.sh` 或 `11_methscan_prepare.sbatch`。
+检查点：契约见 `doc/stages.md` §12；编排产物为 `commands/11_methscan_prepare.sh` 或 `11_methscan_prepare.sbatch`；展开命令含 `scripts/methscan_prepare.py --chunksize`（默认 `10000000`，可由 workflow `methscan_prepare_chunksize` 或 `--methscan-prepare-chunksize` 覆盖）。

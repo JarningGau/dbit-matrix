@@ -46,7 +46,7 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 - **saturation**：`saturation_reads_threshold`；Slurm：`slurm.saturation`
 - **summary**：Slurm：`slurm.summary`
 - **aggregate**（实验性）：`aggregate_script`（默认 `scripts/aggregate.py`）；Slurm：`slurm.aggregate`
-- **methscan_prepare**（实验性）：`methscan_prepare_script`（默认 `scripts/methscan_prepare.py`）、`methscan_pixi_manifest`（可选，覆盖默认 `envs/methscan`）；Slurm：`slurm.methscan_prepare`
+- **methscan_prepare**（实验性）：`methscan_prepare_script`（默认 `scripts/methscan_prepare.py`）、`methscan_pixi_manifest`（可选，覆盖默认 `envs/methscan`）、`methscan_prepare_chunksize`（可选，默认 `10000000`）；Slurm：`slurm.methscan_prepare`
 - **`all` + `slurm`**：`run.sbatch` SBATCH 头默认取自 `slurm.summary`
 
 ## 常用命令

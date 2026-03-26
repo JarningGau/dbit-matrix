@@ -51,6 +51,7 @@
     "saturation_script": "scripts/saturation.py",
     "saturation_reads_threshold": 500,
     "summary_script": "scripts/summary.py",
+    "methscan_prepare_chunksize": 50000000,
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
