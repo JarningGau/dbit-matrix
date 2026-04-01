@@ -331,16 +331,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--methscan-prepare-chunksize",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "Passed to scripts/methscan_prepare.py --chunksize (methscan prepare). "
-            "Default: 10000000 (10 Mbp)."
-        ),
-    )
-    parser.add_argument(
         "--spike-in-index",
         action="append",
         default=None,
@@ -707,8 +697,6 @@ def build_methscan_prepare_command(args: argparse.Namespace, sample_work: Path) 
         str(script_path),
         "--work-path",
         str(sample_work),
-        "--chunksize",
-        str(args.methscan_prepare_chunksize),
     ]
     manifest = getattr(args, "methscan_pixi_manifest", None)
     if manifest:
@@ -1213,10 +1201,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.methscan_pixi_manifest,
             cfg.get("methscan_pixi_manifest"),
         ),
-        "methscan_prepare_chunksize": pick(
-            args.methscan_prepare_chunksize,
-            cfg.get("methscan_prepare_chunksize"),
-        ),
         "spike_in_index": normalize_spike_in_index(
             pick(args.spike_in_index, cfg.get("spike_in_index"))
         ),
@@ -1511,12 +1495,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["methscan_prepare_script"] = (
         settings["methscan_prepare_script"] or "scripts/methscan_prepare.py"
     )
-    if settings["methscan_prepare_chunksize"] is not None:
-        settings["methscan_prepare_chunksize"] = int(settings["methscan_prepare_chunksize"])
-    else:
-        settings["methscan_prepare_chunksize"] = 10_000_000
-    if settings["methscan_prepare_chunksize"] < 1:
-        raise ValueError("methscan_prepare_chunksize must be >= 1")
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -2544,7 +2522,6 @@ def main() -> int:
         command_args = argparse.Namespace(
             methscan_prepare_script=settings["methscan_prepare_script"],
             methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
-            methscan_prepare_chunksize=settings["methscan_prepare_chunksize"],
         )
         command = build_methscan_prepare_command(command_args, sample_work)
         if settings["runner"] == "local":

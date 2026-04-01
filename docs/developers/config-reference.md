@@ -141,7 +141,6 @@ TAPS and EMSeq may also use:
 - `aggregate_sort_mem`
 - `methscan_prepare_script`
 - `methscan_pixi_manifest`
-- `methscan_prepare_chunksize`
 
 These stages are optional and are not part of `--stage all`.
 

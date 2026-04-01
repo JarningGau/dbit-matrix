@@ -389,16 +389,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--methscan-prepare-chunksize",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "Passed to scripts/methscan_prepare.py --chunksize (methscan prepare). "
-            "Default: 10000000 (10 Mbp)."
-        ),
-    )
-    parser.add_argument(
         "--submit",
         action="store_true",
         help="Submit immediately after generating command file.",
@@ -749,8 +739,6 @@ def build_methscan_prepare_command(args: argparse.Namespace, sample_work: Path) 
         str(script_path),
         "--work-path",
         str(sample_work),
-        "--chunksize",
-        str(args.methscan_prepare_chunksize),
     ]
     manifest = getattr(args, "methscan_pixi_manifest", None)
     if manifest:
@@ -976,10 +964,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.methscan_pixi_manifest,
             cfg.get("methscan_pixi_manifest"),
         ),
-        "methscan_prepare_chunksize": pick(
-            args.methscan_prepare_chunksize,
-            cfg.get("methscan_prepare_chunksize"),
-        ),
         "slurm_cfg_raw": slurm_cfg_raw,
         "slurm_partition": pick(args.slurm_partition, stage_slurm_cfg.get("partition")),
         "slurm_mem": pick(args.slurm_mem, stage_slurm_cfg.get("mem")),
@@ -1171,12 +1155,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["methscan_prepare_script"] = (
         settings["methscan_prepare_script"] or "scripts/methscan_prepare.py"
     )
-    if settings["methscan_prepare_chunksize"] is not None:
-        settings["methscan_prepare_chunksize"] = int(settings["methscan_prepare_chunksize"])
-    else:
-        settings["methscan_prepare_chunksize"] = 10_000_000
-    if settings["methscan_prepare_chunksize"] < 1:
-        raise ValueError("methscan_prepare_chunksize must be >= 1")
 
     settings["mbias_script"] = settings["mbias_script"] or "scripts-emseq/mbias.py"
     settings["mbias_mode"] = settings["mbias_mode"] or "spike"
@@ -2446,7 +2424,6 @@ def main() -> int:
         command_args = argparse.Namespace(
             methscan_prepare_script=settings["methscan_prepare_script"],
             methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
-            methscan_prepare_chunksize=settings["methscan_prepare_chunksize"],
         )
         command = build_methscan_prepare_command(command_args, sample_work)
         if settings["runner"] == "local":
