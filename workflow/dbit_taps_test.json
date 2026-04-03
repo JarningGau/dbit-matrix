@@ -54,6 +54,7 @@
     "saturation_script": "scripts/saturation.py",
     "saturation_reads_threshold": 500,
     "summary_script": "scripts/summary.py",
+    "methscan_tss_bed": "data/genome/mm10_encode_VM21_tss_4k.bed",
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
         "puc19": "/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa"
@@ -129,6 +130,36 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "16G",
             "cpus_per_task": 2
+        },
+        "methscan_filter": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "methscan_profile": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "methscan_smooth": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "methscan_scan": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "32G",
+            "cpus_per_task": 10
+        },
+        "methscan_matrix": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "32G",
+            "cpus_per_task": 10
+        },
+        "methscan_all": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "32G",
+            "cpus_per_task": 10
         },
         "saturation": {
             "partition": "amd-ep2,intel-sc3",

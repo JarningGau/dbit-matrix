@@ -139,8 +139,24 @@ TAPS and EMSeq may also use:
 
 - `aggregate_script`
 - `aggregate_sort_mem`
-- `methscan_prepare_script`
+- `methscan_prepare_script` (legacy wrapper; command generation uses `methscan_run_script`)
+- `methscan_run_script` (default: `scripts/methscan_run.py`)
 - `methscan_pixi_manifest`
+- `methscan_prepare_chunksize` (default: `10000000`)
+- `methscan_filter_min_sites` (default: `50000`)
+- `methscan_tss_bed` (required for `methscan_profile` and `methscan_all`)
+- `methscan_profile_strand_column` (default: `6`)
+- `methscan_profile_prepared_subdir`: `host_prepare` or `filter` (default: `host_prepare`)
+- `methscan_profile_csv` (optional path)
+- `methscan_smooth_bandwidth` (optional)
+- `methscan_smooth_use_weights` (boolean)
+- `methscan_scan_threads` (default: `10`)
+- `methscan_vmrs_bed` (optional path)
+- `methscan_matrix_threads` (default: `10`)
+- `methscan_matrix_sparse` (boolean)
+- `methscan_matrix_prefix` (optional output directory)
+
+For `methscan_smooth_use_weights` and `methscan_matrix_sparse`, omit the matching CLI flags so values from workflow JSON apply; passing `--methscan-smooth-use-weights` or `--methscan-matrix-sparse` on the command line still forces those options on.
 
 These stages are optional and are not part of `--stage all`.
 
@@ -154,6 +170,7 @@ Slurm resources should remain stage-specific. Examples:
 - `slurm.call.spike`
 - `slurm.saturation`
 - `slurm.summary`
+- `slurm.methscan_prepare`, `slurm.methscan_filter`, `slurm.methscan_profile`, `slurm.methscan_smooth`, `slurm.methscan_scan`, `slurm.methscan_matrix`, `slurm.methscan_all` (methscan optional stages)
 
 Do not collapse unrelated stages into one shared resource block.
 

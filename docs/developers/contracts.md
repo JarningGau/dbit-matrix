@@ -225,9 +225,13 @@ Contract:
 - `aggregated_cg_by_id.tsv` is sorted by `id`, then position
 - `aggregated_cg_by_pos.tsv` is sorted by position, then `id`
 
-### `methscan_prepare`
+### Methscan optional stages (`methscan_*`)
 
-Purpose: convert host coverage outputs into `methscan prepare` inputs.
+All methscan steps are **host-only**, **explicit** (not part of `--stage all`), and run `scripts/methscan_run.py` in the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it. Paths are under `work/<sample>/coverage/` unless noted.
+
+#### `methscan_prepare`
+
+Purpose: run `methscan prepare` on per-spot Bismark-like coverage.
 
 Input:
 
@@ -237,15 +241,76 @@ Output:
 
 - `coverage/host_prepare/`
 
-Contract:
+#### `methscan_filter`
 
-- this is host-only
-- this stage is explicit and not part of `--stage all`
+Purpose: run `methscan filter` from prepared data to filtered cells.
+
+Input:
+
+- `coverage/host_prepare/`
+
+Output:
+
+- `coverage/filter/`
+
+#### `methscan_profile`
+
+Purpose: run `methscan profile` for mean methylation over regions (e.g. TSS).
+
+Input:
+
+- sorted regions `.bed` (`methscan_tss_bed` in workflow config or CLI)
+- prepared directory: default `coverage/host_prepare/`; optional `coverage/filter/` via `methscan_profile_prepared_subdir`
+
+Output:
+
+- default `coverage/TSS_profile.csv` (override with `methscan_profile_csv`)
+
+#### `methscan_smooth`
+
+Purpose: run `methscan smooth` on filtered data.
+
+Input:
+
+- `coverage/filter/`
+
+Output:
+
+- smoothed values under `coverage/filter/smoothed/` (methscan layout)
+
+#### `methscan_scan`
+
+Purpose: run `methscan scan` for VMRs.
+
+Input:
+
+- `coverage/filter/` (includes smoothed outputs from `methscan smooth`)
+
+Output:
+
+- default `coverage/VMRs.bed` (override with `methscan_vmrs_bed`)
+
+#### `methscan_matrix`
+
+Purpose: run `methscan matrix` for region × cell tables.
+
+Input:
+
+- VMRs `.bed` (default `coverage/VMRs.bed`)
+- `coverage/filter/`
+
+Output:
+
+- default output directory `coverage/matrix_VMR/` (override with `methscan_matrix_prefix`)
+
+#### `methscan_all`
+
+Purpose: run `prepare`, `filter`, `profile`, `smooth`, `scan`, and `matrix` **in order** in one generated script (same effect as running those stages sequentially). Requires `methscan_tss_bed` for the profile step.
 
 ## EMSeq-Specific Additions
 
 - `--stage all` covers only the fixed mainline
-- `aggregate` and `methscan_prepare` are optional explicit stages and are not part of `all`
+- `aggregate` and the methscan optional stages are not part of `all`
 - `mbias` and `call` have EMSeq-specific chemistry and trimming behavior, but the output contracts above remain stable
 
 ## RNA Current Contracts

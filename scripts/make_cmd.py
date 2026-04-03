@@ -21,9 +21,18 @@ STAGE_SEQUENCE = [
     "saturation",
     "summary",
 ]
-STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "methscan_prepare", "all"]
+METHSCAN_STAGES = (
+    "methscan_prepare",
+    "methscan_filter",
+    "methscan_profile",
+    "methscan_smooth",
+    "methscan_scan",
+    "methscan_matrix",
+    "methscan_all",
+)
+STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", *METHSCAN_STAGES, "all"]
 # Stages that may appear as top-level keys under workflow `slurm` (nested mode).
-SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate", "methscan_prepare"}
+SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate", *METHSCAN_STAGES}
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -40,6 +49,23 @@ STAGE_REQUIRED_FIELDS = {
     "summary": [],
     "aggregate": [],
     "methscan_prepare": [],
+    "methscan_filter": [],
+    "methscan_profile": [],
+    "methscan_smooth": [],
+    "methscan_scan": [],
+    "methscan_matrix": [],
+    "methscan_all": [],
+}
+
+# (methscan_run subcommand, script basename without extension, Slurm job name prefix)
+TAPS_METHSCAN_STAGE_MAP = {
+    "methscan_prepare": ("prepare", "11_methscan_prepare", "dbit_methscan_prepare"),
+    "methscan_filter": ("filter", "12_methscan_filter", "dbit_methscan_filter"),
+    "methscan_profile": ("profile", "13_methscan_profile", "dbit_methscan_profile"),
+    "methscan_smooth": ("smooth", "14_methscan_smooth", "dbit_methscan_smooth"),
+    "methscan_scan": ("scan", "15_methscan_scan", "dbit_methscan_scan"),
+    "methscan_matrix": ("matrix", "16_methscan_matrix", "dbit_methscan_matrix"),
+    "methscan_all": ("all", "17_methscan_all", "dbit_methscan_all"),
 }
 
 
@@ -329,6 +355,79 @@ def parse_args() -> argparse.Namespace:
             "Directory with pixi.toml for methscan (passed to --pixi-manifest). "
             "Default: envs/methscan under repo root."
         ),
+    )
+    parser.add_argument(
+        "--methscan-run-script",
+        help="Path to methscan_run.py. Default: scripts/methscan_run.py.",
+    )
+    parser.add_argument(
+        "--methscan-prepare-chunksize",
+        type=int,
+        help="Passed to methscan prepare --chunksize (default: 10000000).",
+    )
+    parser.add_argument(
+        "--methscan-filter-min-sites",
+        type=int,
+        help="Passed to methscan filter --min-sites (default: 50000).",
+    )
+    parser.add_argument(
+        "--methscan-tss-bed",
+        help="BED file for methscan profile / methscan_all (required for those stages).",
+    )
+    parser.add_argument(
+        "--methscan-profile-strand-column",
+        type=int,
+        help="methscan profile --strand-column (default: 6).",
+    )
+    parser.add_argument(
+        "--methscan-profile-prepared-subdir",
+        choices=("host_prepare", "filter"),
+        help="methscan profile --prepared-dir (default: host_prepare).",
+    )
+    parser.add_argument(
+        "--methscan-profile-csv",
+        help="methscan profile output CSV path (optional).",
+    )
+    parser.add_argument(
+        "--methscan-smooth-bandwidth",
+        type=int,
+        help="methscan smooth --bandwidth (optional).",
+    )
+    parser.add_argument(
+        "--methscan-smooth-use-weights",
+        action="store_true",
+        default=None,
+        help=(
+            "Pass --use-weights to methscan smooth. "
+            "Omit to take methscan_smooth_use_weights from workflow JSON."
+        ),
+    )
+    parser.add_argument(
+        "--methscan-scan-threads",
+        type=int,
+        help="methscan scan --threads (default: 10).",
+    )
+    parser.add_argument(
+        "--methscan-vmrs-bed",
+        help="methscan scan/matrix VMRs .bed path (optional defaults under coverage/).",
+    )
+    parser.add_argument(
+        "--methscan-matrix-threads",
+        type=int,
+        help="methscan matrix --threads (default: 10).",
+    )
+    parser.add_argument(
+        "--methscan-matrix-sparse",
+        action="store_true",
+        default=None,
+        help=(
+            "Pass --sparse to methscan matrix. "
+            "Omit to take methscan_matrix_sparse from workflow JSON."
+        ),
+    )
+    parser.add_argument(
+        "--methscan-matrix-prefix",
+        help="methscan matrix output directory (optional).",
     )
     parser.add_argument(
         "--spike-in-index",
@@ -690,18 +789,155 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
     return quoted(command)
 
 
-def build_methscan_prepare_command(args: argparse.Namespace, sample_work: Path) -> str:
-    script_path = Path(args.methscan_prepare_script)
-    command = [
-        sys.executable,
-        str(script_path),
-        "--work-path",
-        str(sample_work),
-    ]
+def build_methscan_run_command(
+    step: str,
+    args: argparse.Namespace,
+    sample_work: Path,
+) -> str:
+    script_path = Path(args.methscan_run_script)
+    command = [sys.executable, str(script_path), step, "--work-path", str(sample_work)]
     manifest = getattr(args, "methscan_pixi_manifest", None)
     if manifest:
         command.extend(["--pixi-manifest", str(manifest)])
+    if step == "prepare":
+        command.extend(
+            ["--chunksize", str(getattr(args, "methscan_prepare_chunksize", 10_000_000))]
+        )
+    elif step == "filter":
+        command.extend(
+            ["--min-sites", str(getattr(args, "methscan_filter_min_sites", 50_000))]
+        )
+    elif step == "profile":
+        command.extend(
+            [
+                "--tss-bed",
+                str(args.methscan_tss_bed),
+                "--strand-column",
+                str(getattr(args, "methscan_profile_strand_column", 6)),
+                "--prepared-dir",
+                str(getattr(args, "methscan_profile_prepared_subdir", "host_prepare")),
+            ]
+        )
+        if getattr(args, "methscan_profile_csv", None):
+            command.extend(["--profile-csv", str(args.methscan_profile_csv)])
+    elif step == "smooth":
+        bw = getattr(args, "methscan_smooth_bandwidth", None)
+        if bw is not None:
+            command.extend(["--bandwidth", str(bw)])
+        if getattr(args, "methscan_smooth_use_weights", False):
+            command.append("--use-weights")
+    elif step == "scan":
+        command.extend(
+            ["--threads", str(getattr(args, "methscan_scan_threads", 10))]
+        )
+        if getattr(args, "methscan_vmrs_bed", None):
+            command.extend(["--vmrs-bed", str(args.methscan_vmrs_bed)])
+    elif step == "matrix":
+        command.extend(
+            ["--threads", str(getattr(args, "methscan_matrix_threads", 10))]
+        )
+        if getattr(args, "methscan_matrix_sparse", False):
+            command.append("--sparse")
+        if getattr(args, "methscan_vmrs_bed", None):
+            command.extend(["--vmrs-bed", str(args.methscan_vmrs_bed)])
+        if getattr(args, "methscan_matrix_prefix", None):
+            command.extend(["--matrix-prefix", str(args.methscan_matrix_prefix)])
+    elif step == "all":
+        command.extend(
+            [
+                "--chunksize",
+                str(getattr(args, "methscan_prepare_chunksize", 10_000_000)),
+                "--min-sites",
+                str(getattr(args, "methscan_filter_min_sites", 50_000)),
+                "--tss-bed",
+                str(args.methscan_tss_bed),
+                "--strand-column",
+                str(getattr(args, "methscan_profile_strand_column", 6)),
+                "--prepared-dir",
+                str(getattr(args, "methscan_profile_prepared_subdir", "host_prepare")),
+            ]
+        )
+        if getattr(args, "methscan_profile_csv", None):
+            command.extend(["--profile-csv", str(args.methscan_profile_csv)])
+        bw = getattr(args, "methscan_smooth_bandwidth", None)
+        if bw is not None:
+            command.extend(["--bandwidth", str(bw)])
+        if getattr(args, "methscan_smooth_use_weights", False):
+            command.append("--use-weights")
+        command.extend(
+            [
+                "--scan-threads",
+                str(getattr(args, "methscan_scan_threads", 10)),
+                "--matrix-threads",
+                str(getattr(args, "methscan_matrix_threads", 10)),
+            ]
+        )
+        if getattr(args, "methscan_matrix_sparse", False):
+            command.append("--sparse")
+        if getattr(args, "methscan_vmrs_bed", None):
+            command.extend(["--vmrs-bed", str(args.methscan_vmrs_bed)])
+        if getattr(args, "methscan_matrix_prefix", None):
+            command.extend(["--matrix-prefix", str(args.methscan_matrix_prefix)])
+    else:
+        raise ValueError(f"unknown methscan step: {step}")
     return quoted(command)
+
+
+def methscan_namespace_from_settings(settings: dict) -> argparse.Namespace:
+    return argparse.Namespace(
+        methscan_run_script=settings["methscan_run_script"],
+        methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
+        methscan_prepare_chunksize=settings["methscan_prepare_chunksize"],
+        methscan_filter_min_sites=settings["methscan_filter_min_sites"],
+        methscan_tss_bed=settings.get("methscan_tss_bed"),
+        methscan_profile_strand_column=settings["methscan_profile_strand_column"],
+        methscan_profile_prepared_subdir=settings["methscan_profile_prepared_subdir"],
+        methscan_profile_csv=settings.get("methscan_profile_csv"),
+        methscan_smooth_bandwidth=settings.get("methscan_smooth_bandwidth"),
+        methscan_smooth_use_weights=settings["methscan_smooth_use_weights"],
+        methscan_scan_threads=settings["methscan_scan_threads"],
+        methscan_vmrs_bed=settings.get("methscan_vmrs_bed"),
+        methscan_matrix_threads=settings["methscan_matrix_threads"],
+        methscan_matrix_sparse=settings["methscan_matrix_sparse"],
+        methscan_matrix_prefix=settings.get("methscan_matrix_prefix"),
+    )
+
+
+def emit_methscan_stage_command(
+    *,
+    settings: dict,
+    sample_work: Path,
+    command_dir: Path,
+    log_dir: Path,
+    step: str,
+    script_filename: str,
+    job_name: str,
+    generated_scripts: list[Path],
+) -> None:
+    command_args = methscan_namespace_from_settings(settings)
+    command = build_methscan_run_command(step, command_args, sample_work)
+    script_path = command_dir / script_filename
+    print(f"[make_cmd] runner={settings['runner']}")
+    print(f"[make_cmd] stage={settings['stage']}")
+    print(f"[make_cmd] sample_id={settings['sample_id']}")
+    print(f"[make_cmd] script={script_path}")
+    print(f"[make_cmd] command={command}")
+    if settings["dry_run"]:
+        return
+    if settings["runner"] == "local":
+        generate_local_script(command, script_path)
+    else:
+        slurm_args = argparse.Namespace(
+            job_name=job_name,
+            slurm_partition=settings["slurm_partition"],
+            slurm_mem=settings["slurm_mem"],
+            slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+            slurm_output=settings["slurm_output"].replace("%x", job_name),
+            slurm_error=settings["slurm_error"].replace("%x", job_name),
+            module_line="",
+        )
+        generate_slurm_script(command, script_path, log_dir, slurm_args)
+    generated_scripts.append(script_path)
 
 
 def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
@@ -812,6 +1048,10 @@ def validate_required_for_stage(stage: str, settings: dict) -> None:
     missing = [key for key in required if settings.get(key) in (None, "")]
     if missing:
         raise ValueError(f"missing required settings: {', '.join(missing)}")
+    if stage in ("methscan_profile", "methscan_all") and not settings.get(
+        "methscan_tss_bed"
+    ):
+        raise ValueError("methscan_tss_bed is required for this stage")
 
 
 def select_stage_slurm_cfg(slurm_cfg_raw: dict, stage: str) -> dict:
@@ -1049,7 +1289,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
     if stage == "all":
         slurm_stage_key = STAGE_SEQUENCE[0]
-    elif stage in STAGE_SEQUENCE or stage in ("aggregate", "methscan_prepare"):
+    elif stage in STAGE_SEQUENCE or stage in ("aggregate", *METHSCAN_STAGES):
         slurm_stage_key = stage
     else:
         slurm_stage_key = STAGE_SEQUENCE[0]
@@ -1196,6 +1436,50 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "methscan_prepare_script": pick(
             args.methscan_prepare_script,
             cfg.get("methscan_prepare_script"),
+        ),
+        "methscan_run_script": pick(args.methscan_run_script, cfg.get("methscan_run_script")),
+        "methscan_prepare_chunksize": pick(
+            args.methscan_prepare_chunksize,
+            cfg.get("methscan_prepare_chunksize"),
+        ),
+        "methscan_filter_min_sites": pick(
+            args.methscan_filter_min_sites,
+            cfg.get("methscan_filter_min_sites"),
+        ),
+        "methscan_tss_bed": pick(args.methscan_tss_bed, cfg.get("methscan_tss_bed")),
+        "methscan_profile_strand_column": pick(
+            args.methscan_profile_strand_column,
+            cfg.get("methscan_profile_strand_column"),
+        ),
+        "methscan_profile_prepared_subdir": pick(
+            args.methscan_profile_prepared_subdir,
+            cfg.get("methscan_profile_prepared_subdir"),
+        ),
+        "methscan_profile_csv": pick(args.methscan_profile_csv, cfg.get("methscan_profile_csv")),
+        "methscan_smooth_bandwidth": pick(
+            args.methscan_smooth_bandwidth,
+            cfg.get("methscan_smooth_bandwidth"),
+        ),
+        "methscan_smooth_use_weights": pick(
+            args.methscan_smooth_use_weights,
+            cfg.get("methscan_smooth_use_weights"),
+        ),
+        "methscan_scan_threads": pick(
+            args.methscan_scan_threads,
+            cfg.get("methscan_scan_threads"),
+        ),
+        "methscan_vmrs_bed": pick(args.methscan_vmrs_bed, cfg.get("methscan_vmrs_bed")),
+        "methscan_matrix_threads": pick(
+            args.methscan_matrix_threads,
+            cfg.get("methscan_matrix_threads"),
+        ),
+        "methscan_matrix_sparse": pick(
+            args.methscan_matrix_sparse,
+            cfg.get("methscan_matrix_sparse"),
+        ),
+        "methscan_matrix_prefix": pick(
+            args.methscan_matrix_prefix,
+            cfg.get("methscan_matrix_prefix"),
         ),
         "methscan_pixi_manifest": pick(
             args.methscan_pixi_manifest,
@@ -1495,6 +1779,49 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["methscan_prepare_script"] = (
         settings["methscan_prepare_script"] or "scripts/methscan_prepare.py"
     )
+    settings["methscan_run_script"] = settings.get("methscan_run_script") or "scripts/methscan_run.py"
+    settings["methscan_prepare_chunksize"] = (
+        int(settings["methscan_prepare_chunksize"])
+        if settings.get("methscan_prepare_chunksize") is not None
+        else 10_000_000
+    )
+    if settings["methscan_prepare_chunksize"] < 1:
+        raise ValueError("methscan_prepare_chunksize must be >= 1")
+    settings["methscan_filter_min_sites"] = (
+        int(settings["methscan_filter_min_sites"])
+        if settings.get("methscan_filter_min_sites") is not None
+        else 50_000
+    )
+    if settings["methscan_filter_min_sites"] < 1:
+        raise ValueError("methscan_filter_min_sites must be >= 1")
+    settings["methscan_profile_strand_column"] = (
+        int(settings["methscan_profile_strand_column"])
+        if settings.get("methscan_profile_strand_column") is not None
+        else 6
+    )
+    if settings["methscan_profile_strand_column"] < 1:
+        raise ValueError("methscan_profile_strand_column must be >= 1")
+    settings["methscan_profile_prepared_subdir"] = (
+        settings.get("methscan_profile_prepared_subdir") or "host_prepare"
+    )
+    settings["methscan_scan_threads"] = (
+        int(settings["methscan_scan_threads"])
+        if settings.get("methscan_scan_threads") is not None
+        else 10
+    )
+    if settings["methscan_scan_threads"] < 1:
+        raise ValueError("methscan_scan_threads must be >= 1")
+    settings["methscan_matrix_threads"] = (
+        int(settings["methscan_matrix_threads"])
+        if settings.get("methscan_matrix_threads") is not None
+        else 10
+    )
+    if settings["methscan_matrix_threads"] < 1:
+        raise ValueError("methscan_matrix_threads must be >= 1")
+    settings["methscan_smooth_use_weights"] = bool(
+        settings.get("methscan_smooth_use_weights")
+    )
+    settings["methscan_matrix_sparse"] = bool(settings.get("methscan_matrix_sparse"))
     settings["slurm_partition"] = settings["slurm_partition"] or "cpu"
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
@@ -2518,46 +2845,22 @@ def main() -> int:
                 )
                 generate_slurm_script(command, script_path, log_dir, slurm_args)
             generated_scripts.append(script_path)
-    elif settings["stage"] == "methscan_prepare":
-        command_args = argparse.Namespace(
-            methscan_prepare_script=settings["methscan_prepare_script"],
-            methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
+    elif settings["stage"] in TAPS_METHSCAN_STAGE_MAP:
+        step, script_base, slug = TAPS_METHSCAN_STAGE_MAP[settings["stage"]]
+        ext = ".sh" if settings["runner"] == "local" else ".sbatch"
+        job_name = f"{slug}_{settings['sample_id']}"
+        emit_methscan_stage_command(
+            settings=settings,
+            sample_work=sample_work,
+            command_dir=command_dir,
+            log_dir=log_dir,
+            step=step,
+            script_filename=f"{script_base}{ext}",
+            job_name=job_name,
+            generated_scripts=generated_scripts,
         )
-        command = build_methscan_prepare_command(command_args, sample_work)
-        if settings["runner"] == "local":
-            script_path = command_dir / "11_methscan_prepare.sh"
-            print(f"[make_cmd] runner={settings['runner']}")
-            print(f"[make_cmd] stage={settings['stage']}")
-            print(f"[make_cmd] sample_id={settings['sample_id']}")
-            print(f"[make_cmd] script={script_path}")
-            print(f"[make_cmd] command={command}")
-            if settings["dry_run"]:
-                return 0
-            generate_local_script(command, script_path)
-            generated_scripts.append(script_path)
-        else:
-            script_path = command_dir / "11_methscan_prepare.sbatch"
-            print(f"[make_cmd] runner={settings['runner']}")
-            print(f"[make_cmd] stage={settings['stage']}")
-            print(f"[make_cmd] sample_id={settings['sample_id']}")
-            print(f"[make_cmd] script={script_path}")
-            print(f"[make_cmd] command={command}")
-            if not settings["dry_run"]:
-                slurm_args = argparse.Namespace(
-                    job_name=f"dbit_methscan_prepare_{settings['sample_id']}",
-                    slurm_partition=settings["slurm_partition"],
-                    slurm_mem=settings["slurm_mem"],
-                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
-                    slurm_output=settings["slurm_output"].replace(
-                        "%x", f"dbit_methscan_prepare_{settings['sample_id']}"
-                    ),
-                    slurm_error=settings["slurm_error"].replace(
-                        "%x", f"dbit_methscan_prepare_{settings['sample_id']}"
-                    ),
-                    module_line="",
-                )
-                generate_slurm_script(command, script_path, log_dir, slurm_args)
-            generated_scripts.append(script_path)
+        if settings["dry_run"]:
+            return 0
     else:
         raise ValueError(f"unsupported stage: {settings['stage']}")
 

@@ -14,7 +14,7 @@ Use these rules when working in this repository.
 - EMSeq mainline is fixed:
   `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 - EMSeq `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
-- `aggregate` and `methscan_prepare` are optional explicit stages and are not part of `--stage all`.
+- `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
 - `scripts-emseq/mbias.py` is the EMSeq `mbias` implementation and is different from TAPS `scripts/mbias.py`.
 
 ## Engineering Rules

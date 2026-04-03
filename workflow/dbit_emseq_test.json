@@ -51,6 +51,7 @@
     "saturation_script": "scripts/saturation.py",
     "saturation_reads_threshold": 500,
     "summary_script": "scripts/summary.py",
+    "methscan_tss_bed": "configs/ENCODE-mm10-vM21-TSS.4k.bed",
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
@@ -127,6 +128,36 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "16G",
             "cpus_per_task": 2
+        },
+        "methscan_filter": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "methscan_profile": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "methscan_smooth": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 2
+        },
+        "methscan_scan": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "32G",
+            "cpus_per_task": 10
+        },
+        "methscan_matrix": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "32G",
+            "cpus_per_task": 10
+        },
+        "methscan_all": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "32G",
+            "cpus_per_task": 10
         }
     }
 }

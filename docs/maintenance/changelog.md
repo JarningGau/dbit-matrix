@@ -2,6 +2,11 @@
 
 This page is the active release history for the repository.
 
+## Current
+- added `scripts/methscan_run.py` with optional stages `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, and `methscan_all`
+- fixed workflow JSON `methscan_smooth_use_weights` / `methscan_matrix_sparse` being ignored by TAPS and EMSeq `make_cmd` (CLI `store_true` defaults no longer override config when flags are omitted)
+- remove `methscan_prepare` `chunksize` from workflow config
+
 ## 1.6.0
 
 - added the standalone RNA workflow with:
