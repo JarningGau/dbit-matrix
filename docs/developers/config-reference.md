@@ -139,7 +139,6 @@ TAPS and EMSeq may also use:
 
 - `aggregate_script`
 - `aggregate_sort_mem`
-- `methscan_prepare_script` (legacy wrapper; command generation uses `methscan_run_script`)
 - `methscan_run_script` (default: `scripts/methscan_run.py`)
 - `methscan_pixi_manifest`
 - `methscan_prepare_chunksize` (default: `10000000`)

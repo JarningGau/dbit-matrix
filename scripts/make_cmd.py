@@ -344,12 +344,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--methscan-prepare-script",
-        help=(
-            "Path to methscan_prepare wrapper. Default: scripts/methscan_prepare.py."
-        ),
-    )
-    parser.add_argument(
         "--methscan-pixi-manifest",
         help=(
             "Directory with pixi.toml for methscan (passed to --pixi-manifest). "
@@ -1433,10 +1427,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.aggregate_sort_mem,
             cfg.get("aggregate_sort_mem", "8G"),
         ),
-        "methscan_prepare_script": pick(
-            args.methscan_prepare_script,
-            cfg.get("methscan_prepare_script"),
-        ),
         "methscan_run_script": pick(args.methscan_run_script, cfg.get("methscan_run_script")),
         "methscan_prepare_chunksize": pick(
             args.methscan_prepare_chunksize,
@@ -1775,9 +1765,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
     settings["aggregate_script"] = (
         settings["aggregate_script"] or "scripts/aggregate.py"
-    )
-    settings["methscan_prepare_script"] = (
-        settings["methscan_prepare_script"] or "scripts/methscan_prepare.py"
     )
     settings["methscan_run_script"] = settings.get("methscan_run_script") or "scripts/methscan_run.py"
     settings["methscan_prepare_chunksize"] = (
