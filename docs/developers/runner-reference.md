@@ -57,11 +57,11 @@ The sort job must depend on the split job.
 
 - available for TAPS and EMSeq only
 - generated commands invoke `scripts/methscan_run.py` (see `contracts.md`) with `--work-path work/<sample>`
-- `methscan_prepare` reads `coverage/host/**/*.CG.cov` and writes `coverage/host_prepare/`
-- `methscan_filter` reads `coverage/host_prepare/` and writes `coverage/filter/`
-- `methscan_profile` requires `methscan_tss_bed`; default profile input dir is `coverage/host_prepare/`
-- `methscan_smooth` reads `coverage/filter/` (writes `coverage/filter/smoothed/` per methscan)
-- `methscan_scan` reads `coverage/filter/` and writes VMRs (default `coverage/VMRs.bed`)
-- `methscan_matrix` reads VMRs bed + `coverage/filter/` (default matrix dir `coverage/matrix_VMR/`)
+- `methscan_prepare` reads `coverage/host/**/*.CG.cov` and writes `methscan/compact/`
+- `methscan_filter` reads `methscan/compact/` and writes `methscan/filter/`
+- `methscan_profile` requires `methscan_tss_bed`; default profile input dir is `methscan/compact/`
+- `methscan_smooth` reads `methscan/filter/` (writes `methscan/filter/smoothed/` per methscan)
+- `methscan_scan` reads `methscan/filter/` and writes VMRs (default `methscan/VMRs.bed`)
+- `methscan_matrix` reads VMRs bed + `methscan/filter/` (default matrix dir `methscan/matrix/`)
 - `methscan_all` runs the six steps in one script; requires `methscan_tss_bed`
 - uses the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it

@@ -3,6 +3,8 @@
 This page is the active release history for the repository.
 
 ## Current
+
+- **BREAKING:** methscan outputs moved from `work/<sample>/coverage/` to `work/<sample>/methscan/` (`compact/`, `filter/`, `matrix/`, and default `TSS_profile.csv` / `VMRs.bed` at `methscan/` root). `methscan_profile_prepared_subdir` values are now `compact` or `filter` (not `host_prepare`). See [contracts](../developers/contracts.md#methscan-optional-stages-methscan_).
 - added `scripts/methscan_run.py` with optional stages `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, and `methscan_all`
 - fixed workflow JSON `methscan_smooth_use_weights` / `methscan_matrix_sparse` being ignored by TAPS and EMSeq `make_cmd` (CLI `store_true` defaults no longer override config when flags are omitted)
 - remove `methscan_prepare` `chunksize` from workflow config

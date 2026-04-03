@@ -8,7 +8,7 @@ EMSeq 独立入口用户说明。Stage 输入输出契约见 `doc/stages.md`；�
 - **入口**：`scripts-emseq/make_cmd.py`
 - **主流程**：`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
 - **可选 `aggregate`（实验性）**：不纳入 `--stage all`；显式 `--stage aggregate` 复用 `scripts/aggregate.py`，从 `coverage/host/**/*.CG.cov` 写出 `coverage/aggregated_cg_by_{id,pos}.tsv`（契约见 `doc/stages.md` §11）
-- **可选 `methscan_prepare`（实验性）**：不纳入 `--stage all`；显式 `--stage methscan_prepare` 通过 `scripts/methscan_run.py prepare`（pixi `envs/methscan`），从 `coverage/host/**/*.CG.cov` 写出 `coverage/host_prepare/`（契约见 `doc/stages.md` §12）
+- **可选 `methscan_prepare`**：不纳入 `--stage all`；显式 `--stage methscan_prepare` 通过 `scripts/methscan_run.py prepare`（pixi `envs/methscan`），从 `coverage/host/**/*.CG.cov` 写出 `methscan/compact/`（完整 methscan 契约见 `docs/developers/contracts.md`；`doc/stages.md` §12）
 - **`--stage all`**：生成 `work/<sample>/commands/run.sh`（`local`）或 `run.sbatch`（`slurm`），按序串联；与 `mbias_mode` / `call_mode` 的 `all` 取值含义不同
 - **`mbias`**：`scripts-emseq/mbias.py`（bisulfite 风格；参考 asTair TOP/BOT，仅统计参考 `CG`；与 TAPS 规则不同）
 - **`summary` / `saturation`**：复用 `scripts/summary.py`、`scripts/saturation.py`，产物路径与 TAPS 一致

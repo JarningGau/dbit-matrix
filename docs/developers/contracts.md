@@ -227,7 +227,7 @@ Contract:
 
 ### Methscan optional stages (`methscan_*`)
 
-All methscan steps are **host-only**, **explicit** (not part of `--stage all`), and run `scripts/methscan_run.py` in the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it. Paths are under `work/<sample>/coverage/` unless noted.
+All methscan steps are **host-only**, **explicit** (not part of `--stage all`), and run `scripts/methscan_run.py` in the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it. Per-cell coverage **input** stays under `work/<sample>/coverage/host/`; all **methscan outputs** live under `work/<sample>/methscan/`.
 
 #### `methscan_prepare`
 
@@ -239,7 +239,7 @@ Input:
 
 Output:
 
-- `coverage/host_prepare/`
+- `methscan/compact/`
 
 #### `methscan_filter`
 
@@ -247,11 +247,11 @@ Purpose: run `methscan filter` from prepared data to filtered cells.
 
 Input:
 
-- `coverage/host_prepare/`
+- `methscan/compact/`
 
 Output:
 
-- `coverage/filter/`
+- `methscan/filter/`
 
 #### `methscan_profile`
 
@@ -260,11 +260,11 @@ Purpose: run `methscan profile` for mean methylation over regions (e.g. TSS).
 Input:
 
 - sorted regions `.bed` (`methscan_tss_bed` in workflow config or CLI)
-- prepared directory: default `coverage/host_prepare/`; optional `coverage/filter/` via `methscan_profile_prepared_subdir`
+- prepared directory: default `methscan/compact/`; optional `methscan/filter/` via `methscan_profile_prepared_subdir` (`compact` or `filter`)
 
 Output:
 
-- default `coverage/TSS_profile.csv` (override with `methscan_profile_csv`)
+- default `methscan/TSS_profile.csv` (override with `methscan_profile_csv`)
 
 #### `methscan_smooth`
 
@@ -272,11 +272,11 @@ Purpose: run `methscan smooth` on filtered data.
 
 Input:
 
-- `coverage/filter/`
+- `methscan/filter/`
 
 Output:
 
-- smoothed values under `coverage/filter/smoothed/` (methscan layout)
+- smoothed values under `methscan/filter/smoothed/` (methscan layout)
 
 #### `methscan_scan`
 
@@ -284,11 +284,11 @@ Purpose: run `methscan scan` for VMRs.
 
 Input:
 
-- `coverage/filter/` (includes smoothed outputs from `methscan smooth`)
+- `methscan/filter/` (includes smoothed outputs from `methscan smooth`)
 
 Output:
 
-- default `coverage/VMRs.bed` (override with `methscan_vmrs_bed`)
+- default `methscan/VMRs.bed` (override with `methscan_vmrs_bed`)
 
 #### `methscan_matrix`
 
@@ -296,12 +296,12 @@ Purpose: run `methscan matrix` for region × cell tables.
 
 Input:
 
-- VMRs `.bed` (default `coverage/VMRs.bed`)
-- `coverage/filter/`
+- VMRs `.bed` (default `methscan/VMRs.bed`)
+- `methscan/filter/`
 
 Output:
 
-- default output directory `coverage/matrix_VMR/` (override with `methscan_matrix_prefix`)
+- default output directory `methscan/matrix/` (override with `methscan_matrix_prefix`)
 
 #### `methscan_all`
 

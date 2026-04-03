@@ -83,6 +83,6 @@ Expected result:
 
 If a stage implementation changed, validate that stage directly and compare outputs against the current contract in [docs/developers/contracts.md](../developers/contracts.md).
 
-Methscan stage behavior and paths under `work/<sample>/coverage/` are specified in the same contracts (Methscan optional stages).
+Methscan stage behavior and paths under `work/<sample>/methscan/` (inputs from `coverage/host/`) are specified in the same contracts (Methscan optional stages).
 
 For command-generation behavior changes, also check [docs/developers/runner-reference.md](../developers/runner-reference.md).

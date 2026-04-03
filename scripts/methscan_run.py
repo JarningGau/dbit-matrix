@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run methscan steps via envs/methscan pixi workspace; paths under work/coverage/."""
+"""Run methscan steps via envs/methscan pixi workspace.
+
+Reads per-cell coverage from work/coverage/host/; writes all methscan outputs under
+work/methscan/ (see methscan_dirs).
+"""
 
 from __future__ import annotations
 
@@ -36,20 +40,26 @@ def validate_manifest(manifest: Path) -> str | None:
     return None
 
 
-def coverage_paths(work: Path) -> dict[str, Path]:
+def coverage_host_dir(work: Path) -> Path:
+    return work / "coverage" / "host"
+
+
+def methscan_dirs(work: Path) -> dict[str, Path]:
+    root = work / "methscan"
     return {
-        "host": work / "coverage" / "host",
-        "host_prepare": work / "coverage" / "host_prepare",
-        "filter": work / "coverage" / "filter",
+        "root": root,
+        "compact": root / "compact",
+        "filter": root / "filter",
+        "matrix": root / "matrix",
     }
 
 
 def prepared_subdir_path(work: Path, name: str) -> Path:
-    cov = coverage_paths(work)
-    if name == "host_prepare":
-        return cov["host_prepare"]
+    m = methscan_dirs(work)
+    if name == "compact":
+        return m["compact"]
     if name == "filter":
-        return cov["filter"]
+        return m["filter"]
     raise ValueError(f"unknown prepared subdir: {name}")
 
 
@@ -71,8 +81,8 @@ def run_methscan(
 
 
 def cmd_prepare(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    cov_dir = work / "coverage" / "host"
-    out_dir = work / "coverage" / "host_prepare"
+    cov_dir = coverage_host_dir(work)
+    out_dir = methscan_dirs(work)["compact"]
     cov_files = sorted(p for p in cov_dir.rglob("*.CG.cov") if p.is_file())
     if not cov_files and not args.dry_run:
         print(f"error: no *.CG.cov under {cov_dir}", file=sys.stderr)
@@ -121,8 +131,8 @@ def cmd_prepare(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_filter(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    paths = coverage_paths(work)
-    data_dir = paths["host_prepare"]
+    paths = methscan_dirs(work)
+    data_dir = paths["compact"]
     filtered_dir = paths["filter"]
     methscan_args = [
         "filter",
@@ -140,7 +150,11 @@ def cmd_profile(args: argparse.Namespace, work: Path, manifest: Path) -> int:
         print(f"error: TSS bed not found: {bed}", file=sys.stderr)
         return 1
     data_dir = prepared_subdir_path(work, args.prepared_dir)
-    out_csv = Path(args.profile_csv).resolve() if args.profile_csv else work / "coverage" / "TSS_profile.csv"
+    out_csv = (
+        Path(args.profile_csv).resolve()
+        if args.profile_csv
+        else methscan_dirs(work)["root"] / "TSS_profile.csv"
+    )
     methscan_args = [
         "profile",
         str(bed),
@@ -153,7 +167,7 @@ def cmd_profile(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_smooth(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    data_dir = coverage_paths(work)["filter"]
+    data_dir = methscan_dirs(work)["filter"]
     methscan_args = ["smooth", str(data_dir)]
     if args.bandwidth is not None:
         methscan_args.extend(["--bandwidth", str(args.bandwidth)])
@@ -163,8 +177,12 @@ def cmd_smooth(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_scan(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    data_dir = coverage_paths(work)["filter"]
-    out_bed = Path(args.vmrs_bed).resolve() if args.vmrs_bed else work / "coverage" / "VMRs.bed"
+    data_dir = methscan_dirs(work)["filter"]
+    out_bed = (
+        Path(args.vmrs_bed).resolve()
+        if args.vmrs_bed
+        else methscan_dirs(work)["root"] / "VMRs.bed"
+    )
     methscan_args = [
         "scan",
         str(data_dir),
@@ -176,12 +194,20 @@ def cmd_scan(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_matrix(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    regions = Path(args.vmrs_bed).resolve() if args.vmrs_bed else work / "coverage" / "VMRs.bed"
+    regions = (
+        Path(args.vmrs_bed).resolve()
+        if args.vmrs_bed
+        else methscan_dirs(work)["root"] / "VMRs.bed"
+    )
     if not regions.is_file() and not args.dry_run:
         print(f"error: VMRs bed not found: {regions}", file=sys.stderr)
         return 1
-    data_dir = coverage_paths(work)["filter"]
-    out_dir = Path(args.matrix_prefix).resolve() if args.matrix_prefix else work / "coverage" / "matrix_VMR"
+    data_dir = methscan_dirs(work)["filter"]
+    out_dir = (
+        Path(args.matrix_prefix).resolve()
+        if args.matrix_prefix
+        else methscan_dirs(work)["matrix"]
+    )
     methscan_args = [
         "matrix",
         str(regions),
@@ -199,7 +225,7 @@ def add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--work-path",
         required=True,
-        help="Sample work directory (contains coverage/).",
+        help="Sample work directory (contains coverage/ for input; methscan/ for outputs).",
     )
     p.add_argument(
         "--pixi-manifest",
@@ -214,7 +240,7 @@ def add_common(p: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run methscan via pixi (envs/methscan) with repo coverage paths.",
+        description="Run methscan via pixi (envs/methscan) with repo coverage/methscan paths.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -228,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"bp per chromosome chunk (default: {METHSCAN_DEFAULT_CHUNKSIZE}).",
     )
 
-    p_filt = sub.add_parser("filter", help="methscan filter host_prepare -> coverage/filter")
+    p_filt = sub.add_parser("filter", help="methscan filter compact -> methscan/filter")
     add_common(p_filt)
     p_filt.add_argument(
         "--min-sites",
@@ -253,16 +279,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_prof.add_argument(
         "--prepared-dir",
-        choices=("host_prepare", "filter"),
-        default="host_prepare",
-        help="Which prepared directory under coverage/ to use (default: host_prepare).",
+        choices=("compact", "filter"),
+        default="compact",
+        help="Which prepared directory under methscan/ to use (default: compact).",
     )
     p_prof.add_argument(
         "--profile-csv",
-        help="Output .csv path (default: coverage/TSS_profile.csv).",
+        help="Output .csv path (default: methscan/TSS_profile.csv).",
     )
 
-    p_smooth = sub.add_parser("smooth", help="methscan smooth on coverage/filter")
+    p_smooth = sub.add_parser("smooth", help="methscan smooth on methscan/filter")
     add_common(p_smooth)
     p_smooth.add_argument(
         "--bandwidth",
@@ -277,7 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Weigh each site by log1p(coverage).",
     )
 
-    p_scan = sub.add_parser("scan", help="methscan scan VMRs from coverage/filter")
+    p_scan = sub.add_parser("scan", help="methscan scan VMRs from methscan/filter")
     add_common(p_scan)
     p_scan.add_argument(
         "--threads",
@@ -287,10 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_scan.add_argument(
         "--vmrs-bed",
-        help="Output .bed path (default: coverage/VMRs.bed).",
+        help="Output .bed path (default: methscan/VMRs.bed).",
     )
 
-    p_matrix = sub.add_parser("matrix", help="methscan matrix from VMRs bed + coverage/filter")
+    p_matrix = sub.add_parser("matrix", help="methscan matrix from VMRs bed + methscan/filter")
     add_common(p_matrix)
     p_matrix.add_argument(
         "--threads",
@@ -305,11 +331,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_matrix.add_argument(
         "--vmrs-bed",
-        help="Input VMRs .bed (default: coverage/VMRs.bed).",
+        help="Input VMRs .bed (default: methscan/VMRs.bed).",
     )
     p_matrix.add_argument(
         "--matrix-prefix",
-        help="Output directory (default: coverage/matrix_VMR).",
+        help="Output directory (default: methscan/matrix).",
     )
 
     p_all = sub.add_parser(
@@ -340,13 +366,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_all.add_argument(
         "--prepared-dir",
-        choices=("host_prepare", "filter"),
-        default="host_prepare",
-        help="Profile step: which prepared directory (default: host_prepare).",
+        choices=("compact", "filter"),
+        default="compact",
+        help="Profile step: which prepared directory (default: compact).",
     )
     p_all.add_argument(
         "--profile-csv",
-        help="Profile output .csv (default: coverage/TSS_profile.csv).",
+        help="Profile output .csv (default: methscan/TSS_profile.csv).",
     )
     p_all.add_argument(
         "--bandwidth",
@@ -374,11 +400,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_all.add_argument(
         "--vmrs-bed",
-        help="VMRs .bed path for scan output / matrix input (default: coverage/VMRs.bed).",
+        help="VMRs .bed path for scan output / matrix input (default: methscan/VMRs.bed).",
     )
     p_all.add_argument(
         "--matrix-prefix",
-        help="Matrix output directory (default: coverage/matrix_VMR).",
+        help="Matrix output directory (default: methscan/matrix).",
     )
 
     return parser

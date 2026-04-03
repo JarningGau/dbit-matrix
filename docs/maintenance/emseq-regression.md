@@ -33,7 +33,7 @@ pixi run python scripts-emseq/make_cmd.py \
 
 ## Optional methscan checks
 
-Run these when changing methscan wiring (`make_cmd`, `scripts/methscan_run.py`, workflow JSON methscan fields, or `envs/methscan`). EMSeq marks this path experimental in code; I/O and layout are still defined in contracts.
+Run these when changing methscan wiring (`make_cmd`, `scripts/methscan_run.py`, workflow JSON methscan fields, or `envs/methscan`). I/O and layout are defined in contracts.
 
 ```bash
 pixi run python scripts-emseq/make_cmd.py \
@@ -83,6 +83,6 @@ Expected result:
 
 If a stage implementation changed, validate that stage directly and compare outputs against the current contract in [docs/developers/contracts.md](../developers/contracts.md).
 
-Methscan stage behavior and paths under `work/<sample>/coverage/` are specified in the same contracts (Methscan optional stages).
+Methscan stage behavior and paths under `work/<sample>/methscan/` (inputs from `coverage/host/`) are specified in the same contracts (Methscan optional stages).
 
 For command-generation behavior changes, also check [docs/developers/runner-reference.md](../developers/runner-reference.md).

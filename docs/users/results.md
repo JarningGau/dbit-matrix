@@ -22,7 +22,7 @@ Optional advanced outputs:
 
 - `coverage/aggregated_cg_by_id.tsv`
 - `coverage/aggregated_cg_by_pos.tsv`
-- `coverage/host_prepare/`
+- `methscan/compact/`, `methscan/filter/`, `methscan/matrix/`, and other methscan outputs under `methscan/` (see contracts)
 
 ## Common Checks For RNA
 

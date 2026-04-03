@@ -375,8 +375,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--methscan-profile-prepared-subdir",
-        choices=("host_prepare", "filter"),
-        help="methscan profile --prepared-dir (default: host_prepare).",
+        choices=("compact", "filter"),
+        help="methscan profile --prepared-dir (default: compact).",
     )
     parser.add_argument(
         "--methscan-profile-csv",
@@ -403,7 +403,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--methscan-vmrs-bed",
-        help="methscan scan/matrix VMRs .bed path (optional defaults under coverage/).",
+        help="methscan scan/matrix VMRs .bed path (optional; default methscan/VMRs.bed).",
     )
     parser.add_argument(
         "--methscan-matrix-threads",
@@ -809,7 +809,7 @@ def build_methscan_run_command(
                 "--strand-column",
                 str(getattr(args, "methscan_profile_strand_column", 6)),
                 "--prepared-dir",
-                str(getattr(args, "methscan_profile_prepared_subdir", "host_prepare")),
+                str(getattr(args, "methscan_profile_prepared_subdir", "compact")),
             ]
         )
         if getattr(args, "methscan_profile_csv", None):
@@ -848,7 +848,7 @@ def build_methscan_run_command(
                 "--strand-column",
                 str(getattr(args, "methscan_profile_strand_column", 6)),
                 "--prepared-dir",
-                str(getattr(args, "methscan_profile_prepared_subdir", "host_prepare")),
+                str(getattr(args, "methscan_profile_prepared_subdir", "compact")),
             ]
         )
         if getattr(args, "methscan_profile_csv", None):
@@ -1789,8 +1789,12 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     if settings["methscan_profile_strand_column"] < 1:
         raise ValueError("methscan_profile_strand_column must be >= 1")
     settings["methscan_profile_prepared_subdir"] = (
-        settings.get("methscan_profile_prepared_subdir") or "host_prepare"
+        settings.get("methscan_profile_prepared_subdir") or "compact"
     )
+    if settings["methscan_profile_prepared_subdir"] not in ("compact", "filter"):
+        raise ValueError(
+            "methscan_profile_prepared_subdir must be 'compact' or 'filter'"
+        )
     settings["methscan_scan_threads"] = (
         int(settings["methscan_scan_threads"])
         if settings.get("methscan_scan_threads") is not None

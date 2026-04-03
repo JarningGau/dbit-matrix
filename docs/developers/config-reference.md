@@ -145,7 +145,7 @@ TAPS and EMSeq may also use:
 - `methscan_filter_min_sites` (default: `50000`)
 - `methscan_tss_bed` (required for `methscan_profile` and `methscan_all`)
 - `methscan_profile_strand_column` (default: `6`)
-- `methscan_profile_prepared_subdir`: `host_prepare` or `filter` (default: `host_prepare`)
+- `methscan_profile_prepared_subdir`: `compact` or `filter` (default: `compact`)
 - `methscan_profile_csv` (optional path)
 - `methscan_smooth_bandwidth` (optional)
 - `methscan_smooth_use_weights` (boolean)
