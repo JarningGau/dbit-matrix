@@ -30,6 +30,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+import workflow_input_checks as wic
 
 STAGE_SEQUENCE = [
     "fastp_split",
@@ -489,6 +493,14 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Print command and output path without writing files.",
+    )
+    parser.add_argument(
+        "--skip-workdir-input-checks",
+        action="store_true",
+        help=(
+            "Do not require prior-stage outputs under the sample work directory. "
+            "When generating --stage all, this is passed to each per-stage subprocess automatically."
+        ),
     )
 
     # Slurm-only options.
@@ -965,6 +977,127 @@ def validate_required_for_stage(stage: str, settings: dict) -> None:
         "methscan_tss_bed"
     ):
         raise ValueError("methscan_tss_bed is required for this stage")
+
+
+def validate_inputs_for_stage(
+    stage: str,
+    settings: dict,
+    sample_work: Path,
+    *,
+    skip_workdir_inputs: bool = False,
+) -> None:
+    """Raise ValueError if required input paths are missing before script generation."""
+    spike = settings["spike_in_index"]
+
+    if stage == "fastp_split":
+        wic.require_file("r1", wic.resolve_config_path(settings["r1"]))
+        wic.require_file("r2", wic.resolve_config_path(settings["r2"]))
+        wic.require_optional_executable_path("fastp_bin", settings["fastp_bin"])
+    elif stage == "demux_extract_bc":
+        wic.require_file(
+            "barcode1_whitelist",
+            wic.resolve_config_path(settings["barcode1_whitelist"]),
+        )
+        wic.require_file(
+            "barcode2_whitelist",
+            wic.resolve_config_path(settings["barcode2_whitelist"]),
+        )
+        if not skip_workdir_inputs:
+            n = int(settings["number_of_split_parts"])
+            chunk_dir = sample_work / "shard_fastq"
+            for ch in wic.chunk_names(n):
+                wic.require_file(
+                    f"shard_fastq/{ch}.R1.fq.gz",
+                    chunk_dir / f"{ch}.R1.fq.gz",
+                )
+                wic.require_file(
+                    f"shard_fastq/{ch}.R2.fq.gz",
+                    chunk_dir / f"{ch}.R2.fq.gz",
+                )
+    elif stage == "align":
+        wic.require_file(
+            "biscuit_reference",
+            wic.resolve_config_path(settings["biscuit_reference"]),
+        )
+        wic.require_spike_index_paths(spike)
+        if not skip_workdir_inputs:
+            n = int(settings["number_of_split_parts"])
+            demux_dir = sample_work / "demux"
+            for ch in wic.chunk_names(n):
+                wic.require_file(
+                    f"demux/{ch}.R1.demux.fq.gz",
+                    demux_dir / f"{ch}.R1.demux.fq.gz",
+                )
+                wic.require_file(
+                    f"demux/{ch}.R2.demux.fq.gz",
+                    demux_dir / f"{ch}.R2.demux.fq.gz",
+                )
+        wic.require_optional_executable_path("biscuit_bin", settings["biscuit_bin"])
+        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
+    elif stage == "pool":
+        if not skip_workdir_inputs:
+            wic.validate_pool_align_shards(sample_work, spike)
+        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
+    elif stage == "split":
+        if not skip_workdir_inputs:
+            wic.require_file(
+                "pooled.byCB.bam",
+                sample_work / "pooled" / "pooled.byCB.bam",
+            )
+        wic.require_file(
+            "split_barcodes",
+            wic.resolve_config_path(settings["split_barcodes"]),
+        )
+        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
+    elif stage == "mbias":
+        wic.require_script_path("mbias_script", settings["mbias_script"])
+        mbias_mode = settings.get("mbias_mode") or "spike"
+        if mbias_mode in ("all", "host"):
+            wic.require_file(
+                "call_reference_file",
+                wic.resolve_config_path(settings["call_reference_file"]),
+            )
+        if mbias_mode in ("all", "spike") and parse_spike_names(spike):
+            wic.require_spike_index_paths(spike)
+        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
+    elif stage == "call":
+        wic.require_script_path("scripts-emseq/call.py", "scripts-emseq/call.py")
+        call_mode = settings.get("call_mode") or "all"
+        if call_mode in ("all", "host"):
+            wic.require_file(
+                "call_reference_file",
+                wic.resolve_config_path(settings["call_reference_file"]),
+            )
+        if call_mode in ("all", "spike") and parse_spike_names(spike):
+            wic.require_spike_index_paths(spike)
+        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
+    elif stage == "saturation":
+        wic.require_script_path("saturation_script", settings["saturation_script"])
+    elif stage == "summary":
+        wic.require_script_path("summary_script", settings["summary_script"])
+    elif stage == "aggregate":
+        wic.require_script_path("aggregate_script", settings["aggregate_script"])
+    elif stage in METHSCAN_STAGES:
+        wic.require_script_path("methscan_run_script", settings["methscan_run_script"])
+        wic.validate_optional_path_dir(
+            "methscan_pixi_manifest", settings.get("methscan_pixi_manifest")
+        )
+        if stage in ("methscan_profile", "methscan_all"):
+            if not settings.get("methscan_tss_bed"):
+                raise ValueError("methscan_tss_bed is required for this stage")
+            wic.require_file(
+                "methscan_tss_bed",
+                wic.resolve_config_path(settings["methscan_tss_bed"]),
+            )
+        wic.validate_optional_path_file(
+            "methscan_profile_csv", settings.get("methscan_profile_csv")
+        )
+        if stage in ("methscan_scan", "methscan_matrix", "methscan_all"):
+            wic.validate_optional_path_file(
+                "methscan_vmrs_bed", settings.get("methscan_vmrs_bed")
+            )
+    else:
+        raise ValueError(f"unsupported stage for input validation: {stage}")
 
 
 def select_stage_slurm_cfg(slurm_cfg_raw: dict, stage: str) -> dict:
@@ -1670,7 +1803,12 @@ def parse_emseq_generated_paths(command_output: str) -> list[Path]:
 def build_stage_passthrough_args(argv: list[str]) -> list[str]:
     """Strip `--stage` / `--runner` / `--submit` / `--dry-run` for subprocess invocations."""
     passthrough: list[str] = []
-    flags_without_value = {"--split-smoke", "--submit", "--dry-run"}
+    flags_without_value = {
+        "--split-smoke",
+        "--submit",
+        "--dry-run",
+        "--skip-workdir-input-checks",
+    }
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -1680,7 +1818,7 @@ def build_stage_passthrough_args(argv: list[str]) -> list[str]:
         if token.startswith("--stage=") or token.startswith("--runner="):
             index += 1
             continue
-        if token in {"--submit", "--dry-run"}:
+        if token in {"--submit", "--dry-run", "--skip-workdir-input-checks"}:
             index += 1
             continue
         if token in flags_without_value:
@@ -1837,7 +1975,22 @@ def main() -> int:
 
     stage = settings["stage"]
 
+    if stage != "all":
+        validate_inputs_for_stage(
+            stage,
+            settings,
+            sample_work,
+            skip_workdir_inputs=bool(args.skip_workdir_input_checks),
+        )
+
     if stage == "all":
+        for stage_name in STAGE_SEQUENCE:
+            validate_inputs_for_stage(
+                stage_name,
+                settings,
+                sample_work,
+                skip_workdir_inputs=True,
+            )
         passthrough_args = build_stage_passthrough_args(sys.argv[1:])
         make_cmd_path = Path(__file__).resolve()
         stage_scripts: list[tuple[str, list[Path]]] = []
@@ -1853,13 +2006,16 @@ def main() -> int:
             ]
             if settings["dry_run"]:
                 stage_argv.append("--dry-run")
+            stage_argv.append("--skip-workdir-input-checks")
             completed = subprocess.run(
-                stage_argv, check=True, capture_output=True, text=True
+                stage_argv, check=False, capture_output=True, text=True
             )
             if completed.stdout:
                 print(completed.stdout, end="")
             if completed.stderr:
                 print(completed.stderr, end="", file=sys.stderr)
+            if completed.returncode != 0:
+                sys.exit(completed.returncode)
             combined_out = (completed.stdout or "") + (completed.stderr or "")
             stage_scripts.append(
                 (stage_name, parse_emseq_generated_paths(combined_out))

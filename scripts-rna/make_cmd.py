@@ -10,6 +10,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+import workflow_input_checks as wic
+
 STAGE_SEQUENCE = ["demux_extract_bc", "align"]
 STAGE_CHOICES = [*STAGE_SEQUENCE, "all"]
 STAGE_REQUIRED_FIELDS = {
@@ -105,6 +110,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run", action="store_true", help="Print intended actions without writing."
     )
+    parser.add_argument(
+        "--skip-workdir-input-checks",
+        action="store_true",
+        help=(
+            "Do not require demux clean FASTQ outputs for the align stage. "
+            "When generating --stage all, align uses this automatically."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -157,6 +170,52 @@ def ensure_required(args: argparse.Namespace, stage: str) -> None:
             missing.append(key)
     if missing:
         raise ValueError(f"Missing required settings for stage '{stage}': {', '.join(missing)}")
+
+
+def validate_inputs_for_stage(
+    stage: str,
+    args: argparse.Namespace,
+    sample_work: Path,
+    *,
+    skip_workdir_inputs: bool = False,
+) -> None:
+    """Raise ValueError if required input paths are missing before script generation."""
+    if stage == "demux_extract_bc":
+        wic.require_file("r1", wic.resolve_config_path(args.r1))
+        wic.require_file("r2", wic.resolve_config_path(args.r2))
+        wic.require_file(
+            "barcode1_whitelist",
+            wic.resolve_config_path(args.barcode1_whitelist),
+        )
+        wic.require_file(
+            "barcode2_whitelist",
+            wic.resolve_config_path(args.barcode2_whitelist),
+        )
+    elif stage == "align":
+        wic.require_dir("star_genome_dir", wic.resolve_config_path(args.star_genome_dir))
+        solo = args.solo_cb_whitelist
+        if solo not in (None, ""):
+            s = str(solo).strip()
+            if s.lower() != "none" and wic.looks_like_filesystem_path(s):
+                wic.require_file("solo_cb_whitelist", wic.resolve_config_path(s))
+        wic.require_file(
+            "barcode1_whitelist",
+            wic.resolve_config_path(args.barcode1_whitelist),
+        )
+        wic.require_optional_executable_path("star_bin", args.star_bin)
+        if not skip_workdir_inputs:
+            demux_dir = sample_work / "demux"
+            r1_candidates = sorted(demux_dir.glob("*.R1.clean.fq.gz"))
+            if len(r1_candidates) != 1:
+                raise ValueError(
+                    f"expected exactly one demux *.R1.clean.fq.gz under {demux_dir}, "
+                    f"found {len(r1_candidates)}"
+                )
+            in_r1 = r1_candidates[0]
+            in_r2 = demux_dir / in_r1.name.replace(".R1.clean.fq.gz", ".R2.clean.fq.gz")
+            wic.require_file("demux matching R2 clean FASTQ", in_r2)
+    else:
+        raise ValueError(f"unsupported stage for input validation: {stage}")
 
 
 def write_script(path: Path, content: str, dry_run: bool) -> None:
@@ -373,9 +432,28 @@ def submit_script(path: Path) -> None:
 
 def main() -> int:
     args = resolve_settings(parse_args())
+    sample_work = sample_work_dir(args)
     if args.stage == "all":
+        validate_inputs_for_stage(
+            "demux_extract_bc",
+            args,
+            sample_work,
+            skip_workdir_inputs=False,
+        )
+        validate_inputs_for_stage(
+            "align",
+            args,
+            sample_work,
+            skip_workdir_inputs=True,
+        )
         target = generate_all(args, args.dry_run)
     else:
+        validate_inputs_for_stage(
+            args.stage,
+            args,
+            sample_work,
+            skip_workdir_inputs=bool(args.skip_workdir_input_checks),
+        )
         target = generate_single_stage(args, args.stage, args.dry_run)
     print(target)
     if args.submit and not args.dry_run:

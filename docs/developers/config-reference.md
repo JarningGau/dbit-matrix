@@ -8,6 +8,7 @@ This document defines the workflow configuration surface for developers.
 - all stages must support `--dry-run`
 - stage names in docs should match the CLI values exactly
 - Slurm resources should be configured per stage
+- TAPS (`scripts/make_cmd.py`), EMSeq (`scripts-emseq/make_cmd.py`), and RNA (`scripts-rna/make_cmd.py`) validate that referenced input paths exist before emitting `.sh` / `.sbatch` scripts. Use `--skip-workdir-input-checks` when generating a full pipeline driver (`--stage all`) or a downstream stage before upstream outputs exist under the sample work directory; `--stage all` passes this flag to each per-stage subprocess automatically (TAPS/EMSeq). For `--stage all`, TAPS/EMSeq also run the same path checks in the parent process first (with workdir intermediates skipped), so invalid `r1`/`r2` or missing references fail immediately with a clear error before any subprocess runs.
 
 ## Common Fields
 
