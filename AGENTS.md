@@ -25,6 +25,18 @@ Use these rules when working in this repository.
 - Update `pixi.lock` whenever dependencies change.
 - Do not change an input/output contract silently.
 
+## Release version
+
+When cutting a release, update these in the same change (single source of truth for CLI: `scripts/_version.py`):
+
+| Artifact | Action |
+|----------|--------|
+| `scripts/_version.py` | Set `__version__` to the new semver (drives `--version` on all workflow drivers). |
+| `README.md` | Update the “Current version” line. |
+| `docs/maintenance/changelog.md` | Move `## Current` items into `## X.Y.Z`, reset `## Current` (per existing style). |
+
+Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; that field is for the methscan sub-environment only.
+
 ## Entrypoints
 
 - TAPS workflow driver: `scripts/make_cmd.py`
@@ -84,7 +96,7 @@ Use these rules when working in this repository.
 
 Before finishing a change, run at least:
 
-- relevant CLI `--help`
+- relevant CLI `--help` and `--version`
 - relevant workflow `--dry-run`
 
 If contracts changed, also update the matching docs in the same change.

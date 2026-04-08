@@ -33,6 +33,7 @@ from pathlib import Path
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from _version import __version__
 import workflow_input_checks as wic
 
 STAGE_SEQUENCE = [
@@ -112,6 +113,11 @@ def normalize_executable_setting(value: str | None, default_name: str) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate executable command scripts for EMSeq workflow stages."
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--workflow-config",

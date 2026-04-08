@@ -13,6 +13,7 @@ from pathlib import Path
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+from _version import __version__
 import workflow_input_checks as wic
 
 STAGE_SEQUENCE = ["demux_extract_bc", "align"]
@@ -56,6 +57,11 @@ def pick(cli_value, cfg_value, default=None):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate executable command scripts for DBiT-RNA workflow."
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument("--workflow-config", help="JSON config path.")
     parser.add_argument("--runner", choices=["local", "slurm"], help="Runner backend.")

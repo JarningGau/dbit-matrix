@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _version import __version__
 import workflow_input_checks as wic
 
 STAGE_SEQUENCE = [
@@ -87,6 +88,11 @@ def normalize_executable_setting(value: str | None, default_name: str) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate executable command scripts for DBiT workflow."
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--workflow-config",
