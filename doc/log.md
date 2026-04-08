@@ -2,6 +2,10 @@
 
 版本变更记录。当前支持范围与入口以 `README.md` 为准。
 
+## 2.0.0
+
+- 完整变更说明见英文日志：`docs/maintenance/changelog.md`（含 methscan 输出路径与配置破坏性变更、make_cmd 输入路径校验、methscan 可选 stages 等）。
+
 ## 1.6.0
 
 - 重建英文文档系统，按用户 / 开发者 / 维护者拆分到 `docs/` 目录

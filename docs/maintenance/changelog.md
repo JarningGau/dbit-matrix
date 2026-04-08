@@ -4,6 +4,10 @@ This page is the active release history for the repository.
 
 ## Current
 
+_No unreleased changes._
+
+## 2.0.0
+
 - **make_cmd input checks:** TAPS (`scripts/make_cmd.py`), EMSeq (`scripts-emseq/make_cmd.py`), and RNA (`scripts-rna/make_cmd.py`) now verify that referenced files and directories exist before writing `.sh` / `.sbatch` scripts (FASTQs, indexes, references, whitelists, stage wrapper scripts, optional methscan paths, and—unless `--skip-workdir-input-checks` is set—expected prior-stage outputs under the sample work directory). For `--stage all`, TAPS/EMSeq run the same checks in the parent process first (with workdir intermediates skipped), then each per-stage subprocess; subprocess failures print stdout/stderr before exit. Shared helpers live in `scripts/workflow_input_checks.py`. See [config reference](../developers/config-reference.md).
 - **BREAKING:** methscan outputs moved from `work/<sample>/coverage/` to `work/<sample>/methscan/` (`compact/`, `filter/`, `matrix/`, and default `TSS_profile.csv` / `VMRs.bed` at `methscan/` root). `methscan_profile_prepared_subdir` values are now `compact` or `filter` (not `host_prepare`). See [contracts](../developers/contracts.md#methscan-optional-stages-methscan_).
 - added `scripts/methscan_run.py` with optional stages `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, and `methscan_all`
