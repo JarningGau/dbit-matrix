@@ -4,7 +4,7 @@ This page is the active release history for the repository.
 
 ## Current
 
-_No unreleased changes._
+- **mbias / call host subsample:** after fractional `samtools view -s` subsampling, host BAM preparation in [`scripts/host_subsample_bam.py`](../../scripts/host_subsample_bam.py) now caps alignment records at a fixed internal limit (`HOST_SUBSAMPLE_MAX_READS`, default 10M; not exposed in CLI or workflow JSON). TAPS and EMSeq `mbias` log `host_subsample_max_reads` for reproducibility.
 
 ## 2.0.0
 

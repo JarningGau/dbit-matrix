@@ -31,6 +31,7 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from scripts.host_subsample_bam import (
+    HOST_SUBSAMPLE_MAX_READS,
     HOST_SUBSAMPLE_SEED,
     build_prepare_host_subsample_commands,
     get_host_subsample_paths,
@@ -493,6 +494,7 @@ def main() -> int:
     print(f"[emseq.mbias] output_dir={output_dir}")
     print(f"[emseq.mbias] host_subsample_fraction={args.host_subsample_fraction}")
     print(f"[emseq.mbias] host_subsample_seed={HOST_SUBSAMPLE_SEED}")
+    print(f"[emseq.mbias] host_subsample_max_reads={HOST_SUBSAMPLE_MAX_READS}")
     print(f"[emseq.mbias] max_cycle={args.max_cycle}")
     print(f"[emseq.mbias] min_mapping_quality={args.min_mapping_quality}")
     if args.reference_file:

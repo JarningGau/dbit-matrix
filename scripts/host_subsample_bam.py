@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
 HOST_SUBSAMPLE_SEED = 11
+# Cap alignment records after fractional subsampling (not user-configurable).
+HOST_SUBSAMPLE_MAX_READS = 10_000_000
 HOST_SUBSAMPLED_BAM_BASENAME = "host.subsampled.bam"
 HOST_SUBSAMPLED_SORTED_BAM_BASENAME = "host.subsampled.sorted.bam"
 
@@ -40,6 +43,37 @@ def build_subsample_fraction(seed: int, fraction: float) -> str:
     return f"{seed}.{decimal_part}"
 
 
+def _build_subsample_pipeline_shell(
+    samtools_bin: str,
+    samtools_threads: int,
+    pooled_host_bam: Path,
+    out_bam: Path,
+    host_subsample_fraction: float,
+    host_subsample_seed: int,
+) -> str:
+    """SAM: optional -s subsample, then cap alignment lines; convert to BAM with header."""
+    subsample_arg = build_subsample_fraction(host_subsample_seed, host_subsample_fraction)
+    header_cmd = shlex.join([samtools_bin, "view", "-H", str(pooled_host_bam)])
+    view1: list[str] = [samtools_bin, "view", "-@", str(samtools_threads)]
+    if subsample_arg:
+        view1.extend(["-s", subsample_arg])
+    view1.append(str(pooled_host_bam))
+    tail_cmd = shlex.join(
+        [
+            samtools_bin,
+            "view",
+            "-@",
+            str(samtools_threads),
+            "-b",
+            "-o",
+            str(out_bam),
+            "-",
+        ]
+    )
+    inner = f"{shlex.join(view1)} | head -n {HOST_SUBSAMPLE_MAX_READS}"
+    return f"{{ {header_cmd}; {inner}; }} | {tail_cmd}"
+
+
 def build_prepare_host_subsample_commands(
     pooled_host_bam: Path,
     paths: HostSubsamplePaths,
@@ -48,31 +82,15 @@ def build_prepare_host_subsample_commands(
     host_subsample_fraction: float,
     host_subsample_seed: int = HOST_SUBSAMPLE_SEED,
 ) -> list[tuple[list[str], Path]]:
-    subsample_arg = build_subsample_fraction(host_subsample_seed, host_subsample_fraction)
-    if subsample_arg:
-        subsample_cmd = [
-            samtools_bin,
-            "view",
-            "-@",
-            str(samtools_threads),
-            "-s",
-            subsample_arg,
-            "-b",
-            "-o",
-            str(paths.subsampled_bam),
-            str(pooled_host_bam),
-        ]
-    else:
-        subsample_cmd = [
-            samtools_bin,
-            "view",
-            "-@",
-            str(samtools_threads),
-            "-b",
-            "-o",
-            str(paths.subsampled_bam),
-            str(pooled_host_bam),
-        ]
+    pipeline = _build_subsample_pipeline_shell(
+        samtools_bin=samtools_bin,
+        samtools_threads=samtools_threads,
+        pooled_host_bam=pooled_host_bam,
+        out_bam=paths.subsampled_bam,
+        host_subsample_fraction=host_subsample_fraction,
+        host_subsample_seed=host_subsample_seed,
+    )
+    subsample_cmd = ["/bin/sh", "-c", pipeline]
     sort_cmd = [
         samtools_bin,
         "sort",
