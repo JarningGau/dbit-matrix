@@ -303,6 +303,11 @@ def parse_args() -> argparse.Namespace:
         help="Mode for call stage. Default: all.",
     )
     parser.add_argument(
+        "--call-context-mode",
+        choices=["cg", "ch", "both"],
+        help="Context mode for TAPS call stage. Default: cg.",
+    )
+    parser.add_argument(
         "--call-r1-left-trimming",
         type=int,
         help="R1 left-end trimming for call stage. Default: 0.",
@@ -325,6 +330,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--call-caller-script",
         help="Path to methy_caller script for call stage. Default: scripts/methy_caller.py.",
+    )
+    parser.add_argument(
+        "--call-ch-caller-script",
+        help="Path to CH caller script for call stage. Default: scripts/methy_caller_CH.py.",
     )
     parser.add_argument(
         "--saturation-script",
@@ -714,6 +723,8 @@ def build_call_command(
         args.call_chromosomes,
         "--mito-chromosomes",
         args.call_mito_chromosomes,
+        "--context-mode",
+        args.call_context_mode,
         "--jobs",
         str(args.call_jobs),
         "--min-base-quality",
@@ -734,6 +745,8 @@ def build_call_command(
         str(args.call_r2_right_trimming),
         "--caller-script",
         args.call_caller_script,
+        "--ch-caller-script",
+        args.call_ch_caller_script,
         "--samtools-bin",
         args.samtools_bin,
         "--samtools-threads",
@@ -1539,6 +1552,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "call_max_depth": pick(args.call_max_depth, cfg.get("call_max_depth")),
         "call_batch_size": pick(args.call_batch_size, cfg.get("call_batch_size")),
         "call_mode": pick(args.call_mode, cfg.get("call_mode")),
+        "call_context_mode": pick(
+            args.call_context_mode,
+            cfg.get("call_context_mode"),
+        ),
         "call_r1_left_trimming": pick(
             args.call_r1_left_trimming, cfg.get("call_r1_left_trimming")
         ),
@@ -1552,6 +1569,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_r2_right_trimming, cfg.get("call_r2_right_trimming")
         ),
         "call_caller_script": pick(args.call_caller_script, cfg.get("call_caller_script")),
+        "call_ch_caller_script": pick(
+            args.call_ch_caller_script,
+            cfg.get("call_ch_caller_script"),
+        ),
         "saturation_script": pick(args.saturation_script, cfg.get("saturation_script")),
         "saturation_reads_threshold": pick(
             args.saturation_reads_threshold,
@@ -1859,6 +1880,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["call_mode"] = settings["call_mode"] or "all"
     if settings["call_mode"] not in {"all", "host", "spike"}:
         raise ValueError("call_mode must be one of: all, host, spike")
+    settings["call_context_mode"] = settings["call_context_mode"] or "cg"
+    if settings["call_context_mode"] not in {"cg", "ch", "both"}:
+        raise ValueError("call_context_mode must be one of: cg, ch, both")
     settings["call_r1_left_trimming"] = (
         int(settings["call_r1_left_trimming"])
         if settings["call_r1_left_trimming"] is not None
@@ -1889,6 +1913,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         raise ValueError("call_r2_right_trimming must be >= 0")
     settings["call_caller_script"] = (
         settings["call_caller_script"] or "scripts/methy_caller.py"
+    )
+    settings["call_ch_caller_script"] = (
+        settings["call_ch_caller_script"] or "scripts/methy_caller_CH.py"
     )
     settings["saturation_script"] = settings["saturation_script"] or "scripts/saturation.py"
     settings["saturation_reads_threshold"] = (
@@ -2791,11 +2818,13 @@ def main() -> int:
             call_sample_size=settings["call_sample_size"],
             call_max_depth=settings["call_max_depth"],
             call_batch_size=settings["call_batch_size"],
+            call_context_mode=settings["call_context_mode"],
             call_r1_left_trimming=settings["call_r1_left_trimming"],
             call_r1_right_trimming=settings["call_r1_right_trimming"],
             call_r2_left_trimming=settings["call_r2_left_trimming"],
             call_r2_right_trimming=settings["call_r2_right_trimming"],
             call_caller_script=settings["call_caller_script"],
+            call_ch_caller_script=settings["call_ch_caller_script"],
             samtools_bin=settings["samtools_bin"],
             samtools_threads=settings["samtools_threads"],
             mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],

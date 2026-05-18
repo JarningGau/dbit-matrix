@@ -50,14 +50,20 @@ Common performance fields:
 Calling fields:
 
 - `call_mode`
+- `call_context_mode`
 - `call_r1_left_trimming`
 - `call_r1_right_trimming`
 - `call_r2_left_trimming`
 - `call_r2_right_trimming`
+- `call_caller_script`
+- `call_ch_caller_script`
 
 Notes:
 
 - TAPS trimming is defined separately for R1 and R2 ends
+- TAPS `call_context_mode` accepts `cg`, `ch`, or `both`
+- `call_caller_script` remains the CpG caller path
+- `call_ch_caller_script` selects the CH caller path
 
 ## EMSeq Fields
 

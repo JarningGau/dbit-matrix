@@ -150,14 +150,20 @@ Inputs:
 Outputs:
 
 - `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
+- `coverage/host/<X_index>/<X_index>_<Y_index>.CH.cov` (optional)
 - `coverage/host_mito.CG.cov`
+- `coverage/host_mito.CH.cov` (optional)
 - `coverage/<spike_name>.CG.cov`
+- `coverage/<spike_name>.CH.cov` (optional)
 
 Contract:
 
 - host outputs are per-spot
 - `host_mito.CG.cov` is a single aggregate output
+- `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only
+- `.CH.cov` outputs are headerless, include covered CH sites only, and add a trailing `context` column with `CA`, `CC`, or `CT`
+- CH outputs are controlled by `call_context_mode`
 
 ### `saturation`
 

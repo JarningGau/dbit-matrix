@@ -83,6 +83,12 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated chromosome list used for aggregate host_mito output.",
     )
     parser.add_argument(
+        "--context-mode",
+        choices=["cg", "ch", "both"],
+        default="cg",
+        help="Emit CpG outputs, CH outputs, or both. Default: cg.",
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=8,
@@ -148,6 +154,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to methy_caller script. Default: scripts/methy_caller.py.",
     )
     parser.add_argument(
+        "--ch-caller-script",
+        default="scripts/methy_caller_CH.py",
+        help="Path to CH caller script. Default: scripts/methy_caller_CH.py.",
+    )
+    parser.add_argument(
         "--samtools-bin",
         default="samtools",
         help="samtools executable path or command name. Default: samtools.",
@@ -200,16 +211,28 @@ def discover_spike_bams(pooled_dir: Path) -> dict[str, Path]:
     return spikes
 
 
-def build_caller_command(
+def iter_context_modes(context_mode: str) -> list[str]:
+    if context_mode == "both":
+        return ["cg", "ch"]
+    return [context_mode]
+
+
+def get_context_suffix(context_mode: str) -> str:
+    return "CG" if context_mode == "cg" else "CH"
+
+
+def build_context_caller_command(
     args: argparse.Namespace,
     bam_file: Path,
     output_file: Path,
     chromosomes: str,
     reference_file: str,
+    context_mode: str,
 ) -> list[str]:
+    script_path = args.caller_script if context_mode == "cg" else args.ch_caller_script
     command = [
         sys.executable,
-        args.caller_script,
+        script_path,
         "-f",
         reference_file,
         "-i",
@@ -290,22 +313,26 @@ def run_host_spot(
     args: argparse.Namespace,
     work_path: Path,
     host_bam: Path,
-) -> Path:
+) -> list[Path]:
     split_root = work_path / "split_bams"
     relative = host_bam.relative_to(split_root)
     base_name = relative.name[: -len(".sorted.bam")]
-    host_out = work_path / "coverage" / "host" / relative.parent / f"{base_name}.CG.cov"
-    host_out.parent.mkdir(parents=True, exist_ok=True)
-
-    host_cmd = build_caller_command(
-        args,
-        host_bam,
-        host_out,
-        args.chromosomes,
-        args.reference_file,
-    )
-    run_or_skip(host_cmd, host_out, args.dry_run)
-    return host_out
+    outputs: list[Path] = []
+    for context_name in iter_context_modes(args.context_mode):
+        suffix = get_context_suffix(context_name)
+        host_out = work_path / "coverage" / "host" / relative.parent / f"{base_name}.{suffix}.cov"
+        host_out.parent.mkdir(parents=True, exist_ok=True)
+        host_cmd = build_context_caller_command(
+            args,
+            host_bam,
+            host_out,
+            args.chromosomes,
+            args.reference_file,
+            context_name,
+        )
+        run_or_skip(host_cmd, host_out, args.dry_run)
+        outputs.append(host_out)
+    return outputs
 
 
 def ensure_host_mito_bam(args: argparse.Namespace, work_path: Path) -> Path:
@@ -341,19 +368,24 @@ def ensure_host_mito_bam(args: argparse.Namespace, work_path: Path) -> Path:
     return host_sorted
 
 
-def run_host_mito_aggregate(args: argparse.Namespace, work_path: Path) -> Path:
+def run_host_mito_aggregate(args: argparse.Namespace, work_path: Path) -> list[Path]:
     host_mito_bam = ensure_host_mito_bam(args, work_path)
-    mito_out = work_path / "coverage" / "host_mito.CG.cov"
-    mito_out.parent.mkdir(parents=True, exist_ok=True)
-    mito_cmd = build_caller_command(
-        args,
-        host_mito_bam,
-        mito_out,
-        args.mito_chromosomes,
-        args.reference_file,
-    )
-    run_or_skip(mito_cmd, mito_out, args.dry_run)
-    return mito_out
+    outputs: list[Path] = []
+    for context_name in iter_context_modes(args.context_mode):
+        suffix = get_context_suffix(context_name)
+        mito_out = work_path / "coverage" / f"host_mito.{suffix}.cov"
+        mito_out.parent.mkdir(parents=True, exist_ok=True)
+        mito_cmd = build_context_caller_command(
+            args,
+            host_mito_bam,
+            mito_out,
+            args.mito_chromosomes,
+            args.reference_file,
+            context_name,
+        )
+        run_or_skip(mito_cmd, mito_out, args.dry_run)
+        outputs.append(mito_out)
+    return outputs
 
 
 def run_host_mode(args: argparse.Namespace, work_path: Path) -> None:
@@ -371,11 +403,13 @@ def run_host_mode(args: argparse.Namespace, work_path: Path) -> None:
         }
         for future in as_completed(futures):
             host_bam = futures[future]
-            host_out = future.result()
+            host_outputs = future.result()
             print(f"[call] host_bam={host_bam}")
-            print(f"[call] output_host={host_out}")
-    mito_out = run_host_mito_aggregate(args, work_path)
-    print(f"[call] output_host_mito={mito_out}")
+            for host_out in host_outputs:
+                print(f"[call] output_host={host_out}")
+    mito_outputs = run_host_mito_aggregate(args, work_path)
+    for mito_out in mito_outputs:
+        print(f"[call] output_host_mito={mito_out}")
 
 
 def run_spike_mode(args: argparse.Namespace, work_path: Path) -> None:
@@ -396,8 +430,6 @@ def run_spike_mode(args: argparse.Namespace, work_path: Path) -> None:
                 f"requested spike-in BAM missing for '{spike_name}': "
                 f"{pooled_dir}/pooled.{spike_name}.sorted.bam"
             )
-        spike_out = work_path / "coverage" / f"{spike_name}.CG.cov"
-        spike_out.parent.mkdir(parents=True, exist_ok=True)
         spike_reference = spike_reference_map.get(spike_name)
         if spike_reference is None:
             raise ValueError(
@@ -414,16 +446,21 @@ def run_spike_mode(args: argparse.Namespace, work_path: Path) -> None:
                 spike_chromosome_csv,
                 f"spike '{spike_name}'",
             )
-        command = build_caller_command(
-            args,
-            spike_bam,
-            spike_out,
-            spike_chromosome_csv,
-            spike_reference,
-        )
-        run_or_skip(command, spike_out, args.dry_run)
         print(f"[call] spike_in={spike_name}")
-        print(f"[call] output={spike_out}")
+        for context_name in iter_context_modes(args.context_mode):
+            suffix = get_context_suffix(context_name)
+            spike_out = work_path / "coverage" / f"{spike_name}.{suffix}.cov"
+            spike_out.parent.mkdir(parents=True, exist_ok=True)
+            command = build_context_caller_command(
+                args,
+                spike_bam,
+                spike_out,
+                spike_chromosome_csv,
+                spike_reference,
+                context_name,
+            )
+            run_or_skip(command, spike_out, args.dry_run)
+            print(f"[call] output={spike_out}")
 
 
 def parse_spike_references(items: list[str]) -> dict[str, str]:
@@ -471,6 +508,8 @@ def main() -> int:
         raise ValueError("batch-size must be > 0")
     if args.sample_size is not None and args.sample_size <= 0:
         raise ValueError("sample-size must be > 0 when provided")
+    if args.context_mode not in {"cg", "ch", "both"}:
+        raise ValueError("context-mode must be one of: cg, ch, both")
     if args.r1_left_trimming < 0:
         raise ValueError("r1-left-trimming must be >= 0")
     if args.r1_right_trimming < 0:
@@ -486,6 +525,8 @@ def main() -> int:
     print(f"[call] host_reference={args.reference_file}")
     print(f"[call] chromosomes={args.chromosomes}")
     print(f"[call] mito_chromosomes={args.mito_chromosomes}")
+    print(f"[call] context_mode={args.context_mode}")
+    print(f"[call] ch_caller_script={args.ch_caller_script}")
     print(f"[call] samtools_bin={args.samtools_bin}")
     print(f"[call] samtools_threads={args.samtools_threads}")
     print(f"[call] host_subsample_fraction={args.host_subsample_fraction}")
