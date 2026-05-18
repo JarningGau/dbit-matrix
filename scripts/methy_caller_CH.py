@@ -167,7 +167,7 @@ def process_pileup_column(
     pileup_column,
     chromosome: str,
     context: str,
-    strand_mode: str,
+    strand: str,
     target_flags: set[int],
     r1_left_trimming: int,
     r1_right_trimming: int,
@@ -209,7 +209,7 @@ def process_pileup_column(
             continue
 
         base = forward_seq[forward_index].upper()
-        if strand_mode == "forward_ch":
+        if strand == "+":
             if forward_index + 1 >= read_len:
                 continue
             neighbor_query_pos = query_pos - 1 if record.is_reverse else query_pos + 1
@@ -234,7 +234,7 @@ def process_pileup_column(
                 total_coverage += 1
             continue
 
-        if strand_mode == "reverse_repr":
+        if strand == "-":
             if base == "A":
                 dan_count += 1
                 total_coverage += 1
@@ -250,6 +250,7 @@ def process_pileup_column(
         "chrom": chromosome,
         "pos": pileup_column.pos,
         "context": context,
+        "strand": strand,
         "methylated_count": methylated_count,
         "unmethylated_count": unmethylated_count,
         "methylation_percent": round(methylation_percent, 2),
@@ -293,13 +294,13 @@ def process_ch_batch(
         target = target_positions.get(pileup_column.pos)
         if target is None:
             continue
-        context, strand_mode = target
+        context, strand = target
         results.append(
             process_pileup_column(
                 pileup_column,
                 chromosome,
                 context,
-                strand_mode,
+                strand,
                 target_flags,
                 r1_left_trimming,
                 r1_right_trimming,
@@ -358,7 +359,11 @@ def format_result_line(result: dict[str, object]) -> str:
     mc = result["methylated_count"]
     c_unmeth = result["unmethylated_count"]
     context = result["context"]
-    return f"{chrom}\t{pos}\t{pos}\t{methy_percent:.2f}\t{mc}\t{c_unmeth}\t{context}\n"
+    strand = result["strand"]
+    return (
+        f"{chrom}\t{pos}\t{pos}\t{methy_percent:.2f}\t{mc}\t{c_unmeth}\t"
+        f"{context}\t{strand}\n"
+    )
 
 
 def load_reference_and_find_ch(
@@ -377,7 +382,7 @@ def load_reference_and_find_ch(
     for start in range(len(sequence) - 1):
         context = sequence[start : start + 2]
         if context in {"CA", "CC", "CT"}:
-            ch_positions.append((start, start + 1, context, "forward_ch"))
+            ch_positions.append((start, start + 1, context, "+"))
     for pos in range(1, len(sequence) - 1):
         if sequence[pos] != "G":
             continue
@@ -385,7 +390,7 @@ def load_reference_and_find_ch(
         context = reverse_context_map.get(prev_base)
         if context is None:
             continue
-        ch_positions.append((pos, pos, context, "reverse_repr"))
+        ch_positions.append((pos, pos, context, "-"))
     ch_positions.sort(key=lambda item: item[0])
     if sample_size and len(ch_positions) > sample_size:
         ch_positions = ch_positions[:sample_size]
