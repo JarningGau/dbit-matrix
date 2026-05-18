@@ -110,21 +110,21 @@ def open_bam_file(bam_file: str):
 
 
 def create_position_batches(
-    ch_positions: list[tuple[int, int, str]],
+    ch_positions: list[tuple[int, int, str, str]],
     batch_size: int,
-) -> list[list[tuple[int, int, str]]]:
+) -> list[list[tuple[int, int, str, str]]]:
     if not ch_positions:
         return []
-    batches: list[list[tuple[int, int, str]]] = []
-    current_batch: list[tuple[int, int, str]] = []
+    batches: list[list[tuple[int, int, str, str]]] = []
+    current_batch: list[tuple[int, int, str, str]] = []
     current_start = ch_positions[0][0]
-    for start_pos, end_pos, context in ch_positions:
+    for start_pos, end_pos, context, strand_mode in ch_positions:
         if start_pos - current_start <= batch_size:
-            current_batch.append((start_pos, end_pos, context))
+            current_batch.append((start_pos, end_pos, context, strand_mode))
         else:
             if current_batch:
                 batches.append(current_batch)
-            current_batch = [(start_pos, end_pos, context)]
+            current_batch = [(start_pos, end_pos, context, strand_mode)]
             current_start = start_pos
     if current_batch:
         batches.append(current_batch)
@@ -167,6 +167,7 @@ def process_pileup_column(
     pileup_column,
     chromosome: str,
     context: str,
+    strand_mode: str,
     target_flags: set[int],
     r1_left_trimming: int,
     r1_right_trimming: int,
@@ -178,8 +179,6 @@ def process_pileup_column(
     dan_count = 0
     dgn_count = 0
     total_coverage = 0
-    context_h = context[1]
-
     for pileup_read in pileup_column.pileups:
         if pileup_read.alignment.flag not in target_flags:
             continue
@@ -209,46 +208,39 @@ def process_pileup_column(
         ):
             continue
 
-        counted = False
-        if forward_index + 1 < read_len:
+        base = forward_seq[forward_index].upper()
+        if strand_mode == "forward_ch":
+            if forward_index + 1 >= read_len:
+                continue
+            neighbor_query_pos = query_pos - 1 if record.is_reverse else query_pos + 1
             if is_trimmed_read_position(
                 record=record,
-                query_pos=(query_pos - 1 if record.is_reverse else query_pos + 1),
+                query_pos=neighbor_query_pos,
                 read_len=read_len,
                 r1_left_trimming=r1_left_trimming,
                 r1_right_trimming=r1_right_trimming,
                 r2_left_trimming=r2_left_trimming,
                 r2_right_trimming=r2_right_trimming,
             ):
-                pass
-            else:
-                base = forward_seq[forward_index].upper()
-                next_base = forward_seq[forward_index + 1].upper()
-                if next_base == context_h:
-                    if base == "T":
-                        nth_count += 1
-                        total_coverage += 1
-                        counted = True
-                    elif base == "C":
-                        nch_count += 1
-                        total_coverage += 1
-                        counted = True
-
-        if counted:
+                continue
+            next_base = forward_seq[forward_index + 1].upper()
+            if next_base != context[1]:
+                continue
+            if base == "T":
+                nth_count += 1
+                total_coverage += 1
+            elif base == "C":
+                nch_count += 1
+                total_coverage += 1
             continue
 
-        if forward_index - 1 < 0:
-            continue
-        prev_base = forward_seq[forward_index - 1].upper()
-        base = forward_seq[forward_index].upper()
-        if prev_base == "C":
-            continue
-        if base == "A":
-            dan_count += 1
-            total_coverage += 1
-        elif base == "G":
-            dgn_count += 1
-            total_coverage += 1
+        if strand_mode == "reverse_repr":
+            if base == "A":
+                dan_count += 1
+                total_coverage += 1
+            elif base == "G":
+                dgn_count += 1
+                total_coverage += 1
 
     methylated_count = nth_count + dan_count
     unmethylated_count = nch_count + dgn_count
@@ -268,7 +260,7 @@ def process_pileup_column(
 def process_ch_batch(
     inbam,
     chromosome: str,
-    ch_batch: list[tuple[int, int, str]],
+    ch_batch: list[tuple[int, int, str, str]],
     min_base_quality: int,
     min_mapping_quality: int,
     target_flags: set[int],
@@ -282,7 +274,7 @@ def process_ch_batch(
         return []
     batch_start = min(pos[0] for pos in ch_batch)
     batch_end = max(pos[1] for pos in ch_batch)
-    target_positions = {pos[0]: pos[2] for pos in ch_batch}
+    target_positions = {pos[0]: (pos[2], pos[3]) for pos in ch_batch}
     results: list[dict[str, object]] = []
     pileups = inbam.pileup(
         chromosome,
@@ -298,14 +290,16 @@ def process_ch_batch(
         min_mapping_quality=min_mapping_quality,
     )
     for pileup_column in pileups:
-        context = target_positions.get(pileup_column.pos)
-        if context is None:
+        target = target_positions.get(pileup_column.pos)
+        if target is None:
             continue
+        context, strand_mode = target
         results.append(
             process_pileup_column(
                 pileup_column,
                 chromosome,
                 context,
+                strand_mode,
                 target_flags,
                 r1_left_trimming,
                 r1_right_trimming,
@@ -319,7 +313,7 @@ def process_ch_batch(
 def process_all_ch_positions(
     inbam,
     chromosome: str,
-    ch_positions: list[tuple[int, int, str]],
+    ch_positions: list[tuple[int, int, str, str]],
     min_base_quality: int,
     min_mapping_quality: int,
     max_depth: int,
@@ -371,14 +365,28 @@ def load_reference_and_find_ch(
     reference_file: str,
     chromosome: str,
     sample_size: int | None,
-) -> list[tuple[int, int, str]]:
+) -> list[tuple[int, int, str, str]]:
     with pysam.FastaFile(reference_file) as fasta:
         sequence = fasta.fetch(chromosome).upper()
-    ch_positions: list[tuple[int, int, str]] = []
+    reverse_context_map = {
+        "T": "CA",
+        "G": "CC",
+        "A": "CT",
+    }
+    ch_positions: list[tuple[int, int, str, str]] = []
     for start in range(len(sequence) - 1):
         context = sequence[start : start + 2]
         if context in {"CA", "CC", "CT"}:
-            ch_positions.append((start, start + 1, context))
+            ch_positions.append((start, start + 1, context, "forward_ch"))
+    for pos in range(1, len(sequence) - 1):
+        if sequence[pos] != "G":
+            continue
+        prev_base = sequence[pos - 1]
+        context = reverse_context_map.get(prev_base)
+        if context is None:
+            continue
+        ch_positions.append((pos, pos, context, "reverse_repr"))
+    ch_positions.sort(key=lambda item: item[0])
     if sample_size and len(ch_positions) > sample_size:
         ch_positions = ch_positions[:sample_size]
     return ch_positions
