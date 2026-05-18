@@ -89,16 +89,18 @@ Reason:
 
 ## CH Output Contract
 
-CH output is headerless and Bismark-like for the first six columns, with one
-extra trailing column:
+CH output is headerless and Bismark-like for the first six columns, with two
+extra trailing columns:
 
-`chrom  start  end  methylation_percent  mc_count  unmeth_count  context`
+`chrom  start  end  methylation_percent  mc_count  unmeth_count  context  strand`
 
 Rules:
 
 - `start` and `end` use the same coordinate convention as the existing CpG
   caller.
 - `context` is one of `CA`, `CC`, or `CT`.
+- `strand` is `+` or `-` and represents which genomic strand contains the
+  target cytosine.
 - Only covered sites are written.
 
 The existing `.CG.cov` format remains unchanged.
@@ -121,17 +123,25 @@ Reference:
 
 ## Target Site Discovery
 
-`scripts/methy_caller_CH.py` scans the reference sequence and enumerates only
-reference-strand CH sites:
+`scripts/methy_caller_CH.py` scans the reference sequence and enumerates both:
+
+- reference-strand CH sites: `CA`, `CC`, `CT`
+- opposite-strand CH sites represented on the reference strand as `DGN`
+  anchors
+
+Each discovered site produces at most one output row.
+
+The row `context` is always normalized to the target cytosine context:
 
 - `CA`
 - `CC`
 - `CT`
 
-Each discovered site produces at most one output row.
+The row `strand` identifies which strand contains that cytosine:
 
-The row `context` is derived directly from the reference dinucleotide at that
-site.
+- `+` for cytosines on the reference strand
+- `-` for cytosines on the opposite strand represented on the reference strand
+  as `DGN`
 
 ## Pileup Model
 
@@ -154,11 +164,17 @@ The CH caller should follow the existing TAPS caller conventions for:
 
 ## Context-Specific Output Semantics
 
-Each output row is keyed by a reference-strand cytosine in `CA`, `CC`, or `CT`.
+Each output row is keyed by one genomic cytosine site.
 
-The `context` column describes that reference-strand CH identity, not the read
-orientation. Reverse-strand evidence is collapsed into the same row instead of
-producing separate strand-specific records.
+The `context` column describes the normalized CH identity of that cytosine, not
+the read orientation.
+
+The `strand` column describes the genomic strand containing that cytosine, not
+the read orientation:
+
+- `+` means the cytosine is on the reference strand
+- `-` means the cytosine is on the opposite strand and is represented on the
+  reference strand by a `DGN` anchor
 
 ## Validation Scope
 
