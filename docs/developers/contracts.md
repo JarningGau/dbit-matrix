@@ -162,7 +162,9 @@ Contract:
 - `host_mito.CG.cov` is a single aggregate output
 - `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only
-- `.CH.cov` outputs are headerless, include covered CH sites only, and add a trailing `context` column with `CA`, `CC`, or `CT`
+- `.CH.cov` outputs are headerless, include covered CH sites only, and add trailing `context` and `strand` columns
+- `context` is one of `CA`, `CC`, or `CT`
+- `strand` is `+` or `-` and indicates which genomic strand contains the target cytosine
 - CH outputs are controlled by `call_context_mode`
 
 ### `saturation`
