@@ -5,6 +5,9 @@ This page is the active release history for the repository.
 ## Current
 
 - **mbias / call host subsample:** after fractional `samtools view -s` subsampling, host BAM preparation in [`scripts/host_subsample_bam.py`](../../scripts/host_subsample_bam.py) now caps alignment records at a fixed internal limit (`HOST_SUBSAMPLE_MAX_READS`, default 10M; not exposed in CLI or workflow JSON). TAPS and EMSeq `mbias` log `host_subsample_max_reads` for reproducibility.
+- **TAPS CH calling:** TAPS `call` now supports `call_context_mode` values `cg`, `ch`, and `both`, with a dedicated CH caller at [`scripts/methy_caller_CH.py`](../../scripts/methy_caller_CH.py). `cg` remains the default behavior.
+- **TAPS CH outputs:** `.CH.cov` outputs now cover both reference-strand CH cytosines and opposite-strand CH cytosines represented on the reference strand as `DGN` anchors, instead of counting only reference-strand `CA/CC/CT` sites.
+- **TAPS CH output contract:** `.CH.cov` rows now append `context` and `strand` columns. `context` is one of `CA`, `CC`, or `CT`, and `strand` is `+` or `-` to indicate which genomic strand contains the target cytosine.
 
 ## 2.0.0
 
