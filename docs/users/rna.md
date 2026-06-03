@@ -2,6 +2,14 @@
 
 Use this guide for the RNA workflow.
 
+## Library Structure
+
+R1: BC2 (8 bp) + linker2 + BC1 (8 bp) + linker1 + UMI (10 bp)
+R2: cDNA
+
+linker1 (30 bp): GTGGCCGATGTTTCGCATCGGCGTACGACT (umi_left)
+linker2 (30 bp): ATCCACGTGCTTGAGAGGCCAGAGCATTCG (linker_bc)
+
 ## What It Runs
 
 The current RNA scope is:

@@ -8,7 +8,7 @@
     "barcode1_whitelist": "configs/barcodes_50a.tsv",
     "barcode2_whitelist": "configs/barcodes_50a.tsv",
     "linker_bc": "ATCCACGTGCTTGAGAGGCCAGAGCATTCG",
-    "umi_left": "GTGGCCGATGTTTCG",
+    "umi_left": "GTGGCCGATGTTTCGCATCGGCGTACGACT",
     "umi_len": 10,
     "barcode_hamming_distance": 1,
     "linker_edit_distance": 1,
