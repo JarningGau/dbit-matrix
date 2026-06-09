@@ -94,6 +94,10 @@ def parse_args() -> argparse.Namespace:
         help="STARsolo cell filter mode. Default: EmptyDrops_CR.",
     )
     parser.add_argument(
+        "--solo-features",
+        help="STARsolo --soloFeatures value. Default: Gene GeneFull.",
+    )
+    parser.add_argument(
         "--out-tmp-dir",
         help="Optional STAR outTmpDir (recommended on WSL).",
     )
@@ -150,6 +154,9 @@ def resolve_settings(args: argparse.Namespace) -> argparse.Namespace:
     args.solo_cb_whitelist = pick(args.solo_cb_whitelist, cfg.get("solo_cb_whitelist"))
     args.solo_cell_filter = pick(
         args.solo_cell_filter, cfg.get("solo_cell_filter"), "EmptyDrops_CR"
+    )
+    args.solo_features = pick(
+        args.solo_features, cfg.get("solo_features"), "Gene GeneFull"
     )
     args.out_tmp_dir = pick(args.out_tmp_dir, cfg.get("out_tmp_dir"))
     args.align_threads = pick(args.align_threads, cfg.get("align_threads"), 1)
@@ -279,6 +286,8 @@ def build_align_command(args: argparse.Namespace, sample_work: Path) -> str:
         args.barcode1_whitelist,
         "--solo-cell-filter",
         args.solo_cell_filter,
+        "--solo-features",
+        args.solo_features,
         "--threads",
         str(args.align_threads),
     ]

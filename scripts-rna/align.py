@@ -80,6 +80,11 @@ def parse_args() -> argparse.Namespace:
         help="STARsolo --soloCellFilter value. Default: EmptyDrops_CR.",
     )
     parser.add_argument(
+        "--solo-features",
+        default="Gene GeneFull",
+        help="STARsolo --soloFeatures value. Default: Gene GeneFull.",
+    )
+    parser.add_argument(
         "--out-tmp-dir",
         help="Optional STAR --outTmpDir (useful on WSL).",
     )
@@ -143,7 +148,7 @@ def main() -> int:
         "--soloCellFilter",
         args.solo_cell_filter,
         "--soloFeatures",
-        "Gene",
+        args.solo_features,
     ]
     if args.out_tmp_dir:
         star_cmd.extend(["--outTmpDir", args.out_tmp_dir])

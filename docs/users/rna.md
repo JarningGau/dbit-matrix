@@ -58,6 +58,7 @@ Copy and edit the example workflow JSON. At minimum, set:
 - `umi_len`
 - `star_genome_dir`
 - `gtf`
+- `solo_features` (must include `Gene` for `barcodes_pos.tsv` generation; default: `Gene GeneFull`)
 
 ## Dry-Run
 
