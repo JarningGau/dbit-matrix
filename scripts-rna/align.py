@@ -148,7 +148,7 @@ def main() -> int:
         "--soloCellFilter",
         args.solo_cell_filter,
         "--soloFeatures",
-        args.solo_features,
+        *args.solo_features.split(),
     ]
     if args.out_tmp_dir:
         star_cmd.extend(["--outTmpDir", args.out_tmp_dir])
