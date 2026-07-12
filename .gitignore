@@ -37,3 +37,5 @@ envs/*
 envs/methscan/*
 !envs/methscan/pixi.toml
 !envs/methscan/pixi.lock
+
+explore/
