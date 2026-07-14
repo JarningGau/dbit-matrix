@@ -4,6 +4,7 @@ This page is the active release history for the repository.
 
 ## Current
 
+- **TAPS v2 methylated-linker demux:** added parallel driver [`scripts-v2/make_cmd.py`](../../scripts-v2/make_cmd.py) with C→N-masked `insert_left` matching, optional `require_c_all_t` conversion filter, demux mC→T QC stats, and conversion columns in [`scripts-v2/summary.py`](../../scripts-v2/summary.py). Configs: `workflow/dbit_taps_v2_test.json`, `workflow/dbit_taps_v2_slurm.json`. Unchanged stages reuse `scripts/*.py`.
 - **mbias / call host subsample:** after fractional `samtools view -s` subsampling, host BAM preparation in [`scripts/host_subsample_bam.py`](../../scripts/host_subsample_bam.py) now caps alignment records at a fixed internal limit (`HOST_SUBSAMPLE_MAX_READS`, default 10M; not exposed in CLI or workflow JSON). TAPS and EMSeq `mbias` log `host_subsample_max_reads` for reproducibility.
 - **TAPS CH calling:** TAPS `call` now supports `call_context_mode` values `cg`, `ch`, and `both`, with a dedicated CH caller at [`scripts/methy_caller_CH.py`](../../scripts/methy_caller_CH.py). `cg` remains the default behavior.
 - **TAPS CH outputs:** `.CH.cov` outputs now cover both reference-strand CH cytosines and opposite-strand CH cytosines represented on the reference strand as `DGN` anchors, instead of counting only reference-strand `CA/CC/CT` sites.

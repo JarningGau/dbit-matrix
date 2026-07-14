@@ -40,10 +40,12 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
 ## Entrypoints
 
 - TAPS workflow driver: `scripts/make_cmd.py`
+- TAPS v2 workflow driver: `scripts-v2/make_cmd.py` (methylated-linker demux; reuses most `scripts/*.py`)
 - EMSeq workflow driver: `scripts-emseq/make_cmd.py`
 - RNA workflow driver: `scripts-rna/make_cmd.py`
 - Single-stage implementations live in:
   - `scripts/*.py`
+  - `scripts-v2/*.py` (forked demux/summary only)
   - `scripts-emseq/*.py`
   - `scripts-rna/*.py`
 

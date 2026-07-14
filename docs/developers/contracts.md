@@ -46,6 +46,16 @@ Contract:
 - stats must include retention information and reject reasons
 - matched and spike-in reads must be separated
 
+#### TAPS v2 demux (`scripts-v2/extract_bc.py`)
+
+TAPS v2 uses the same output paths and mainline stage order. The demux implementation additionally:
+
+- locates `insert_left` (the methylated-linker on R1) with C→N masking so converted anchors still match
+- always records mC→T conversion QC in `stats.json` (`spike_mCtoT_*`, `spike_scored_reads`, `scored_fully_converted`, …)
+- optionally rejects reads that fail an all-T conversion filter (`--require-c-all-t` / `require_c_all_t`; empty = off)
+
+Terminology: the methylated-linker is the 5mC-bearing `insert_left` conversion QC motif. It is not a reference spike-in (lambda/pUC19). Rejected reads still use the existing `*.spike-in.fq.gz` contract names.
+
 ### `align`
 
 Purpose: align demultiplexed reads to spike-in and host references.
@@ -210,6 +220,7 @@ Contract:
 - `sample_summary.tsv` is one row per sample
 - missing upstream inputs should preserve fixed columns and write `NA`
 - `per_spot_summary.tsv` keeps fixed columns for `X_index`, `Y_index`, `spot`, `mean_methylation`, `cpg_site_count`, and `reads`
+- TAPS v2 (`scripts-v2/summary.py`) additionally surfaces methylated-linker conversion QC columns in `sample_summary.tsv`: `spike_scored_reads`, `scored_fully_converted`, `spike_mean_conversion_rate`, `spike_fraction_all_T`, `spike_conversion_filtered_rejects`
 
 ## Optional TAPS And EMSeq Stages
 

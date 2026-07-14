@@ -8,7 +8,7 @@ This document defines the workflow configuration surface for developers.
 - all stages must support `--dry-run`
 - stage names in docs should match the CLI values exactly
 - Slurm resources should be configured per stage
-- TAPS (`scripts/make_cmd.py`), EMSeq (`scripts-emseq/make_cmd.py`), and RNA (`scripts-rna/make_cmd.py`) validate that referenced input paths exist before emitting `.sh` / `.sbatch` scripts. Use `--skip-workdir-input-checks` when generating a full pipeline driver (`--stage all`) or a downstream stage before upstream outputs exist under the sample work directory; `--stage all` passes this flag to each per-stage subprocess automatically (TAPS/EMSeq). For `--stage all`, TAPS/EMSeq also run the same path checks in the parent process first (with workdir intermediates skipped), so invalid `r1`/`r2` or missing references fail immediately with a clear error before any subprocess runs.
+- TAPS (`scripts/make_cmd.py`), TAPS v2 (`scripts-v2/make_cmd.py`), EMSeq (`scripts-emseq/make_cmd.py`), and RNA (`scripts-rna/make_cmd.py`) validate that referenced input paths exist before emitting `.sh` / `.sbatch` scripts. Use `--skip-workdir-input-checks` when generating a full pipeline driver (`--stage all`) or a downstream stage before upstream outputs exist under the sample work directory; `--stage all` passes this flag to each per-stage subprocess automatically (TAPS/TAPS v2/EMSeq). For `--stage all`, TAPS/TAPS v2/EMSeq also run the same path checks in the parent process first (with workdir intermediates skipped), so invalid `r1`/`r2` or missing references fail immediately with a clear error before any subprocess runs.
 
 ## Common Fields
 
@@ -30,6 +30,11 @@ This document defines the workflow configuration surface for developers.
 - `linker_edit_distance`
 - `barcode_hamming_distance`
 - `gzip_level`
+
+TAPS v2 demux-only fields (`scripts-v2/make_cmd.py`, configs `workflow/dbit_taps_v2_*.json`):
+
+- `spike_edit_distance`: max mismatches on non-N positions of the C→N-masked `insert_left` (methylated-linker). Default: `1`.
+- `require_c_all_t`: comma-separated 0-based C positions that must all be T to keep a read (e.g. `"3,6,10"`). Empty string disables the conversion filter (default).
 
 ## TAPS Fields
 

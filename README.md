@@ -1,8 +1,9 @@
 # DBiT-Matrix
 
-DBiT-Matrix is a workflow repository for DBiT-style spatial omics data processing. It currently provides three entrypoints:
+DBiT-Matrix is a workflow repository for DBiT-style spatial omics data processing. It currently provides these entrypoints:
 
 - `TAPS` for methylation workflows
+- `TAPS v2` for methylation workflows with methylated-linker demux
 - `EMSeq` for methylation workflows
 - `RNA` for transcriptomics workflows
 
@@ -14,6 +15,7 @@ All workflows are configured with [`workflow/*.json`](workflow/) and run through
 ## Current Status
 
 - `TAPS`: main methylation workflow available
+- `TAPS v2`: same mainline as TAPS, with C→N-masked methylated-linker demux and conversion QC in summary
 - `EMSeq`: main methylation workflow available
 - `RNA`: current scope is `demux_extract_bc -> align`
 
@@ -28,6 +30,7 @@ pixi install
 | Workflow | Entrypoint | Start here |
 | --- | --- | --- |
 | `TAPS` | `scripts/make_cmd.py` | [TAPS user guide](docs/users/taps.md) |
+| `TAPS v2` | `scripts-v2/make_cmd.py` | [TAPS user guide](docs/users/taps.md) (use `workflow/dbit_taps_v2_*.json`) |
 | `EMSeq` | `scripts-emseq/make_cmd.py` | [EMSeq user guide](docs/users/emseq.md) |
 | `RNA` | `scripts-rna/make_cmd.py` | [RNA user guide](docs/users/rna.md) |
 
