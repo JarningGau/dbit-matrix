@@ -1,9 +1,9 @@
 {
     "runner": "local",
     "stage": "fastp_split",
-    "sample_id": "test-DNAme-TAPS-v2",
-    "r1": "data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R1.fq.gz",
-    "r2": "data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R2.fq.gz",
+    "sample_id": "test-TAPS-5mc-linker",
+    "r1": "data/raw/test-TAPS-5mc-linker/test-TAPS-5mc-linker_R1.fq.gz",
+    "r2": "data/raw/test-TAPS-5mc-linker/test-TAPS-5mc-linker_R2.fq.gz",
     "work_root": "work",
     "fastp_threads": 2,
     "number_of_split_parts": 2,
