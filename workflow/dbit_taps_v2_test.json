@@ -47,10 +47,20 @@
     "call_batch_size": 10000000,
     "call_mode": "all",
     "call_context_mode": "cg",
-    "call_r1_left_trimming": 0,
-    "call_r1_right_trimming": 0,
-    "call_r2_left_trimming": 0,
-    "call_r2_right_trimming": 0,
+    "call_trimming": {
+        "host": {
+            "r1_left": 0,
+            "r1_right": 0,
+            "r2_left": 10,
+            "r2_right": 0
+        },
+        "spike": {
+            "r1_left": 30,
+            "r1_right": 0,
+            "r2_left": 10,
+            "r2_right": 0
+        }
+    },
     "call_caller_script": "scripts/methy_caller.py",
     "call_ch_caller_script": "scripts/methy_caller_CH.py",
     "saturation_script": "scripts/saturation.py",

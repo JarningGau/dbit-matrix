@@ -703,6 +703,30 @@ def build_split_sort_command(args: argparse.Namespace, sample_work: Path) -> str
     return quoted(command)
 
 
+CALL_TRIM_FIELDS = ("r1_left", "r1_right", "r2_left", "r2_right")
+
+
+def resolve_call_trim_target(
+    cfg_target: object,
+    flat_defaults: dict[str, int],
+    target_label: str,
+) -> dict[str, int]:
+    if cfg_target is None:
+        cfg_target = {}
+    if not isinstance(cfg_target, dict):
+        raise ValueError(f"call_trimming.{target_label} must be an object")
+    result: dict[str, int] = {}
+    for field in CALL_TRIM_FIELDS:
+        raw = cfg_target.get(field, flat_defaults[field])
+        if raw is None:
+            raw = 0
+        value = int(raw)
+        if value < 0:
+            raise ValueError(f"call_trimming.{target_label}.{field} must be >= 0")
+        result[field] = value
+    return result
+
+
 def build_call_command(
     args: argparse.Namespace,
     sample_work: Path,
@@ -710,6 +734,7 @@ def build_call_command(
     spike_name: str | None = None,
 ) -> str:
     script_path = Path("scripts/call.py")
+    trim = args.call_trim_spike if mode == "spike" else args.call_trim_host
     command = [
         sys.executable,
         str(script_path),
@@ -736,13 +761,13 @@ def build_call_command(
         "--batch-size",
         str(args.call_batch_size),
         "--r1-left-trimming",
-        str(args.call_r1_left_trimming),
+        str(trim["r1_left"]),
         "--r1-right-trimming",
-        str(args.call_r1_right_trimming),
+        str(trim["r1_right"]),
         "--r2-left-trimming",
-        str(args.call_r2_left_trimming),
+        str(trim["r2_left"]),
         "--r2-right-trimming",
-        str(args.call_r2_right_trimming),
+        str(trim["r2_right"]),
         "--caller-script",
         args.call_caller_script,
         "--ch-caller-script",
@@ -1911,6 +1936,23 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["call_r2_right_trimming"] < 0:
         raise ValueError("call_r2_right_trimming must be >= 0")
+    call_trimming_cfg = cfg.get("call_trimming")
+    if call_trimming_cfg is None:
+        call_trimming_cfg = {}
+    if not isinstance(call_trimming_cfg, dict):
+        raise ValueError("call_trimming must be an object")
+    flat_call_trim = {
+        "r1_left": settings["call_r1_left_trimming"],
+        "r1_right": settings["call_r1_right_trimming"],
+        "r2_left": settings["call_r2_left_trimming"],
+        "r2_right": settings["call_r2_right_trimming"],
+    }
+    settings["call_trim_host"] = resolve_call_trim_target(
+        call_trimming_cfg.get("host"), flat_call_trim, "host"
+    )
+    settings["call_trim_spike"] = resolve_call_trim_target(
+        call_trimming_cfg.get("spike"), flat_call_trim, "spike"
+    )
     settings["call_caller_script"] = (
         settings["call_caller_script"] or "scripts/methy_caller.py"
     )
@@ -2819,10 +2861,8 @@ def main() -> int:
             call_max_depth=settings["call_max_depth"],
             call_batch_size=settings["call_batch_size"],
             call_context_mode=settings["call_context_mode"],
-            call_r1_left_trimming=settings["call_r1_left_trimming"],
-            call_r1_right_trimming=settings["call_r1_right_trimming"],
-            call_r2_left_trimming=settings["call_r2_left_trimming"],
-            call_r2_right_trimming=settings["call_r2_right_trimming"],
+            call_trim_host=settings["call_trim_host"],
+            call_trim_spike=settings["call_trim_spike"],
             call_caller_script=settings["call_caller_script"],
             call_ch_caller_script=settings["call_ch_caller_script"],
             samtools_bin=settings["samtools_bin"],
@@ -2832,7 +2872,26 @@ def main() -> int:
         )
         if settings["runner"] == "local":
             script_path = command_dir / "07_call.sh"
-            command = build_call_command(command_args, sample_work, settings["call_mode"])
+            call_mode = settings["call_mode"]
+            trims_differ = (
+                settings["call_trim_host"] != settings["call_trim_spike"]
+            )
+            if call_mode == "all" and trims_differ:
+                sub_commands: list[str] = [
+                    build_call_command(command_args, sample_work, "host")
+                ]
+                for spike_name in parse_spike_names(settings["spike_in_index"]):
+                    sub_commands.append(
+                        build_call_command(
+                            command_args,
+                            sample_work,
+                            "spike",
+                            spike_name=spike_name,
+                        )
+                    )
+                command = "\n\n".join(sub_commands)
+            else:
+                command = build_call_command(command_args, sample_work, call_mode)
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")

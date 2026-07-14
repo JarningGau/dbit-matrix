@@ -56,16 +56,37 @@ Calling fields:
 
 - `call_mode`
 - `call_context_mode`
-- `call_r1_left_trimming`
-- `call_r1_right_trimming`
-- `call_r2_left_trimming`
-- `call_r2_right_trimming`
+- `call_trimming` (per-target r1/r2 left/right trimming for host and spike-in)
+- `call_r1_left_trimming` (legacy; global fallback default, see below)
+- `call_r1_right_trimming` (legacy; global fallback default)
+- `call_r2_left_trimming` (legacy; global fallback default)
+- `call_r2_right_trimming` (legacy; global fallback default)
 - `call_caller_script`
 - `call_ch_caller_script`
 
 Notes:
 
-- TAPS trimming is defined separately for R1 and R2 ends
+- TAPS trimming is defined separately for R1 and R2 ends, and separately
+  for host and spike-in via `call_trimming`.
+- `call_trimming` accepts nested `host` and `spike` objects, each with any
+  subset of `r1_left`, `r1_right`, `r2_left`, `r2_right`. Missing fields
+  fall back to the flat `call_r*_trimming` keys, which default to `0`.
+  Example (host trims TAPS-linker leftover on both reads; spike is untrimmed):
+
+  ```json
+  "call_trimming": {
+    "host":  { "r1_left": 0,  "r1_right": 0, "r2_left": 0,  "r2_right": 10 },
+    "spike": { "r1_left": 30, "r1_right": 0, "r2_left": 10, "r2_right": 0  }
+  }
+  ```
+
+  When `call_mode` is `all` on the local runner and host/spike trims differ,
+  `07_call.sh` is emitted as sequential `call.py` invocations (host, then
+  each spike). On the Slurm runner, host and spike already run as separate
+  sbatch jobs, so each receives its own trim flags.
+- The flat `call_r*_trimming` keys remain supported for backward
+  compatibility and as the fallback default when a nested field is omitted.
+  New configs should prefer `call_trimming`.
 - TAPS `call_context_mode` accepts `cg`, `ch`, or `both`
 - `call_caller_script` remains the CpG caller path
 - `call_ch_caller_script` selects the CH caller path
