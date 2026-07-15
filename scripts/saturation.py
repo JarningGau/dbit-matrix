@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import statistics
 from pathlib import Path
@@ -30,6 +31,7 @@ DEFAULT_FRACTIONS = [
     0.90,
     1.00,
 ]
+DEFAULT_LINEAR_R2_THRESHOLD = 0.99
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +59,25 @@ def parse_args() -> argparse.Namespace:
         help="Coverage fraction used for forward prediction point. Default: 2.0.",
     )
     parser.add_argument(
+        "--linear-r2-threshold",
+        type=float,
+        default=DEFAULT_LINEAR_R2_THRESHOLD,
+        help=(
+            "If the linear (through-origin) fit reaches this R^2, use linear "
+            "extrapolation; otherwise fall back to the saturation curve. "
+            "Default: 0.99."
+        ),
+    )
+    parser.add_argument(
+        "--fastp-json",
+        default=None,
+        help=(
+            "fastp JSON report for total sequencing depth on the plot x-axis. "
+            "Default: auto-detect <work_path>/shard_fastq/fastp.json. If missing, "
+            "the x-axis falls back to raw coverage fraction."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         default=None,
         help="Output directory. Default: <work_path>/qc/saturation.",
@@ -79,6 +100,32 @@ def format_optional_float(value: float | None) -> str:
     if value is None or not math.isfinite(value):
         return "NA"
     return f"{value:.6f}"
+
+
+def discover_fastp_json(work_path: Path) -> Path | None:
+    candidate = work_path / "shard_fastq" / "fastp.json"
+    return candidate if candidate.is_file() else None
+
+
+def resolve_fastp_json(work_path: Path, fastp_json: str | None) -> Path | None:
+    if fastp_json:
+        path = Path(fastp_json)
+        if not path.is_file():
+            raise FileNotFoundError(f"fastp JSON not found: {path}")
+        return path
+    return discover_fastp_json(work_path)
+
+
+def load_fastp_sequencing_gbp(fastp_json: Path) -> float:
+    data = json.loads(fastp_json.read_text(encoding="utf-8"))
+    summary = data.get("summary", {})
+    for section in ("after_filtering", "before_filtering"):
+        total_bases = summary.get(section, {}).get("total_bases")
+        if total_bases is not None:
+            bases = int(total_bases)
+            if bases > 0:
+                return bases / 1e9
+    raise ValueError(f"no total_bases found in fastp report: {fastp_json}")
 
 
 def parse_per_spot_reads(path: Path) -> dict[str, float]:
@@ -132,8 +179,36 @@ def expected_unique(hist: dict[int, int], fraction: float) -> float:
     return total
 
 
+def median_and_iqr(values: list[float]) -> tuple[float, float, float]:
+    if not values:
+        raise ValueError("empty values for median_and_iqr")
+    median = float(statistics.median(values))
+    if len(values) == 1:
+        return median, 0.0, 0.0
+    q1, _, q3 = statistics.quantiles(values, n=4, method="inclusive")
+    return median, max(0.0, median - q1), max(0.0, q3 - median)
+
+
 def sat_func(fraction: float, a: float, b: float) -> float:
     return a * (1.0 - math.exp(-b * fraction))
+
+
+def fit_linear_through_origin(fractions: list[float], y_values: list[float]) -> float:
+    denominator = sum(f * f for f in fractions)
+    if denominator <= 0:
+        return 0.0
+    return sum(f * y for f, y in zip(fractions, y_values)) / denominator
+
+
+def r_squared(y_values: list[float], predictions: list[float]) -> float:
+    if not y_values:
+        return 0.0
+    mean_y = sum(y_values) / len(y_values)
+    sst = sum((y - mean_y) ** 2 for y in y_values)
+    sse = sum((y - p) ** 2 for y, p in zip(y_values, predictions))
+    if sst <= 0:
+        return 1.0 if sse <= 0 else 0.0
+    return 1.0 - sse / sst
 
 
 def fit_saturation_curve(fractions: list[float], y_values: list[float]) -> tuple[float, float]:
@@ -185,6 +260,7 @@ def write_summary_tsv(path: Path, row: dict[str, str]) -> None:
         "theoretical_max_median_unique_cpgs",
         "predicted_median_unique_cpgs_at_2x",
         "saturation_rate",
+        "extrapolation_model",
         "hq_spot_count",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -209,52 +285,80 @@ def write_plot(
     sample_id: str,
     fractions: list[float],
     median_uniques: list[float],
+    err_low: list[float],
+    err_high: list[float],
+    model: str,
     a: float,
     b: float,
+    slope: float,
     pred_fraction: float,
+    predicted: float | None,
     saturation_rate: float | None,
+    sequencing_gbp: float | None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     scale = 1e4
 
-    max_x = max(max(fractions), pred_fraction, 1.0)
-    fit_x = [max_x * index / 250.0 for index in range(251)]
-    fit_y = [sat_func(value, a, b) / scale for value in fit_x]
-    pred_y = sat_func(pred_fraction, a, b) / scale
-    max_y = a / scale
+    # When fastp depth is available the x-axis is sequencing depth in Gbp,
+    # otherwise fall back to the raw coverage fraction.
+    x_scale = sequencing_gbp if sequencing_gbp else 1.0
+    x_label = "Sequencing depth (Gbp)" if sequencing_gbp else "Coverage Fraction"
+
+    x_values = [fraction * x_scale for fraction in fractions]
+    max_fraction = max(max(fractions), pred_fraction, 1.0)
+    fit_fractions = [max_fraction * index / 250.0 for index in range(251)]
+    fit_x = [fraction * x_scale for fraction in fit_fractions]
+    if model == "linear":
+        fit_y = [slope * value / scale for value in fit_fractions]
+        fit_label = "Fitted line (linear)"
+    else:
+        fit_y = [sat_func(value, a, b) / scale for value in fit_fractions]
+        fit_label = "Fitted curve (saturation)"
+    pred_x = pred_fraction * x_scale
+    pred_y = (predicted if predicted is not None else 0.0) / scale
+    medians_scaled = [value / scale for value in median_uniques]
+    yerr = [
+        [value / scale for value in err_low],
+        [value / scale for value in err_high],
+    ]
 
     fig, ax = plt.subplots(figsize=(6.8, 4.8))
-    ax.plot(
-        fractions,
-        [value / scale for value in median_uniques],
-        "o-",
+    ax.errorbar(
+        x_values,
+        medians_scaled,
+        yerr=yerr,
+        fmt="o-",
         color="blue",
         linewidth=2,
         markersize=5,
-        label="Observed median",
+        capsize=4,
+        label="Observed median (IQR)",
     )
-    ax.plot(fit_x, fit_y, "r--", linewidth=2, label="Fitted curve")
+    ax.plot(fit_x, fit_y, "r--", linewidth=2, label=fit_label)
     ax.scatter(
-        [pred_fraction],
+        [pred_x],
         [pred_y],
         color="green",
         s=55,
         zorder=4,
         label=f"Prediction at {pred_fraction:g}x",
     )
-    ax.axhline(
-        max_y,
-        color="purple",
-        linestyle="--",
-        linewidth=1.8,
-        label="Max CpG Reads",
-    )
-    if saturation_rate is None:
-        sat_text = "NA"
-    else:
+    if model != "linear" and a > 0:
+        ax.axhline(
+            a / scale,
+            color="purple",
+            linestyle="--",
+            linewidth=1.8,
+            label="Max CpG Reads",
+        )
+    if saturation_rate is not None:
         sat_text = f"{saturation_rate:.2f}%"
+    elif model == "linear":
+        sat_text = "NA (linear, unsaturated)"
+    else:
+        sat_text = "NA"
     ax.set_title(f"Saturation analysis ({sample_id})\nSaturation rate: {sat_text}")
-    ax.set_xlabel("Coverage Fraction")
+    ax.set_xlabel(x_label)
     ax.set_ylabel("Median Unique CpGs per Spot (x10^4)")
     ax.grid(True, alpha=0.35)
     ax.legend(loc="lower right")
@@ -273,10 +377,23 @@ def main() -> int:
     plot_path = output_dir / "saturation_curve.png"
     summary_path = output_dir / "saturation_summary.tsv"
 
+    fastp_json_path = resolve_fastp_json(work_path, args.fastp_json)
+    sequencing_gbp: float | None = None
+    if fastp_json_path is not None:
+        sequencing_gbp = load_fastp_sequencing_gbp(fastp_json_path)
+    else:
+        print("[saturation] warning=fastp_json_not_found")
+
     print(f"[saturation] work_path={work_path}")
     print(f"[saturation] reads_table={read_counts_path}")
     print(f"[saturation] host_cov_count={len(host_cov_paths)}")
     print(f"[saturation] reads_threshold={args.reads_threshold}")
+    print(f"[saturation] linear_r2_threshold={args.linear_r2_threshold}")
+    print(f"[saturation] fastp_json={fastp_json_path}")
+    print(
+        "[saturation] sequencing_gbp="
+        + (f"{sequencing_gbp:.6f}" if sequencing_gbp is not None else "NA")
+    )
     print(f"[saturation] output_plot={plot_path}")
     print(f"[saturation] output_summary={summary_path}")
 
@@ -303,6 +420,7 @@ def main() -> int:
             "theoretical_max_median_unique_cpgs": "NA",
             "predicted_median_unique_cpgs_at_2x": "NA",
             "saturation_rate": "NA",
+            "extrapolation_model": "NA",
             "hq_spot_count": "0",
         }
         write_summary_tsv(summary_path, row)
@@ -320,12 +438,17 @@ def main() -> int:
 
     usable_fractions: list[float] = []
     median_uniques: list[float] = []
+    err_low: list[float] = []
+    err_high: list[float] = []
     for fraction in DEFAULT_FRACTIONS:
         values = per_fraction_values[fraction]
         if not values:
             continue
+        median, low, high = median_and_iqr(values)
         usable_fractions.append(fraction)
-        median_uniques.append(float(statistics.median(values)))
+        median_uniques.append(median)
+        err_low.append(low)
+        err_high.append(high)
 
     if not usable_fractions:
         print("[saturation] warning=no_coverage_values_for_hq_spots")
@@ -335,6 +458,7 @@ def main() -> int:
             "theoretical_max_median_unique_cpgs": "NA",
             "predicted_median_unique_cpgs_at_2x": "NA",
             "saturation_rate": "NA",
+            "extrapolation_model": "NA",
             "hq_spot_count": str(len(hq_spots)),
         }
         write_summary_tsv(summary_path, row)
@@ -342,23 +466,49 @@ def main() -> int:
         print("[saturation] done")
         return 0
 
-    a, b = fit_saturation_curve(usable_fractions, median_uniques)
     observed = median_uniques[-1]
-    theoretical = a if a > 0 else None
-    predicted_2x = sat_func(args.pred_fraction, a, b) if a > 0 else None
-    saturation_rate = None
-    if theoretical is not None and theoretical > 0:
-        saturation_rate = observed / theoretical * 100.0
+    a, b = fit_saturation_curve(usable_fractions, median_uniques)
+    slope = fit_linear_through_origin(usable_fractions, median_uniques)
+    linear_r2 = r_squared(median_uniques, [slope * f for f in usable_fractions])
+    exp_r2 = r_squared(median_uniques, [sat_func(f, a, b) for f in usable_fractions])
+
+    # Prefer the linear (through-origin) extrapolation when the observed curve
+    # is essentially linear (undersaturated): in that regime the exponential
+    # asymptote/saturation rate is unidentifiable and unreliable. Only when the
+    # linear fit is poor (clear curvature) do we trust the saturation curve.
+    use_linear = linear_r2 >= args.linear_r2_threshold
+    if use_linear:
+        model = "linear"
+        theoretical = None
+        predicted_2x = slope * args.pred_fraction
+        saturation_rate = None
+    else:
+        model = "saturation"
+        theoretical = a if a > 0 else None
+        predicted_2x = sat_func(args.pred_fraction, a, b) if a > 0 else None
+        saturation_rate = None
+        if theoretical is not None and theoretical > 0:
+            saturation_rate = observed / theoretical * 100.0
+
+    print(f"[saturation] linear_r2={linear_r2:.6f} exp_r2={exp_r2:.6f}")
+    print(f"[saturation] extrapolation_model={model}")
+    print(f"[saturation] saturation_rate={format_optional_float(saturation_rate)}")
 
     write_plot(
         path=plot_path,
         sample_id=sample_id,
         fractions=usable_fractions,
         median_uniques=median_uniques,
+        err_low=err_low,
+        err_high=err_high,
+        model=model,
         a=a,
         b=b,
+        slope=slope,
         pred_fraction=args.pred_fraction,
+        predicted=predicted_2x,
         saturation_rate=saturation_rate,
+        sequencing_gbp=sequencing_gbp,
     )
     row = {
         "sample_id": sample_id,
@@ -366,6 +516,7 @@ def main() -> int:
         "theoretical_max_median_unique_cpgs": format_optional_int(theoretical),
         "predicted_median_unique_cpgs_at_2x": format_optional_int(predicted_2x),
         "saturation_rate": format_optional_float(saturation_rate),
+        "extrapolation_model": model,
         "hq_spot_count": str(len(hq_spots)),
     }
     write_summary_tsv(summary_path, row)

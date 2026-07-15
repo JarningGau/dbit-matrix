@@ -185,11 +185,14 @@ Inputs:
 
 - `coverage/host/**/*.CG.cov`
 - `split_bams/per_spot_read_counts.tsv`
+- `shard_fastq/fastp.json` (optional; supplies total sequencing depth for the Gbp x-axis. If absent, the plot falls back to a raw coverage-fraction x-axis.)
 
 Outputs:
 
 - `qc/saturation/saturation_curve.png`
-- `qc/saturation/saturation_summary.tsv`
+- `qc/saturation/saturation_summary.tsv` (columns: `sample_id`, `observed_median_unique_cpgs`, `theoretical_max_median_unique_cpgs`, `predicted_median_unique_cpgs_at_2x`, `saturation_rate`, `extrapolation_model`, `hq_spot_count`)
+
+Extrapolation model: fits both a through-origin linear model and an exponential saturation curve. When the linear fit reaches `--linear-r2-threshold` (default `0.99`) the curve is treated as undersaturated, `extrapolation_model=linear` is reported, and `saturation_rate`/theoretical max are `NA`; otherwise the saturation curve is used.
 
 ### `summary`
 

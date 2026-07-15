@@ -40,3 +40,4 @@ envs/methscan/*
 !envs/methscan/pixi.lock
 
 explore/
+template/
