@@ -70,11 +70,26 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--mito-chromosomes",
+        default="chrM",
+        help=(
+            "Comma-separated host contigs treated as mitochondrial when "
+            "splitting host_valid_reads into mito vs nuclear. Default: chrM."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print resolved inputs/outputs and exit without writing files.",
     )
     return parser.parse_args()
+
+
+def parse_mito_chromosomes(chromosome_csv: str) -> frozenset[str]:
+    chromosomes = [item.strip() for item in chromosome_csv.split(",") if item.strip()]
+    if not chromosomes:
+        raise ValueError("--mito-chromosomes resolved to an empty list")
+    return frozenset(chromosomes)
 
 
 def parse_cov_stats(cov_path: Path) -> tuple[float, int] | None:
@@ -191,11 +206,16 @@ def collect_barcoded_reads(demux_dir: Path) -> int | None:
     return total
 
 
-def count_host_bam_metrics(host_bam_path: Path) -> tuple[int | None, int | None]:
+def count_host_bam_metrics(
+    host_bam_path: Path,
+    mito_chromosomes: frozenset[str],
+) -> tuple[int | None, int | None, int | None, int | None]:
     if not host_bam_path.exists():
-        return None, None
+        return None, None, None, None
     mapped_reads = 0
     valid_reads = 0
+    valid_reads_mito = 0
+    valid_reads_nuclear = 0
     try:
         with pysam.AlignmentFile(str(host_bam_path), "rb") as bam_handle:
             for read in bam_handle.fetch(until_eof=True):
@@ -213,11 +233,16 @@ def count_host_bam_metrics(host_bam_path: Path) -> tuple[int | None, int | None]
                     # NH tag may be absent; treat as unique in that case.
                     pass
                 mapped_reads += 1
-                if read.flag in VALID_FLAGS:
-                    valid_reads += 1
+                if read.flag not in VALID_FLAGS:
+                    continue
+                valid_reads += 1
+                if read.reference_name in mito_chromosomes:
+                    valid_reads_mito += 1
+                else:
+                    valid_reads_nuclear += 1
     except OSError:
-        return None, None
-    return mapped_reads, valid_reads
+        return None, None, None, None
+    return mapped_reads, valid_reads, valid_reads_mito, valid_reads_nuclear
 
 
 def count_mapped_reads(bam_path: Path) -> int | None:
@@ -355,6 +380,8 @@ def build_sample_summary_row(
     barcoded_reads: int | None,
     host_mapped_reads: int | None,
     host_valid_reads: int | None,
+    host_valid_reads_mito: int | None,
+    host_valid_reads_nuclear: int | None,
     spike_mapped_reads: dict[str, int | None],
 ) -> dict[str, str]:
     weighted_sum = 0.0
@@ -409,6 +436,8 @@ def build_sample_summary_row(
             spike_mapped_reads.get(spike_name)
         )
     row["host_valid_reads"] = format_optional_int(host_valid_reads)
+    row["host_valid_reads_mito"] = format_optional_int(host_valid_reads_mito)
+    row["host_valid_reads_nuclear"] = format_optional_int(host_valid_reads_nuclear)
     row["valid_reads_rate"] = format_percentage(host_valid_reads, raw_reads)
     return row
 
@@ -581,6 +610,7 @@ def main() -> int:
     per_spot_out = summary_dir / "per_spot_summary.tsv"
     sample_out = summary_dir / "sample_summary.tsv"
     heatmap_outputs = [summary_dir / spec["output_name"] for spec in HEATMAP_SPECS]
+    mito_chromosomes = parse_mito_chromosomes(args.mito_chromosomes)
 
     requested_spikes = [item.strip() for item in args.spike_in_name if item.strip()]
     if requested_spikes:
@@ -607,6 +637,7 @@ def main() -> int:
     print(f"[summary] saturation_summary={saturation_summary_path}")
     print(f"[summary] host_bam={host_bam_path}")
     print(f"[summary] host_mito_cov={host_mito_cov_path}")
+    print(f"[summary] mito_chromosomes={','.join(sorted(mito_chromosomes))}")
     print(f"[summary] spike_names={','.join(spike_names) if spike_names else 'none'}")
     for spike_name, spike_cov_path in spike_cov_paths.items():
         print(f"[summary] spike_cov[{spike_name}]={spike_cov_path}")
@@ -640,7 +671,12 @@ def main() -> int:
     if raw_reads is None:
         raw_reads = parse_fastp_raw_reads(fastp_json_legacy_path)
     barcoded_reads = collect_barcoded_reads(demux_dir)
-    host_mapped_reads, host_valid_reads = count_host_bam_metrics(host_bam_path)
+    (
+        host_mapped_reads,
+        host_valid_reads,
+        host_valid_reads_mito,
+        host_valid_reads_nuclear,
+    ) = count_host_bam_metrics(host_bam_path, mito_chromosomes)
     spike_mapped_reads = {
         spike_name: count_mapped_reads(spike_bam_paths[spike_name])
         for spike_name in spike_names
@@ -656,6 +692,8 @@ def main() -> int:
         barcoded_reads,
         host_mapped_reads,
         host_valid_reads,
+        host_valid_reads_mito,
+        host_valid_reads_nuclear,
         spike_mapped_reads,
     )
     sample_fields = list(sample_row.keys())

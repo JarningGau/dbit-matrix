@@ -228,6 +228,7 @@ Contract:
 - `sample_summary.tsv` is one row per sample
 - missing upstream inputs should preserve fixed columns and write `NA`
 - `per_spot_summary.tsv` keeps fixed columns for `X_index`, `Y_index`, `spot`, `mean_methylation`, `cpg_site_count`, and `reads`
+- `sample_summary.tsv` includes `host_valid_reads`, plus the mito/nuclear split `host_valid_reads_mito` and `host_valid_reads_nuclear` (same valid-read filters; mito contigs from `--mito-chromosomes`, default `chrM`; nuclear is the complement). When BAM metrics succeed: `host_valid_reads_mito + host_valid_reads_nuclear == host_valid_reads`
 - TAPS v2 (`scripts-v2/summary.py`) additionally surfaces methylated-linker conversion QC columns in `sample_summary.tsv`: `spike_scored_reads`, `scored_fully_converted`, `spike_mean_conversion_rate`, `spike_fraction_all_T`, `spike_conversion_filtered_rejects`
 
 ## Optional TAPS And EMSeq Stages

@@ -997,6 +997,8 @@ def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
         str(script_path),
         "--work-path",
         str(sample_work),
+        "--mito-chromosomes",
+        args.call_mito_chromosomes,
     ]
     for spike_name in parse_spike_names(args.spike_in_index):
         command.extend(["--spike-in-name", spike_name])
@@ -3015,6 +3017,7 @@ def main() -> int:
         command_args = argparse.Namespace(
             summary_script=settings["summary_script"],
             spike_in_index=settings["spike_in_index"],
+            call_mito_chromosomes=settings["call_mito_chromosomes"],
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":
