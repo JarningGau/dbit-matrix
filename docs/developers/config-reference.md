@@ -56,6 +56,7 @@ Calling fields:
 
 - `call_mode`
 - `call_context_mode`
+- `call_chromosomes` (nuclear host chromosome whitelist; also reused by host `mbias`)
 - `call_trimming` (per-target r1/r2 left/right trimming for host and spike-in)
 - `call_r1_left_trimming` (legacy; global fallback default, see below)
 - `call_r1_right_trimming` (legacy; global fallback default)
@@ -98,6 +99,7 @@ Core fields:
 - `biscuit_reference`
 - `split_barcodes`
 - `call_reference_file`
+- `call_chromosomes` (nuclear host chromosome whitelist; required for host `mbias`)
 - `call_jobs`
 
 Common performance fields:
@@ -130,6 +132,7 @@ Notes:
 
 - EMSeq trimming uses `call_left_trimming` and `call_right_trimming`
 - EMSeq does not split trimming by R1 and R2
+- Host `mbias` reuses `call_chromosomes` and excludes mitochondrial contigs such as `chrM`
 
 ## RNA Fields
 

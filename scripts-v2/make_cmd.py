@@ -855,6 +855,7 @@ def build_mbias_command(
     ]
     if mode in ("all", "host"):
         command.extend(["--reference-file", args.call_reference_file])
+        command.extend(["--chromosomes", args.call_chromosomes])
     if mode in ("all", "spike"):
         for item in args.spike_in_index:
             command.extend(["--spike-reference", item])
@@ -1910,6 +1911,10 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["mbias_mode"] = settings["mbias_mode"] or "spike"
     if settings["mbias_mode"] not in {"all", "host", "spike"}:
         raise ValueError("mbias_mode must be one of: all, host, spike")
+    if settings["mbias_mode"] in {"all", "host"} and not settings.get("call_chromosomes"):
+        raise ValueError(
+            "mbias stage requires call_chromosomes when mbias_mode is all or host"
+        )
     settings["mbias_max_cycle"] = (
         int(settings["mbias_max_cycle"]) if settings["mbias_max_cycle"] is not None else 150
     )
@@ -2828,6 +2833,7 @@ def main() -> int:
             mbias_min_mapping_quality=settings["mbias_min_mapping_quality"],
             mbias_script=settings["mbias_script"],
             call_reference_file=settings["call_reference_file"],
+            call_chromosomes=settings["call_chromosomes"],
             spike_in_index=settings["spike_in_index"],
         )
         if settings["runner"] == "local":

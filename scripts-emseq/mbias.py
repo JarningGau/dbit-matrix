@@ -113,6 +113,14 @@ def parse_args() -> argparse.Namespace:
         help="Minimum mapping quality for counting. Default: 1.",
     )
     parser.add_argument(
+        "--chromosomes",
+        default=None,
+        help=(
+            "Comma-separated host chromosome whitelist for counting "
+            "(for example: chr1,chr2,chrX). Required in host/all mode."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         default=None,
         help="Output directory. Default: <work_path>/qc/mbias.",
@@ -167,6 +175,13 @@ def parse_spike_references(items: list[str]) -> dict[str, str]:
             )
         parsed[name.strip()] = reference_path.strip()
     return parsed
+
+
+def parse_chromosome_csv(chromosome_csv: str) -> set[str]:
+    chromosomes = {item.strip() for item in chromosome_csv.split(",") if item.strip()}
+    if not chromosomes:
+        raise ValueError("chromosome list is empty after parsing")
+    return chromosomes
 
 
 TOP_FLAGS = {99, 147}
@@ -235,6 +250,7 @@ def count_mbias_rows(
     reference_file: str,
     max_cycle: int,
     min_mapping_quality: int,
+    allowed_chromosomes: set[str] | None = None,
     right_align_r1: bool = False,
 ) -> list[dict[str, object]]:
     counts: dict[tuple[str, int], list[int]] = defaultdict(lambda: [0, 0])
@@ -256,6 +272,11 @@ def count_mbias_rows(
             if not record.is_read1 and not record.is_read2:
                 continue
             if record.reference_name is None:
+                continue
+            if (
+                allowed_chromosomes is not None
+                and record.reference_name not in allowed_chromosomes
+            ):
                 continue
             read_seq = record.query_sequence
             if not read_seq:
@@ -383,6 +404,8 @@ def write_mbias_png(
 def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -> None:
     if not args.reference_file:
         raise ValueError("host mode requires --reference-file")
+    if not args.chromosomes:
+        raise ValueError("host mode requires --chromosomes")
     pooled_host = work_path / "pooled" / "pooled.byCB.bam"
     if not pooled_host.exists():
         raise ValueError(f"missing host pooled BAM: {pooled_host}")
@@ -417,6 +440,7 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
                 reference_file=args.reference_file,
                 max_cycle=args.max_cycle,
                 min_mapping_quality=args.min_mapping_quality,
+                allowed_chromosomes=parse_chromosome_csv(args.chromosomes),
                 right_align_r1=True,
             )
         if not host_tsv.exists() and not args.dry_run:
@@ -499,6 +523,8 @@ def main() -> int:
     print(f"[emseq.mbias] min_mapping_quality={args.min_mapping_quality}")
     if args.reference_file:
         print(f"[emseq.mbias] host_reference={args.reference_file}")
+    if args.chromosomes:
+        print(f"[emseq.mbias] host_chromosomes={args.chromosomes}")
     if args.spike_reference:
         print(f"[emseq.mbias] spike_reference_count={len(args.spike_reference)}")
     if args.dry_run:

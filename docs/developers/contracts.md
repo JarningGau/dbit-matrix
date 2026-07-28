@@ -142,6 +142,11 @@ Outputs:
 - `qc/mbias/<spike_name>.mbias.tsv`
 - `qc/mbias/<spike_name>.mbias.png`
 
+Host counting note:
+
+- Host M-bias CG counts use the nuclear chromosome whitelist from `call_chromosomes`
+- Mitochondrial contigs such as `chrM` are excluded from `host.mbias.tsv`
+
 Workflow-specific note:
 
 - EMSeq uses `scripts-emseq/mbias.py`

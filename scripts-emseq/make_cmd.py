@@ -273,6 +273,13 @@ def parse_args() -> argparse.Namespace:
         help="Host reference FASTA for EMSeq call stage (biscuit pileup/mergecg).",
     )
     parser.add_argument(
+        "--call-chromosomes",
+        help=(
+            "Comma-separated host nuclear chromosomes for host mbias counting "
+            "(for example: chr1,chr2,chrX). Required when mbias_mode is all or host."
+        ),
+    )
+    parser.add_argument(
         "--call-jobs",
         type=int,
         help="Maximum per-stage pileup jobs for EMSeq call. Default: 8.",
@@ -748,6 +755,7 @@ def build_mbias_command(
     ]
     if mode in ("all", "host"):
         command.extend(["--reference-file", args.call_reference_file])
+        command.extend(["--chromosomes", args.call_chromosomes])
     if mode in ("all", "spike"):
         for item in args.spike_in_index:
             command.extend(["--spike-reference", item])
@@ -1241,6 +1249,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_reference_file,
             cfg.get("call_reference_file", cfg.get("biscuit_reference")),
         ),
+        "call_chromosomes": pick(args.call_chromosomes, cfg.get("call_chromosomes")),
         "call_jobs": pick(args.call_jobs, cfg.get("call_jobs")),
         "call_mode": pick(args.call_mode, cfg.get("call_mode")),
         "call_host_threads": pick(
@@ -1721,6 +1730,10 @@ def validate_mbias_settings(settings: dict) -> None:
     if mode in ("all", "host") and not settings.get("call_reference_file"):
         raise ValueError(
             "mbias stage requires call_reference_file when mbias_mode is all or host"
+        )
+    if mode in ("all", "host") and not settings.get("call_chromosomes"):
+        raise ValueError(
+            "mbias stage requires call_chromosomes when mbias_mode is all or host"
         )
     if mode in ("all", "spike") and not parse_spike_names(settings["spike_in_index"]):
         raise ValueError(
@@ -2474,6 +2487,7 @@ def main() -> int:
             mbias_min_mapping_quality=settings["mbias_min_mapping_quality"],
             mbias_script=settings["mbias_script"],
             call_reference_file=settings["call_reference_file"],
+            call_chromosomes=settings["call_chromosomes"],
             spike_in_index=settings["spike_in_index"],
         )
 
