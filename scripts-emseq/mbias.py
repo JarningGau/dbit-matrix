@@ -188,6 +188,8 @@ TOP_FLAGS = {99, 147}
 BOT_FLAGS = {83, 163}
 TARGET_FLAGS = TOP_FLAGS | BOT_FLAGS
 
+MIN_COVERAGE_FOR_CYCLE = 500
+
 
 def resolve_cycle(
     record: pysam.AlignedSegment,
@@ -319,6 +321,8 @@ def count_mbias_rows(
     rows: list[dict[str, object]] = []
     for (read_label, cycle), (methylated, unmethylated) in sorted(counts.items()):
         coverage = methylated + unmethylated
+        if coverage <= MIN_COVERAGE_FOR_CYCLE:
+            continue
         methylation_rate = (methylated / coverage) if coverage > 0 else 0.0
         rows.append(
             {

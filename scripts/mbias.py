@@ -172,6 +172,8 @@ def parse_chromosome_csv(chromosome_csv: str) -> set[str]:
 
 TARGET_FLAGS = {99, 147, 83, 163}
 
+MIN_COVERAGE_FOR_CYCLE = 500
+
 
 def resolve_cycle(
     record: pysam.AlignedSegment,
@@ -261,6 +263,8 @@ def count_mbias_rows(
     rows: list[dict[str, object]] = []
     for (read_label, cycle), (methylated, unmethylated) in sorted(counts.items()):
         coverage = methylated + unmethylated
+        if coverage <= MIN_COVERAGE_FOR_CYCLE:
+            continue
         methylation_rate = (methylated / coverage) if coverage > 0 else 0.0
         rows.append(
             {

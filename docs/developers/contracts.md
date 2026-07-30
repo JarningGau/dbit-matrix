@@ -146,6 +146,7 @@ Host counting note:
 
 - Host M-bias CG counts use the nuclear chromosome whitelist from `call_chromosomes`
 - Mitochondrial contigs such as `chrM` are excluded from `host.mbias.tsv`
+- Only cycles with `coverage > 500` are included in TSV output and plots
 
 Workflow-specific note:
 

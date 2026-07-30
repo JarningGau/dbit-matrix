@@ -171,6 +171,7 @@ EMSeq 独立入口主流程一致；`mbias` 实现为 `scripts-emseq/mbias.py`�
 - `call` 的 `host_mito` 优先复用 `qc/mbias/host.subsampled.sorted.bam`
 - EMSeq：`scripts-emseq/mbias.py` 参考 asTair TOP/BOT 方式，仅统计参考 `CG` 位点；TOP (`99/147`) 以 `C/T` 判甲基化，BOT (`83/163`) 以 `G/A` 判甲基化
 - 仅输出 QC，不自动修改 trimming 或 calling 参数
+- 输出的 cycle 仅包含 `coverage > 500` 的点，以保证结果稳定性
 
 ## 8. `call`
 
