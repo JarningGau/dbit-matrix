@@ -49,8 +49,6 @@ Common performance fields:
 - `bwa_threads`
 - `samtools_threads`
 - `host_sort_mem`
-- `split_barcodes`
-- `split_smoke`
 
 Calling fields:
 
@@ -66,6 +64,8 @@ Calling fields:
 - `call_jobs`
 - `call_min_mapping_quality`
 - `call_max_depth`
+- `split_barcodes` (CB whitelist for `call`; not a split-stage input)
+- `call_smoke`
 
 Notes:
 
@@ -94,14 +94,15 @@ Notes:
 - `call_caller_script` selects the TAPS caller ([`scripts/methy_caller.py`](../../scripts/methy_caller.py)); CG and CH share one pass
 - `call_jobs` sets interval workers inside each chromosome (default `8`)
 - `call_min_mapping_quality` defaults to `10`; `call_max_depth` defaults to `50000`
-- host `call` requires `split_barcodes` (same path as the `split` stage)
+- host `call` requires `split_barcodes` as the CB whitelist (defaults to `barcode1_whitelist` when omitted)
+- `call_smoke` writes host `.cov` only for the 16 spots with highest `reads` (see [contracts](contracts.md#call))
 
 ## EMSeq Fields
 
 Core fields:
 
 - `biscuit_reference`
-- `split_barcodes`
+- `split_barcodes` (CB whitelist for `call`; not a split-stage input)
 - `call_reference_file`
 - `call_chromosomes` (nuclear host chromosome whitelist; required for host `mbias`)
 - `call_jobs`
@@ -118,10 +119,16 @@ Common performance fields:
 Calling fields:
 
 - `call_mode`
-- `call_left_trimming`
-- `call_right_trimming`
-- `call_host_threads`
-- `call_spike_threads`
+- `call_context_mode`
+- `call_trimming` (same nested host/spike r1/r2 keys as TAPS)
+- `call_r1_left_trimming` (legacy; global fallback default)
+- `call_r1_right_trimming` (legacy; global fallback default)
+- `call_r2_left_trimming` (legacy; global fallback default)
+- `call_r2_right_trimming` (legacy; global fallback default)
+- `call_caller_script` (default: `scripts-emseq/methy_caller.py`)
+- `call_min_mapping_quality`
+- `call_max_depth`
+- `call_smoke`
 - `call_host_subsample_fraction`
 - `call_host_subsample_seed`
 
@@ -134,9 +141,12 @@ QC fields:
 
 Notes:
 
-- EMSeq trimming uses `call_left_trimming` and `call_right_trimming`
-- EMSeq does not split trimming by R1 and R2
+- EMSeq `align` still uses biscuit (`biscuit_reference`, `biscuit_threads`, `biscuit_batch_size`)
+- EMSeq `call` is pooled pysam, not biscuit pileup; there are no `call_left_trimming` / `call_right_trimming` / `call_host_threads` / `call_spike_threads` keys
+- EMSeq trimming uses `call_trimming` like TAPS (see [TAPS Fields](#taps-fields))
 - Host `mbias` reuses `call_chromosomes` and excludes mitochondrial contigs such as `chrM`
+- `split_barcodes` is the CB whitelist for `call`, not a split-stage input
+- `call_smoke` is the same host smoke switch as TAPS (see [contracts](contracts.md#call))
 
 ## RNA Fields
 

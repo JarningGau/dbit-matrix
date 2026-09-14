@@ -20,7 +20,7 @@ Stage implementations stay in thin single-step scripts:
 
 TAPS and EMSeq mainline:
 
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+`fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 
 RNA current scope:
 
@@ -48,7 +48,6 @@ Frequently used subdirectories:
 - `demux/`
 - `align_shards/`
 - `pooled/`
-- `split_bams/`
 - `coverage/`
 - `qc/`
 - `summary/`
@@ -57,4 +56,5 @@ Frequently used subdirectories:
 ## Workflow-Specific Notes
 
 - EMSeq `mbias` is implemented by `scripts-emseq/mbias.py` and does not use the same chemistry logic as TAPS `scripts/mbias.py`
+- EMSeq `call` is pooled pysam (`scripts-emseq/methy_caller.py` / `scripts-emseq/call.py`); biscuit remains an align-stage tool
 - RNA currently produces STARsolo matrix outputs rather than methylation coverage outputs

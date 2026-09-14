@@ -11,11 +11,13 @@ Use these rules when working in this repository.
 
 ## Current Workflow Status
 
-- EMSeq mainline is fixed:
-  `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
-- EMSeq `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
+- TAPS, TAPS v2, and EMSeq share this mainline:
+  `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+- `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
+- `split` is not in `--stage all` or `STAGE_CHOICES`. `scripts/split_bams.py` exists but is not a workflow stage.
 - `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
 - `scripts-emseq/mbias.py` is the EMSeq `mbias` implementation and is different from TAPS `scripts/mbias.py`.
+- EMSeq `call` is pooled pysam (`scripts-emseq/methy_caller.py` / `scripts-emseq/call.py`), not biscuit pileup.
 
 ## Engineering Rules
 
@@ -58,7 +60,6 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
   - `demux_extract_bc`: one sbatch per chunk
   - `align`: one sbatch per chunk; run spike-in before host inside the script
   - `pool`: separate host and spike-in jobs
-  - `split`: `split_bams` and `sort` must be separate sbatch jobs with dependencies
   - `mbias`: split host and spike jobs; use `slurm.mbias.host` and `slurm.mbias.spike`
   - `call`: split host and spike jobs; use `slurm.call.host` and `slurm.call.spike`
   - `saturation`: one sbatch; use `slurm.saturation`
@@ -76,10 +77,10 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
   - spike-in: `<chunk>.<spike_name>.bam`
 - `spike_in_index` must support either a JSON object or a `NAME=INDEX` list.
 - `pool` writes:
-  - host: `pooled/pooled.byCB.bam`
+  - host: `pooled/pooled.host.sorted.bam` (coordinate-sorted, indexed; no `-t CB`)
   - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
-- `split` reads `pooled/pooled.byCB.bam` and parses spots from `CB:Z:<x>+<y>`.
-- `split --smoke` writes at most 16 non-empty spot BAMs.
+- `call` writes `coverage/per_spot_read_counts.tsv`. Smoke is `call_smoke` (top 16 spots by reads).
+- `split_barcodes` is the CB whitelist for `call`, not a split-stage input.
 
 ## Documentation Rules
 

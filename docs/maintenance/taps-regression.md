@@ -27,7 +27,8 @@ pixi run python scripts/make_cmd.py \
 ## Expected Results
 
 - commands expand without missing parameters
-- stage order remains `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- stage order remains `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+- after `pool`, the next mainline stages are `pool -> mbias -> call` (`split` is not a stage)
 - `--stage all` covers the fixed mainline only
 - `methscan_*` stages are optional, explicit, and not part of `--stage all` (see [Methscan optional stages](../developers/contracts.md#methscan-optional-stages-methscan_) in contracts)
 - no path resolution errors appear

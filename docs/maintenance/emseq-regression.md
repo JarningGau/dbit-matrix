@@ -25,7 +25,8 @@ pixi run python scripts-emseq/make_cmd.py \
 ## Expected Results
 
 - commands expand without missing parameters
-- stage order remains `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+- stage order remains `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+- after `pool`, the next mainline stages are `pool -> mbias -> call` (`split` is not a stage)
 - `--stage all` covers the fixed mainline only
 - `methscan_*` stages are optional, explicit, and not part of `--stage all` (see [Methscan optional stages](../developers/contracts.md#methscan-optional-stages-methscan_) in contracts)
 - no path resolution errors appear
@@ -86,3 +87,7 @@ If a stage implementation changed, validate that stage directly and compare outp
 Methscan stage behavior and paths under `work/<sample>/methscan/` (inputs from `coverage/host/`) are specified in the same contracts (Methscan optional stages).
 
 For command-generation behavior changes, also check [docs/developers/runner-reference.md](../developers/runner-reference.md).
+
+## Biscuit compare
+
+Do not overwrite the frozen biscuit baseline at `work/test-DNAme-EMSeq`. After `pool -> mbias -> call`, compare new EMSeq `.CG.cov` files with [`scripts-emseq/compare_cov_to_biscuit.py`](../../scripts-emseq/compare_cov_to_biscuit.py).

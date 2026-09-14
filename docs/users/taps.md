@@ -6,7 +6,7 @@ Use this guide for the TAPS workflow.
 
 The main pipeline is:
 
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+`fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 
 ## Before You Start
 
@@ -79,7 +79,6 @@ More output guidance: [Results guide](results.md)
 - missing whitelist paths
 - missing reference paths
 - skipping the dry-run
-- running host `call` without an indexed `pooled/pooled.byCB.bam` or
-  `split_bams/per_spot_read_counts.tsv`
+- running host `call` without an indexed `pooled/pooled.host.sorted.bam`
 
 Developer details such as stage contracts and full config fields are documented separately.

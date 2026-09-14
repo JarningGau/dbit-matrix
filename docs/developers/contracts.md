@@ -6,7 +6,7 @@ This document is the canonical stage input/output reference for developers.
 
 Main stage order:
 
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+`fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 
 ### `fastp_split`
 
@@ -88,41 +88,19 @@ Inputs:
 
 Outputs:
 
-- host: `pooled/pooled.byCB.bam`
+- host: `pooled/pooled.host.sorted.bam`
+- host index: `pooled/pooled.host.sorted.bam.bai` (or `.csi`)
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
 - spike-in index: `pooled/pooled.<spike_name>.sorted.bam.bai`
 
-### `split`
-
-Purpose: split the pooled host BAM into per-spot BAMs.
-
-Input:
-
-- `pooled/pooled.byCB.bam`
-
-Outputs:
-
-- `split_bams/<X_index>/<X_index>_<Y_index>.bam`
-- `split_bams/per_spot_read_counts.tsv`
-
 Contract:
 
-- spot parsing uses `CB:Z:<x>+<y>`
-- smoke mode writes at most 16 non-empty spot BAMs
-- in Slurm mode, `split_bams` and `sort` are separate jobs
+- host is coordinate-sorted (no `-t CB`) and indexed
+- spike-in sort and index are unchanged
 
-### `split` sort substep
+### `split` (legacy script, not a workflow stage)
 
-Purpose: sort and index per-spot BAMs.
-
-Outputs:
-
-- `split_bams/**/*.sorted.bam`
-- `split_bams/**/*.sorted.bam.bai`
-
-Contract:
-
-- this is a substep of `split`, not a top-level stage
+`scripts/split_bams.py` remains in the repository. It is not in `--stage all` and is not a `STAGE_CHOICES` value. Per-spot BAM trees are not a mainline output.
 
 ### `mbias`
 
@@ -130,7 +108,7 @@ Purpose: write M-bias QC outputs and prepare a host subsampled BAM when needed.
 
 Inputs:
 
-- host: `pooled/pooled.byCB.bam`
+- host: `pooled/pooled.host.sorted.bam`
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
 
 Outputs:
@@ -159,13 +137,13 @@ Purpose: generate host per-spot, host mitochondrial aggregate, and spike-in meth
 
 Inputs:
 
-- host: `pooled/pooled.byCB.bam` (indexed) plus `split_barcodes` and
-  `split_bams/per_spot_read_counts.tsv`
+- host: `pooled/pooled.host.sorted.bam` (indexed) plus `split_barcodes`
 - host mito fallback source: `qc/mbias/host.subsampled.sorted.bam`
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
 
 Outputs:
 
+- `coverage/per_spot_read_counts.tsv`
 - `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
 - `coverage/host/<X_index>/<X_index>_<Y_index>.CH.cov` (optional)
 - `coverage/host_mito.CG.cov`
@@ -175,10 +153,12 @@ Outputs:
 
 Contract:
 
-- host calling does not read `split_bams/**/*.sorted.bam`
+- `split_barcodes` is the CB whitelist for `call`, not a split-stage input
+- host calling does not read per-spot BAMs
 - host outputs are per-spot
 - spot filenames still `{X_index}/{X_index}_{Y_index}`
-- smoke calling uses the split roster
+- `call` writes `coverage/per_spot_read_counts.tsv` from a full BAM scan of whitelist-assigned reads
+- smoke is `call_smoke`: write `.cov` only for the 16 spots with highest `reads` (ties broken by `spot` ascending)
 - `host_mito.CG.cov` is a single aggregate output
 - `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only
@@ -186,6 +166,9 @@ Contract:
 - `context` is one of `CA`, `CC`, or `CT`
 - `strand` is `+` or `-` and indicates which genomic strand contains the target cytosine
 - CH outputs are controlled by `call_context_mode`
+- EMSeq host/mito/spike calling uses pooled pysam (`scripts-emseq/methy_caller.py` / `scripts-emseq/call.py`), not biscuit pileup or VCF intermediates
+- EMSeq `.CG.cov` positions are pysam 0-based; `pct` has two decimal places
+- EMSeq trimming uses `call_trimming` like TAPS (see [config reference](config-reference.md#emseq-fields))
 
 ### `saturation`
 
@@ -194,7 +177,7 @@ Purpose: estimate CpG saturation from host coverage and per-spot read counts.
 Inputs:
 
 - `coverage/host/**/*.CG.cov`
-- `split_bams/per_spot_read_counts.tsv`
+- `coverage/per_spot_read_counts.tsv`
 - `shard_fastq/fastp.json` (optional; supplies total sequencing depth for the Gbp x-axis. If absent, the plot falls back to a raw coverage-fraction x-axis.)
 
 Outputs:
@@ -213,7 +196,7 @@ Inputs include:
 - host coverage
 - host mitochondrial coverage
 - spike-in coverage
-- split read counts
+- per-spot read counts (`coverage/per_spot_read_counts.tsv`, written by `call`)
 - fastp statistics
 - demux statistics
 - pooled BAMs
@@ -344,7 +327,9 @@ Purpose: run `prepare`, `filter`, `profile`, `smooth`, `scan`, and `matrix` **in
 
 - `--stage all` covers only the fixed mainline
 - `aggregate` and the methscan optional stages are not part of `all`
-- `mbias` and `call` have EMSeq-specific chemistry and trimming behavior, but the output contracts above remain stable
+- `mbias` has EMSeq-specific chemistry (`scripts-emseq/mbias.py`)
+- `call` polarity is inverted relative to TAPS (retained base = methylated); `.cov` paths still follow the contract above
+- EMSeq uses `call_trimming` like TAPS; biscuit remains an align-stage tool, not a call-stage tool
 
 ## RNA Current Contracts
 

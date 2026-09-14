@@ -17,7 +17,7 @@ pixi run python <entry-script> \
 ## `all`
 
 - `TAPS` and `EMSeq` expand `all` to:
-  `fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+  `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 - `RNA` expands `all` to:
   `demux_extract_bc -> align`
 - `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are explicit and are not part of `all`
@@ -36,14 +36,7 @@ pixi run python <entry-script> \
 - stage dependencies use `afterok`
 - nested `sbatch` on compute nodes is not part of the model
 
-## Required Split Layout
-
-In Slurm mode, `split` is always two jobs:
-
-- `split_bams`
-- `sort`
-
-The sort job must depend on the split job.
+In Slurm mode, `mbias` and `call` remain separate host and spike jobs. See [config reference](config-reference.md#slurm-structure).
 
 ## Advanced Stages
 

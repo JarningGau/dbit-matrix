@@ -6,7 +6,7 @@ Use this guide for the EMSeq workflow.
 
 The main pipeline is:
 
-`fastp_split -> demux_extract_bc -> align -> pool -> split -> mbias -> call -> saturation -> summary`
+`fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 
 `--stage all` runs the mainline only.
 
@@ -17,7 +17,7 @@ Prepare:
 - `R1` and `R2` FASTQ files
 - `barcode1_whitelist`
 - `barcode2_whitelist`
-- `split_barcodes`
+- `split_barcodes` (CB whitelist for `call`)
 - `biscuit_reference`
 - `call_reference_file`
 - `call_jobs`
@@ -45,7 +45,7 @@ Copy and edit the example workflow JSON. At minimum, set:
 - `barcode2_whitelist`
 - `linker_bc`
 - `insert_left`
-- `split_barcodes`
+- `split_barcodes` (CB whitelist for `call`)
 - `biscuit_reference`
 - `call_reference_file`
 - `call_jobs`
@@ -85,8 +85,9 @@ More output guidance: [Results guide](results.md)
 ## Common Mistakes
 
 - using `scripts/make_cmd.py` instead of `scripts-emseq/make_cmd.py`
-- missing `split_barcodes`
+- missing `split_barcodes` (the CB whitelist for `call`)
 - missing `call_reference_file` or `call_jobs`
 - skipping the dry-run
+- running host `call` without an indexed `pooled/pooled.host.sorted.bam`
 
 Developer details such as chemistry-specific behavior and stage contracts are documented separately.
