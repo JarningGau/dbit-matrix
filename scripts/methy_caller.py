@@ -1,420 +1,192 @@
 #!/usr/bin/env python3
-"""Methylation caller for DBiT TAPS data."""
+"""TAPS methylation caller (pooled host or aggregate spike/mito)."""
 
 from __future__ import annotations
 
 import argparse
+import multiprocessing
+import os
+import shutil
+import sys
+import tempfile
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import BinaryIO, Dict, List, Optional, Set, Tuple
 
 import pysam
 
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Methylation caller for TAPS-seq data")
+from scripts.split_bams import parse_cb_value, read_barcodes
+
+TOP_FLAGS: Set[int] = {99, 147}
+BOT_FLAGS: Set[int] = {83, 163}
+PAIRED_FLAGS: Set[int] = TOP_FLAGS | BOT_FLAGS
+CH_FORWARD_CONTEXTS: Set[str] = {"CA", "CC", "CT"}
+CH_REVERSE_MAP: Dict[str, str] = {"T": "CA", "G": "CC", "A": "CT"}
+CH_REVERSE_NEIGHBOR: Dict[str, str] = {"CA": "T", "CC": "G", "CT": "A"}
+
+WORKER_CHROMOSOME_SEQUENCE: Optional[str] = None
+BarcodeMap = Dict[str, int]
+CgCounts = Dict[str, Dict[int, List[int]]]
+ChCounts = Dict[str, Dict[int, List[object]]]
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="TAPS methylation caller")
+    parser.add_argument("--mode", choices=("host", "aggregate"), required=True)
+    parser.add_argument("--bam", required=True)
+    parser.add_argument("--reference", required=True)
+    parser.add_argument("-c", "--chromosomes", required=True)
     parser.add_argument(
-        "-f",
-        "--reference-file",
-        required=True,
-        help="Path to reference FASTA file.",
+        "--context-mode", choices=("cg", "ch", "both"), default="cg"
     )
+    parser.add_argument("--min-base-quality", type=int, default=30)
+    parser.add_argument("--min-mapping-quality", type=int, default=10)
+    parser.add_argument("--max-depth", type=int, default=50_000)
+    parser.add_argument("--batch-size", type=int, default=10_000_000)
+    parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--sample-size", type=int, default=None)
+    parser.add_argument("--r1-left-trimming", type=int, default=0)
+    parser.add_argument("--r1-right-trimming", type=int, default=0)
+    parser.add_argument("--r2-left-trimming", type=int, default=0)
+    parser.add_argument("--r2-right-trimming", type=int, default=0)
+    parser.add_argument("--cb-tag", default="CB")
+    parser.add_argument("--barcodes", help="Whitelist TSV for host mode.")
     parser.add_argument(
-        "-i",
-        "--bam-file",
-        required=True,
-        help="Path to aligned BAM file.",
+        "--spot-roster",
+        help="split_bams/per_spot_read_counts.tsv for host mode.",
     )
-    parser.add_argument(
-        "-c",
-        "--chromosome",
-        required=True,
-        help=(
-            "Chromosome names to analyze. "
-            "For multiple chromosomes, use comma-separated values."
-        ),
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        required=True,
-        help="Output path for headerless Bismark-like .cov file.",
-    )
-    parser.add_argument(
-        "--min-base-quality",
-        type=int,
-        default=30,
-        help="Minimum base quality score. Default: 30.",
-    )
-    parser.add_argument(
-        "--min-mapping-quality",
-        type=int,
-        default=1,
-        help="Minimum mapping quality score. Default: 1.",
-    )
-    parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=None,
-        help="Only process first N CpG sites per chromosome.",
-    )
-    parser.add_argument(
-        "--max-depth",
-        type=int,
-        default=250,
-        help="Maximum read depth for pileup. Default: 250.",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=10_000_000,
-        help="Batch size in bp for grouping CpG positions. Default: 10,000,000.",
-    )
-    parser.add_argument(
-        "--r1-left-trimming",
-        type=int,
-        default=0,
-        help="R1 left-end trimming in read coordinates. Default: 0.",
-    )
-    parser.add_argument(
-        "--r1-right-trimming",
-        type=int,
-        default=0,
-        help="R1 right-end trimming in read coordinates. Default: 0.",
-    )
-    parser.add_argument(
-        "--r2-left-trimming",
-        type=int,
-        default=0,
-        help="R2 left-end trimming in read coordinates. Default: 0.",
-    )
-    parser.add_argument(
-        "--r2-right-trimming",
-        type=int,
-        default=0,
-        help="R2 right-end trimming in read coordinates. Default: 0.",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logs.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print resolved parameters only; do not run calling.",
-    )
-    return parser.parse_args()
+    parser.add_argument("--out-dir", help="Host output directory (coverage/host).")
+    parser.add_argument("--output", help="Aggregate CG/CH stem path without suffix.")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
 
 
-def open_bam_file(bam_file: str):
-    return pysam.AlignmentFile(bam_file, "rb")
-
-
-def create_position_batches(
-    cpg_positions: list[tuple[int, int]],
-    batch_size: int,
-) -> list[list[tuple[int, int]]]:
-    if not cpg_positions:
-        return []
-    batches: list[list[tuple[int, int]]] = []
-    current_batch: list[tuple[int, int]] = []
-    current_start = cpg_positions[0][0]
-    for start_pos, end_pos in cpg_positions:
-        if start_pos - current_start <= batch_size:
-            current_batch.append((start_pos, end_pos))
-        else:
-            if current_batch:
-                batches.append(current_batch)
-            current_batch = [(start_pos, end_pos)]
-            current_start = start_pos
-    if current_batch:
-        batches.append(current_batch)
-    return batches
-
-
-def process_pileup_column(
-    pileup_column,
-    chromosome: str,
-    target_flags: set[int],
-    r1_left_trimming: int,
-    r1_right_trimming: int,
-    r2_left_trimming: int,
-    r2_right_trimming: int,
-) -> dict[str, object]:
-    tg_count = 0
-    ca_count = 0
-    cg_count = 0
-    total_coverage = 0
-
-    for pileup_read in pileup_column.pileups:
-        if pileup_read.alignment.flag not in target_flags:
-            continue
-        if pileup_read.is_del or pileup_read.is_refskip:
-            continue
-        if pileup_read.query_position is None:
-            continue
-        record = pileup_read.alignment
-        read_seq = record.query_sequence
-        if not read_seq:
-            continue
-        read_len = len(read_seq)
-        if read_len < 2:
-            continue
-        query_pos = pileup_read.query_position
-        next_pos = query_pos + 1
-        if next_pos >= read_len:
-            continue
-        if is_trimmed_read_position(
-            record=record,
-            query_pos=query_pos,
-            read_len=read_len,
-            r1_left_trimming=r1_left_trimming,
-            r1_right_trimming=r1_right_trimming,
-            r2_left_trimming=r2_left_trimming,
-            r2_right_trimming=r2_right_trimming,
-        ):
-            continue
-        if is_trimmed_read_position(
-            record=record,
-            query_pos=next_pos,
-            read_len=read_len,
-            r1_left_trimming=r1_left_trimming,
-            r1_right_trimming=r1_right_trimming,
-            r2_left_trimming=r2_left_trimming,
-            r2_right_trimming=r2_right_trimming,
-        ):
-            continue
-        base = read_seq[query_pos]
-        dinucleotide = (base + read_seq[next_pos]).upper()
-        if dinucleotide == "TG":
-            tg_count += 1
-            total_coverage += 1
-        elif dinucleotide == "CA":
-            ca_count += 1
-            total_coverage += 1
-        elif dinucleotide == "CG":
-            cg_count += 1
-            total_coverage += 1
-
-    total_mc = tg_count + ca_count
-    total_reads = total_mc + cg_count
-    methylation_percent = (total_mc / total_reads) * 100 if total_reads > 0 else 0
-    return {
-        "chrom": chromosome,
-        "pos": pileup_column.pos,
-        "TG_counts": tg_count,
-        "CA_counts": ca_count,
-        "CG_counts": cg_count,
-        "methylation_percent": round(methylation_percent, 2),
-        "coverage": total_coverage,
-    }
-
-
-def process_cpg_batch(
-    inbam,
-    chromosome: str,
-    cpg_batch: list[tuple[int, int]],
-    min_base_quality: int,
-    min_mapping_quality: int,
-    target_flags: set[int],
-    max_depth: int,
-    r1_left_trimming: int,
-    r1_right_trimming: int,
-    r2_left_trimming: int,
-    r2_right_trimming: int,
-) -> list[dict[str, object]]:
-    if not cpg_batch:
-        return []
-    batch_start = min(pos[0] for pos in cpg_batch)
-    batch_end = max(pos[1] for pos in cpg_batch)
-    target_positions = {pos[0] for pos in cpg_batch}
-    results: list[dict[str, object]] = []
-    pileups = inbam.pileup(
-        chromosome,
-        batch_start,
-        batch_end,
-        ignore_overlaps=True,
-        min_base_quality=min_base_quality,
-        stepper="samtools",
-        redo_baq=False,
-        max_depth=max_depth,
-        ignore_orphans=True,
-        compute_baq=True,
-        min_mapping_quality=min_mapping_quality,
-    )
-    for pileup_column in pileups:
-        if pileup_column.pos in target_positions:
-            results.append(
-                process_pileup_column(
-                    pileup_column,
-                    chromosome,
-                    target_flags,
-                    r1_left_trimming,
-                    r1_right_trimming,
-                    r2_left_trimming,
-                    r2_right_trimming,
-                )
-            )
-    return results
-
-
-def process_all_cpg_positions(
-    inbam,
-    chromosome: str,
-    cpg_positions: list[tuple[int, int]],
-    min_base_quality: int,
-    min_mapping_quality: int,
-    max_depth: int,
-    batch_size: int,
-    r1_left_trimming: int,
-    r1_right_trimming: int,
-    r2_left_trimming: int,
-    r2_right_trimming: int,
-    output_handle,
-) -> tuple[int, int]:
-    target_flags = {99, 147, 83, 163}
-    processed_sites = 0
-    covered_sites = 0
-    batches = create_position_batches(cpg_positions, batch_size)
-    for cpg_batch in batches:
-        batch_results = process_cpg_batch(
-            inbam,
-            chromosome,
-            cpg_batch,
-            min_base_quality,
-            min_mapping_quality,
-            target_flags,
-            max_depth,
-            r1_left_trimming,
-            r1_right_trimming,
-            r2_left_trimming,
-            r2_right_trimming,
-        )
-        processed_sites += len(batch_results)
-        for result in batch_results:
-            if int(result["coverage"]) <= 0:
-                continue
-            covered_sites += 1
-            output_handle.write(format_result_line(result))
-    return processed_sites, covered_sites
-
-
-def format_result_line(result: dict[str, object]) -> str:
-    chrom = result["chrom"]
-    pos = result["pos"]
-    methy_percent = result["methylation_percent"]
-    mc = result["TG_counts"] + result["CA_counts"]
-    c_unmeth = result["CG_counts"]
-    return f"{chrom}\t{pos}\t{pos}\t{methy_percent:.2f}\t{mc}\t{c_unmeth}\n"
-
-
-def write_results_to_file(results: list[dict[str, object]], output_file: str) -> None:
-    output_path = Path(output_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as handle:
-        for result in results:
-            handle.write(format_result_line(result))
-
-
-def load_reference_and_find_cpg(
-    reference_file: str,
-    chromosome: str,
-    sample_size: int | None,
-) -> list[tuple[int, int]]:
-    with pysam.FastaFile(reference_file) as fasta:
-        sequence = fasta.fetch(chromosome).upper()
-    cpg_positions: list[tuple[int, int]] = []
-    for start in range(len(sequence) - 1):
-        if sequence[start] == "C" and sequence[start + 1] == "G":
-            cpg_positions.append((start, start + 1))
-    if sample_size and len(cpg_positions) > sample_size:
-        cpg_positions = cpg_positions[:sample_size]
-    return cpg_positions
-
-
-def parse_chromosome_csv(chromosome_csv: str) -> list[str]:
-    chromosomes = [chrom.strip() for chrom in chromosome_csv.split(",") if chrom.strip()]
+def parse_chromosomes(csv: str) -> List[str]:
+    chromosomes = [item.strip() for item in csv.split(",") if item.strip()]
     if not chromosomes:
         raise ValueError("chromosome list is empty")
     return chromosomes
 
 
-def validate_chromosomes_in_reference(reference_file: str, chromosomes: list[str]) -> None:
-    with pysam.FastaFile(reference_file) as fasta:
+def validate_chromosomes(reference: str, chromosomes: List[str]) -> None:
+    with pysam.FastaFile(reference) as fasta:
         available = set(fasta.references)
     missing = [chrom for chrom in chromosomes if chrom not in available]
     if missing:
-        missing_str = ",".join(missing)
         raise ValueError(
-            f"chromosome(s) not found in reference '{reference_file}': {missing_str}"
+            f"chromosomes not found in reference '{reference}': {','.join(missing)}"
         )
 
 
-def methylation_caller(
-    reference_file: str,
-    bam_file: str,
-    output_file: str,
-    chromosome: str,
-    min_base_quality: int,
-    min_mapping_quality: int,
-    sample_size: int | None,
-    max_depth: int,
-    batch_size: int,
-    r1_left_trimming: int,
-    r1_right_trimming: int,
-    r2_left_trimming: int,
-    r2_right_trimming: int,
-    verbose: bool,
-) -> tuple[int, int]:
-    chromosomes = parse_chromosome_csv(chromosome)
-    validate_chromosomes_in_reference(reference_file, chromosomes)
-    inbam = open_bam_file(bam_file)
+def bam_index_exists(path: Path) -> bool:
+    return any(
+        candidate.is_file()
+        for candidate in (
+            Path(str(path) + ".bai"),
+            path.with_suffix(".bai"),
+            Path(str(path) + ".csi"),
+        )
+    )
+
+
+def classify_cg_observation(dinucleotide: str) -> Optional[bool]:
+    if dinucleotide in {"TG", "CA"}:
+        return True
+    if dinucleotide == "CG":
+        return False
+    return None
+
+
+def classify_ch_observation(base: str, strand: str) -> Optional[Tuple[int, int]]:
+    if strand == "+":
+        if base not in {"C", "T"}:
+            return None
+        methylated = base == "T"
+    else:
+        if base not in {"G", "A"}:
+            return None
+        methylated = base == "A"
+    return (1, 0) if methylated else (0, 1)
+
+
+def ch_neighbor_matches(context: str, strand: str, base: str) -> bool:
+    observed = base.upper()
+    if context == "CC":
+        return observed in (("C", "T") if strand == "+" else ("G", "A"))
+    expected = context[1] if strand == "+" else CH_REVERSE_NEIGHBOR[context]
+    return observed == expected
+
+
+def classify_reference_position(
+    sequence: str, pos: int
+) -> Tuple[bool, Optional[Tuple[str, str]]]:
+    base = sequence[pos]
+    next_base = sequence[pos + 1] if pos + 1 < len(sequence) else ""
+    if base == "C":
+        dinucleotide = base + next_base
+        if dinucleotide == "CG":
+            return True, None
+        if dinucleotide in CH_FORWARD_CONTEXTS:
+            return False, (dinucleotide, "+")
+        return False, None
+    if base == "G" and pos > 0:
+        context = CH_REVERSE_MAP.get(sequence[pos - 1])
+        if context is not None:
+            return False, (context, "-")
+    return False, None
+
+
+def is_sample_site(is_cpg: bool, ch_target: Optional[Tuple[str, str]], context_mode: str) -> bool:
+    if context_mode in {"cg", "both"} and is_cpg:
+        return True
+    if context_mode in {"ch", "both"} and ch_target is not None:
+        return True
+    return False
+
+
+def select_sample_positions(
+    sequence: str, context_mode: str, sample_size: Optional[int]
+) -> Optional[Set[int]]:
+    """First N CG/CH reference sites on this chromosome, or None to keep all."""
+    if sample_size is None:
+        return None
+    positions: List[int] = []
+    for pos in range(len(sequence)):
+        is_cpg, ch_target = classify_reference_position(sequence, pos)
+        if is_sample_site(is_cpg, ch_target, context_mode):
+            positions.append(pos)
+            if len(positions) >= sample_size:
+                break
+    return set(positions)
+
+
+def has_unclear_conversion_strand(record: pysam.AlignedSegment) -> bool:
     try:
-        output_path = Path(output_file)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        processed_sites = 0
-        covered_sites = 0
-        with output_path.open("w", encoding="utf-8") as handle:
-            for idx, chrom in enumerate(chromosomes, start=1):
-                if verbose:
-                    print(f"[methy_caller] chromosome={chrom} ({idx}/{len(chromosomes)})")
-                cpg_positions = load_reference_and_find_cpg(reference_file, chrom, sample_size)
-                chrom_processed_sites, chrom_covered_sites = process_all_cpg_positions(
-                    inbam=inbam,
-                    chromosome=chrom,
-                    cpg_positions=cpg_positions,
-                    min_base_quality=min_base_quality,
-                    min_mapping_quality=min_mapping_quality,
-                    max_depth=max_depth,
-                    batch_size=batch_size,
-                    r1_left_trimming=r1_left_trimming,
-                    r1_right_trimming=r1_right_trimming,
-                    r2_left_trimming=r2_left_trimming,
-                    r2_right_trimming=r2_right_trimming,
-                    output_handle=handle,
-                )
-                processed_sites += chrom_processed_sites
-                covered_sites += chrom_covered_sites
-        return processed_sites, covered_sites
-    finally:
-        inbam.close()
+        return record.get_tag("YD") == "u"
+    except KeyError:
+        return False
 
 
-def is_trimmed_read_position(
+def is_trimmed(
     record: pysam.AlignedSegment,
     query_pos: int,
     read_len: int,
-    r1_left_trimming: int,
-    r1_right_trimming: int,
-    r2_left_trimming: int,
-    r2_right_trimming: int,
+    r1_left: int,
+    r1_right: int,
+    r2_left: int,
+    r2_right: int,
 ) -> bool:
     if record.is_read1:
-        left_trim = r1_left_trimming
-        right_trim = r1_right_trimming
+        left_trim, right_trim = r1_left, r1_right
     elif record.is_read2:
-        left_trim = r2_left_trimming
-        right_trim = r2_right_trimming
+        left_trim, right_trim = r2_left, r2_right
     else:
+        return False
+    if left_trim == 0 and right_trim == 0:
         return False
     if record.is_reverse:
         left_cycle = read_len - query_pos
@@ -425,61 +197,631 @@ def is_trimmed_read_position(
     return left_cycle <= left_trim or right_cycle <= right_trim
 
 
-def main() -> int:
-    args = parse_args()
-    if args.min_base_quality < 0:
-        raise ValueError("min-base-quality must be >= 0")
-    if args.min_mapping_quality < 0:
-        raise ValueError("min-mapping-quality must be >= 0")
-    if args.max_depth <= 0:
-        raise ValueError("max-depth must be > 0")
-    if args.batch_size <= 0:
-        raise ValueError("batch-size must be > 0")
-    if args.sample_size is not None and args.sample_size <= 0:
-        raise ValueError("sample-size must be > 0 when provided")
-    if args.r1_left_trimming < 0:
-        raise ValueError("r1-left-trimming must be >= 0")
-    if args.r1_right_trimming < 0:
-        raise ValueError("r1-right-trimming must be >= 0")
-    if args.r2_left_trimming < 0:
-        raise ValueError("r2-left-trimming must be >= 0")
-    if args.r2_right_trimming < 0:
-        raise ValueError("r2-right-trimming must be >= 0")
-    chromosomes = parse_chromosome_csv(args.chromosome)
-    validate_chromosomes_in_reference(args.reference_file, chromosomes)
+def spot_id_from_cb(
+    cb: str, barcode_to_index: BarcodeMap, barcode_len: int
+) -> Optional[str]:
+    parsed = parse_cb_value(cb, barcode_len)
+    if parsed is None:
+        return None
+    x_barcode, y_barcode = parsed
+    x_index = barcode_to_index.get(x_barcode)
+    y_index = barcode_to_index.get(y_barcode)
+    if x_index is None or y_index is None:
+        return None
+    return f"{x_index:02d}_{y_index:02d}"
 
-    print(f"[methy_caller] reference={args.reference_file}")
-    print(f"[methy_caller] bam={args.bam_file}")
-    print(f"[methy_caller] chromosome={args.chromosome}")
-    print(f"[methy_caller] output={args.output}")
-    if args.sample_size is not None:
-        print(f"[methy_caller] sample_size={args.sample_size}")
+
+def spot_is_allowed(spot_id: Optional[str], allowed: Optional[Set[str]]) -> bool:
+    if spot_id is None:
+        return False
+    if allowed is None:
+        return True
+    return spot_id in allowed
+
+
+def load_spot_roster(path: str) -> List[str]:
+    spots: List[str] = []
+    with Path(path).open(encoding="utf-8") as handle:
+        header = handle.readline()
+        if not header:
+            raise ValueError(f"spot roster is empty: {path}")
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 3:
+                continue
+            spots.append(fields[2])
+    if not spots:
+        raise ValueError(f"spot roster has no spots: {path}")
+    return spots
+
+
+def host_cov_path(out_dir: Path, spot_id: str, suffix: str) -> Path:
+    row = spot_id.split("_", 1)[0]
+    return out_dir / row / f"{spot_id}.{suffix}.cov"
+
+
+def format_cg_line(chrom: str, pos: int, meth: int, unmeth: int) -> str:
+    total = meth + unmeth
+    pct = round((meth / total) * 100, 2) if total > 0 else 0.0
+    return f"{chrom}\t{pos}\t{pos}\t{pct:.2f}\t{meth}\t{unmeth}\n"
+
+
+def format_ch_line(
+    chrom: str, pos: int, meth: int, unmeth: int, context: str, strand: str
+) -> str:
+    total = meth + unmeth
+    pct = round((meth / total) * 100, 2) if total > 0 else 0.0
+    return (
+        f"{chrom}\t{pos}\t{pos}\t{pct:.2f}\t{meth}\t{unmeth}\t{context}\t{strand}\n"
+    )
+
+
+def effective_batch_size(
+    chromosome_length: int, configured_batch_size: int, jobs: int
+) -> int:
+    return min(configured_batch_size, max(1, chromosome_length // max(jobs, 1)))
+
+
+def count_cg_column(
+    pileup_col,
+    dest: Dict[int, List[int]] | CgCounts,
+    host: bool,
+    cb_tag: str,
+    barcode_to_index: Optional[BarcodeMap],
+    barcode_len: int,
+    allowed_spots: Optional[Set[str]],
+    skip_spots: Set[str],
+    r1_left: int,
+    r1_right: int,
+    r2_left: int,
+    r2_right: int,
+) -> None:
+    pos = pileup_col.pos
+    for pileup_read in pileup_col.pileups:
+        record = pileup_read.alignment
+        if record.flag not in PAIRED_FLAGS:
+            continue
+        if has_unclear_conversion_strand(record):
+            continue
+        if pileup_read.is_del or pileup_read.is_refskip:
+            continue
+        qpos = pileup_read.query_position
+        if qpos is None:
+            continue
+        seq = record.query_sequence
+        if not seq or qpos + 1 >= len(seq):
+            continue
+        if is_trimmed(record, qpos, len(seq), r1_left, r1_right, r2_left, r2_right):
+            continue
+        if is_trimmed(
+            record, qpos + 1, len(seq), r1_left, r1_right, r2_left, r2_right
+        ):
+            continue
+        methylated = classify_cg_observation((seq[qpos] + seq[qpos + 1]).upper())
+        if methylated is None:
+            continue
+        key = 0 if methylated else 1
+        if not host:
+            dest.setdefault(pos, [0, 0])[key] += 1
+            continue
+        try:
+            cb = record.get_tag(cb_tag)
+        except KeyError:
+            continue
+        assert barcode_to_index is not None
+        spot = spot_id_from_cb(str(cb), barcode_to_index, barcode_len)
+        if not spot_is_allowed(spot, allowed_spots) or spot in skip_spots:
+            continue
+        assert isinstance(spot, str)
+        slot = dest.setdefault(spot, {}).setdefault(pos, [0, 0])
+        slot[key] += 1
+
+
+def count_ch_column(
+    pileup_col,
+    context: str,
+    strand: str,
+    dest,
+    host: bool,
+    cb_tag: str,
+    barcode_to_index: Optional[BarcodeMap],
+    barcode_len: int,
+    allowed_spots: Optional[Set[str]],
+    skip_spots: Set[str],
+    r1_left: int,
+    r1_right: int,
+    r2_left: int,
+    r2_right: int,
+) -> None:
+    pos = pileup_col.pos
+    strand_flags = TOP_FLAGS if strand == "+" else BOT_FLAGS
+    for pileup_read in pileup_col.pileups:
+        record = pileup_read.alignment
+        if record.flag not in strand_flags:
+            continue
+        if has_unclear_conversion_strand(record):
+            continue
+        if pileup_read.is_del or pileup_read.is_refskip:
+            continue
+        qpos = pileup_read.query_position
+        if qpos is None:
+            continue
+        seq = record.query_sequence
+        if not seq or qpos >= len(seq):
+            continue
+        if is_trimmed(record, qpos, len(seq), r1_left, r1_right, r2_left, r2_right):
+            continue
+        if strand == "+":
+            if qpos + 1 >= len(seq):
+                continue
+            neighbor_qpos = qpos + 1
+            neighbor = seq[neighbor_qpos]
+        else:
+            if qpos == 0:
+                continue
+            neighbor_qpos = qpos - 1
+            neighbor = seq[neighbor_qpos]
+        if is_trimmed(
+            record, neighbor_qpos, len(seq), r1_left, r1_right, r2_left, r2_right
+        ):
+            continue
+        if not ch_neighbor_matches(context, strand, neighbor):
+            continue
+        observation = classify_ch_observation(seq[qpos].upper(), strand)
+        if observation is None:
+            continue
+        meth, unmeth = observation
+        if not host:
+            values = dest.setdefault((pos, context, strand), [0, 0])
+            values[0] += meth
+            values[1] += unmeth
+            continue
+        try:
+            cb = record.get_tag(cb_tag)
+        except KeyError:
+            continue
+        assert barcode_to_index is not None
+        spot = spot_id_from_cb(str(cb), barcode_to_index, barcode_len)
+        if not spot_is_allowed(spot, allowed_spots) or spot in skip_spots:
+            continue
+        assert isinstance(spot, str)
+        slot = dest.setdefault(spot, {}).setdefault(pos, [0, 0, context, strand])
+        slot[0] += meth
+        slot[1] += unmeth
+
+
+def process_interval(
+    bam_path: str,
+    chrom: str,
+    batch_index: int,
+    start: int,
+    stop: int,
+    part_dir: str,
+    context_mode: str,
+    host: bool,
+    cb_tag: str,
+    barcode_to_index: Optional[BarcodeMap],
+    barcode_len: int,
+    allowed_spots: Optional[Set[str]],
+    skip_spots: Set[str],
+    min_base_quality: int,
+    min_mapping_quality: int,
+    max_depth: int,
+    r1_left: int,
+    r1_right: int,
+    r2_left: int,
+    r2_right: int,
+    allowed_positions: Optional[Set[int]],
+) -> Tuple[int, Dict[str, str]]:
+    sequence = WORKER_CHROMOSOME_SEQUENCE
+    if sequence is None:
+        raise RuntimeError("worker chromosome sequence was not initialized")
+    cg_host: CgCounts = defaultdict(dict)
+    ch_host: ChCounts = defaultdict(dict)
+    cg_agg: Dict[int, List[int]] = defaultdict(lambda: [0, 0])
+    ch_agg: Dict[Tuple[int, str, str], List[int]] = defaultdict(lambda: [0, 0])
+    with pysam.AlignmentFile(bam_path, "rb") as bam:
+        for pileup_col in bam.pileup(
+            chrom,
+            start,
+            stop,
+            truncate=True,
+            ignore_overlaps=True,
+            min_base_quality=min_base_quality,
+            stepper="samtools",
+            redo_baq=False,
+            max_depth=max_depth,
+            ignore_orphans=True,
+            compute_baq=True,
+            min_mapping_quality=min_mapping_quality,
+        ):
+            if allowed_positions is not None and pileup_col.pos not in allowed_positions:
+                continue
+            is_cpg, ch_target = classify_reference_position(sequence, pileup_col.pos)
+            if is_cpg and context_mode in {"cg", "both"}:
+                count_cg_column(
+                    pileup_col,
+                    cg_host if host else cg_agg,
+                    host,
+                    cb_tag,
+                    barcode_to_index,
+                    barcode_len,
+                    allowed_spots,
+                    skip_spots,
+                    r1_left,
+                    r1_right,
+                    r2_left,
+                    r2_right,
+                )
+            if ch_target is not None and context_mode in {"ch", "both"}:
+                ctx, strand = ch_target
+                count_ch_column(
+                    pileup_col,
+                    ctx,
+                    strand,
+                    ch_host if host else ch_agg,
+                    host,
+                    cb_tag,
+                    barcode_to_index,
+                    barcode_len,
+                    allowed_spots,
+                    skip_spots,
+                    r1_left,
+                    r1_right,
+                    r2_left,
+                    r2_right,
+                )
+    part_root = Path(part_dir)
+    paths: Dict[str, str] = {}
+    if context_mode in {"cg", "both"}:
+        cg_path = part_root / f"batch_{batch_index:06d}.CG.part"
+        with cg_path.open("w", encoding="utf-8") as handle:
+            if host:
+                for spot_id, pos_map in cg_host.items():
+                    for pos, (meth, unmeth) in pos_map.items():
+                        if meth + unmeth <= 0:
+                            continue
+                        handle.write(
+                            format_cg_line(chrom, pos, meth, unmeth).rstrip("\n")
+                            + f"\t{spot_id}\n"
+                        )
+            else:
+                for pos, (meth, unmeth) in sorted(cg_agg.items()):
+                    if meth + unmeth <= 0:
+                        continue
+                    handle.write(format_cg_line(chrom, pos, meth, unmeth))
+        paths["CG"] = str(cg_path)
+    if context_mode in {"ch", "both"}:
+        ch_path = part_root / f"batch_{batch_index:06d}.CH.part"
+        with ch_path.open("w", encoding="utf-8") as handle:
+            if host:
+                for spot_id, pos_map in ch_host.items():
+                    for pos, values in pos_map.items():
+                        meth, unmeth, ctx, strand = values
+                        if int(meth) + int(unmeth) <= 0:
+                            continue
+                        handle.write(
+                            format_ch_line(
+                                chrom, pos, int(meth), int(unmeth), str(ctx), str(strand)
+                            ).rstrip("\n")
+                            + f"\t{spot_id}\n"
+                        )
+            else:
+                for (pos, ctx, strand), (meth, unmeth) in sorted(ch_agg.items()):
+                    if meth + unmeth <= 0:
+                        continue
+                    handle.write(format_ch_line(chrom, pos, meth, unmeth, ctx, strand))
+        paths["CH"] = str(ch_path)
+    return batch_index, paths
+
+
+def append_parts(
+    part_paths: Dict[str, str],
+    handles: Dict[str, BinaryIO],
+) -> None:
+    for context, path_str in part_paths.items():
+        path = Path(path_str)
+        if path.stat().st_size == 0:
+            continue
+        with path.open("rb") as part_handle:
+            shutil.copyfileobj(part_handle, handles[context], length=16 * 1024 * 1024)
+
+
+def shuffle_host_parts(
+    combined_cg: Path,
+    combined_ch: Optional[Path],
+    out_dir: Path,
+    roster: List[str],
+    skip_spots: Set[str],
+    context_mode: str,
+) -> None:
+    handles: Dict[Tuple[str, str], BinaryIO] = {}
+    temps: Dict[Tuple[str, str], Path] = {}
+
+    def get_handle(spot_id: str, suffix: str) -> BinaryIO:
+        key = (spot_id, suffix)
+        if key not in handles:
+            final_path = host_cov_path(out_dir, spot_id, suffix)
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = final_path.with_name(final_path.name + f".tmp.{os.getpid()}")
+            temps[key] = temp_path
+            handles[key] = temp_path.open("wb")
+        return handles[key]
+
+    def consume(part_path: Path, suffix: str, extra_cols: int) -> None:
+        if not part_path.is_file() or part_path.stat().st_size == 0:
+            return
+        with part_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                fields = line.rstrip("\n").split("\t")
+                spot_id = fields[-1]
+                body = "\t".join(fields[:-1]) + "\n"
+                if extra_cols and len(fields) < 7 + extra_cols:
+                    continue
+                get_handle(spot_id, suffix).write(body.encode("utf-8"))
+
+    try:
+        if context_mode in {"cg", "both"}:
+            consume(combined_cg, "CG", 0)
+        if context_mode in {"ch", "both"} and combined_ch is not None:
+            consume(combined_ch, "CH", 1)
+    finally:
+        for handle in handles.values():
+            handle.close()
+    for (spot_id, suffix), temp_path in temps.items():
+        os.replace(temp_path, host_cov_path(out_dir, spot_id, suffix))
+    suffixes = []
+    if context_mode in {"cg", "both"}:
+        suffixes.append("CG")
+    if context_mode in {"ch", "both"}:
+        suffixes.append("CH")
+    for spot_id in roster:
+        if spot_id in skip_spots:
+            continue
+        for suffix in suffixes:
+            path = host_cov_path(out_dir, spot_id, suffix)
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+
+
+def process_chromosome(
+    args: argparse.Namespace,
+    chrom: str,
+    part_root: Path,
+    host: bool,
+    barcode_to_index: Optional[BarcodeMap],
+    barcode_len: int,
+    allowed_spots: Optional[Set[str]],
+    skip_spots: Set[str],
+    combined_handles: Dict[str, BinaryIO],
+) -> None:
+    global WORKER_CHROMOSOME_SEQUENCE
+    with pysam.FastaFile(args.reference) as fasta:
+        sequence = fasta.fetch(chrom).upper()
+    WORKER_CHROMOSOME_SEQUENCE = sequence
+    chrom_len = len(sequence)
+    allowed_positions = select_sample_positions(
+        sequence, args.context_mode, args.sample_size
+    )
+    batch = effective_batch_size(chrom_len, args.batch_size, args.jobs)
+    intervals = [
+        (index, start, min(start + batch, chrom_len))
+        for index, start in enumerate(range(0, chrom_len, batch))
+    ]
+    chrom_dir = part_root / chrom
+    chrom_dir.mkdir(parents=True, exist_ok=True)
+    interval_args = [
+        (
+            args.bam,
+            chrom,
+            batch_index,
+            start,
+            stop,
+            str(chrom_dir),
+            args.context_mode,
+            host,
+            args.cb_tag,
+            barcode_to_index,
+            barcode_len,
+            allowed_spots,
+            skip_spots,
+            args.min_base_quality,
+            args.min_mapping_quality,
+            args.max_depth,
+            args.r1_left_trimming,
+            args.r1_right_trimming,
+            args.r2_left_trimming,
+            args.r2_right_trimming,
+            allowed_positions,
+        )
+        for batch_index, start, stop in intervals
+    ]
+    results = []
+    if args.jobs == 1 or len(intervals) == 1:
+        for worker_args in interval_args:
+            results.append(process_interval(*worker_args))
+    else:
+        fork_context = multiprocessing.get_context("fork")
+        with ProcessPoolExecutor(
+            max_workers=min(args.jobs, len(intervals)),
+            mp_context=fork_context,
+        ) as executor:
+            futures = [
+                executor.submit(process_interval, *worker_args)
+                for worker_args in interval_args
+            ]
+            for future in as_completed(futures):
+                results.append(future.result())
+    for _, part_paths in sorted(results):
+        append_parts(part_paths, combined_handles)
+    shutil.rmtree(chrom_dir)
+    WORKER_CHROMOSOME_SEQUENCE = None
+
+
+def existing_skip_spots(
+    out_dir: Path, roster: List[str], context_mode: str
+) -> Set[str]:
+    skip: Set[str] = set()
+    suffixes = []
+    if context_mode in {"cg", "both"}:
+        suffixes.append("CG")
+    if context_mode in {"ch", "both"}:
+        suffixes.append("CH")
+    for spot_id in roster:
+        if all(host_cov_path(out_dir, spot_id, suffix).is_file() for suffix in suffixes):
+            skip.add(spot_id)
+    return skip
+
+
+def validate_runtime(args: argparse.Namespace) -> None:
+    if args.jobs <= 0:
+        raise ValueError("--jobs must be > 0")
+    if args.batch_size <= 0 or args.max_depth <= 0:
+        raise ValueError("--batch-size and --max-depth must be > 0")
+    if args.min_base_quality < 0 or args.min_mapping_quality < 0:
+        raise ValueError("quality filters must be >= 0")
+    for name in (
+        "r1_left_trimming",
+        "r1_right_trimming",
+        "r2_left_trimming",
+        "r2_right_trimming",
+    ):
+        if getattr(args, name) < 0:
+            raise ValueError(f"--{name.replace('_', '-')} must be >= 0")
+    if args.sample_size is not None and args.sample_size <= 0:
+        raise ValueError("--sample-size must be > 0 when provided")
+    if args.mode == "host":
+        if not args.barcodes or not args.spot_roster or not args.out_dir:
+            raise ValueError("host mode requires --barcodes, --spot-roster, and --out-dir")
+    elif not args.output:
+        raise ValueError("aggregate mode requires --output")
+
+
+def print_resolved_parameters(args: argparse.Namespace) -> None:
+    print(f"[methy_caller] mode={args.mode}")
+    print(f"[methy_caller] bam={args.bam}")
+    print(f"[methy_caller] reference={args.reference}")
+    print(f"[methy_caller] chromosomes={args.chromosomes}")
+    print(f"[methy_caller] context_mode={args.context_mode}")
+    print(f"[methy_caller] jobs={args.jobs}")
     print(f"[methy_caller] r1_left_trimming={args.r1_left_trimming}")
     print(f"[methy_caller] r1_right_trimming={args.r1_right_trimming}")
     print(f"[methy_caller] r2_left_trimming={args.r2_left_trimming}")
     print(f"[methy_caller] r2_right_trimming={args.r2_right_trimming}")
+    if args.mode == "host":
+        print(f"[methy_caller] barcodes={args.barcodes}")
+        print(f"[methy_caller] spot_roster={args.spot_roster}")
+        print(f"[methy_caller] out_dir={args.out_dir}")
+    else:
+        print(f"[methy_caller] output={args.output}")
 
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_args(argv)
+    print_resolved_parameters(args)
     if args.dry_run:
         print("[methy_caller] dry_run=1")
         return 0
+    try:
+        validate_runtime(args)
+        chromosomes = parse_chromosomes(args.chromosomes)
+        validate_chromosomes(args.reference, chromosomes)
+        bam_path = Path(args.bam)
+        if not bam_path.is_file():
+            raise ValueError(f"BAM not found: {bam_path}")
+        if not bam_index_exists(bam_path):
+            raise ValueError(f"BAM index not found: {bam_path}")
+        if not Path(args.reference).is_file() or not Path(str(args.reference) + ".fai").is_file():
+            raise ValueError(f"reference FASTA/.fai not found: {args.reference}")
+    except ValueError as exc:
+        print(f"[methy_caller] error: {exc}", file=sys.stderr)
+        return 1
 
-    processed_sites, covered_sites = methylation_caller(
-        reference_file=args.reference_file,
-        bam_file=args.bam_file,
-        output_file=args.output,
-        chromosome=args.chromosome,
-        min_base_quality=args.min_base_quality,
-        min_mapping_quality=args.min_mapping_quality,
-        sample_size=args.sample_size,
-        max_depth=args.max_depth,
-        batch_size=args.batch_size,
-        r1_left_trimming=args.r1_left_trimming,
-        r1_right_trimming=args.r1_right_trimming,
-        r2_left_trimming=args.r2_left_trimming,
-        r2_right_trimming=args.r2_right_trimming,
-        verbose=args.verbose,
-    )
-    print(f"[methy_caller] done processed_sites={processed_sites} covered_sites={covered_sites}")
+    host = args.mode == "host"
+    barcode_to_index: Optional[BarcodeMap] = None
+    barcode_len = 0
+    allowed_spots: Optional[Set[str]] = None
+    skip_spots: Set[str] = set()
+    roster: List[str] = []
+    if host:
+        try:
+            barcodes, barcode_to_index = read_barcodes(args.barcodes)
+            if not barcodes:
+                raise ValueError("barcode whitelist is empty")
+            barcode_len = len(barcodes[0])
+            if any(len(barcode) != barcode_len for barcode in barcodes):
+                raise ValueError("barcode whitelist has unequal lengths")
+            roster = load_spot_roster(args.spot_roster)
+        except ValueError as exc:
+            print(f"[methy_caller] error: {exc}", file=sys.stderr)
+            return 1
+        allowed_spots = set(roster)
+        skip_spots = existing_skip_spots(Path(args.out_dir), roster, args.context_mode)
+        print(f"[methy_caller] roster_spots={len(roster)} skip_spots={len(skip_spots)}")
+
+    suffixes = []
+    if args.context_mode in {"cg", "both"}:
+        suffixes.append("CG")
+    if args.context_mode in {"ch", "both"}:
+        suffixes.append("CH")
+
+    if host:
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        combined_dir = out_dir
+    else:
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        combined_dir = out_path.parent
+        if all(Path(str(args.output) + f".{suffix}.cov").is_file() for suffix in suffixes):
+            print("[methy_caller] skip_existing_aggregate=1")
+            return 0
+
+    temp_suffix = f".parts.{os.getpid()}"
+    combined_temps = {
+        suffix: combined_dir / f".call.{suffix}{temp_suffix}"
+        for suffix in suffixes
+    }
+    handles = {suffix: path.open("wb") for suffix, path in combined_temps.items()}
+    try:
+        with tempfile.TemporaryDirectory(prefix=".methy-call-parts.", dir=combined_dir) as part_dir:
+            for chrom in chromosomes:
+                process_chromosome(
+                    args,
+                    chrom,
+                    Path(part_dir),
+                    host,
+                    barcode_to_index,
+                    barcode_len,
+                    allowed_spots,
+                    skip_spots,
+                    handles,
+                )
+        for handle in handles.values():
+            handle.close()
+        handles.clear()
+        if host:
+            shuffle_host_parts(
+                combined_temps.get("CG", Path("/dev/null")),
+                combined_temps.get("CH"),
+                Path(args.out_dir),
+                roster,
+                skip_spots,
+                args.context_mode,
+            )
+        else:
+            for suffix, temp_path in combined_temps.items():
+                os.replace(temp_path, Path(str(args.output) + f".{suffix}.cov"))
+    finally:
+        for handle in handles.values():
+            handle.close()
+        for temp_path in combined_temps.values():
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+    print("[methy_caller] done")
     return 0
 
 
