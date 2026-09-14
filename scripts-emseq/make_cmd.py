@@ -7,7 +7,6 @@ This is an EMSeq-only entrypoint that supports:
 - `demux_extract_bc`
 - `align`
 - `pool`
-- `split`
 - `mbias`
 - `call`
 - `saturation`
@@ -41,7 +40,6 @@ STAGE_SEQUENCE = [
     "demux_extract_bc",
     "align",
     "pool",
-    "split",
     "mbias",
     "call",
     "saturation",
@@ -71,9 +69,8 @@ STAGE_REQUIRED_FIELDS = {
         "biscuit_reference",
     ],
     "pool": [],
-    "split": ["split_barcodes"],
     "mbias": [],
-    "call": ["call_reference_file", "call_jobs"],
+    "call": ["call_reference_file", "call_chromosomes"],
     "saturation": [],
     "summary": [],
     "aggregate": [],
@@ -237,52 +234,24 @@ def parse_args() -> argparse.Namespace:
         "--host-sort-mem",
         help="Memory per thread for host samtools sort -m in pool stage. Default: 16G.",
     )
-    # Split stage.
+    # Barcode whitelist (passed to call --barcodes).
     parser.add_argument(
         "--split-barcodes",
-        help="Barcode whitelist TSV for split stage. Default: barcode1_whitelist.",
-    )
-    parser.add_argument(
-        "--split-cb-tag",
-        help="CB-like tag name used in split stage. Default: CB.",
-    )
-    parser.add_argument(
-        "--split-threads-read",
-        type=int,
-        help="Reader threads for split stage. Default: 1.",
-    )
-    parser.add_argument(
-        "--split-threads-write",
-        type=int,
-        help="Writer threads for split stage. Default: 1.",
-    )
-    parser.add_argument(
-        "--split-smoke",
-        action="store_true",
-        default=None,
-        help="Enable smoke mode for split stage (emit up to 16 spot BAMs).",
-    )
-    parser.add_argument(
-        "--split-sort-jobs",
-        type=int,
-        help="Parallel job count for bam_sort_parallel in split stage. Default: 8.",
+        help="Barcode whitelist TSV passed to call --barcodes. Default: barcode1_whitelist.",
     )
     # Call stage.
     parser.add_argument(
         "--call-reference-file",
-        help="Host reference FASTA for EMSeq call stage (biscuit pileup/mergecg).",
+        help="Host reference FASTA for EMSeq call stage.",
     )
     parser.add_argument(
         "--call-chromosomes",
-        help=(
-            "Comma-separated host nuclear chromosomes for host mbias counting "
-            "(for example: chr1,chr2,chrX). Required when mbias_mode is all or host."
-        ),
+        help="Comma-separated chromosomes for call stage output (e.g. chr1,chr2).",
     )
     parser.add_argument(
         "--call-jobs",
         type=int,
-        help="Maximum per-stage pileup jobs for EMSeq call. Default: 8.",
+        help="Parallel host spot jobs for call stage. Default: 8.",
     )
     parser.add_argument(
         "--call-mode",
@@ -290,22 +259,64 @@ def parse_args() -> argparse.Namespace:
         help="Call mode: host+spike, host only, or spike only. Default: all.",
     )
     parser.add_argument(
-        "--call-host-threads",
+        "--call-smoke",
+        action="store_true",
+        default=None,
+        help="Enable smoke mode for call stage (top 16 spots by read count).",
+    )
+    parser.add_argument(
+        "--call-min-base-quality",
         type=int,
-        help="biscuit pileup/bgzip threads in host call. Default: biscuit_threads.",
+        help="min_base_quality passed to methy_caller in call stage. Default: 30.",
     )
     parser.add_argument(
-        "--call-spike-threads",
+        "--call-min-mapping-quality",
         type=int,
-        help="biscuit pileup/bgzip threads in spike call. Default: biscuit_threads.",
+        help="min_mapping_quality passed to methy_caller in call stage. Default: 10.",
     )
     parser.add_argument(
-        "--call-bgzip-bin",
-        help="bgzip executable path or command name. Default: bgzip.",
+        "--call-sample-size",
+        type=int,
+        help="Optional sample_size passed to methy_caller in call stage.",
     )
     parser.add_argument(
-        "--call-tabix-bin",
-        help="tabix executable path or command name. Default: tabix.",
+        "--call-max-depth",
+        type=int,
+        help="max_depth passed to methy_caller in call stage. Default: 50000.",
+    )
+    parser.add_argument(
+        "--call-batch-size",
+        type=int,
+        help="batch_size passed to methy_caller in call stage. Default: 10000000.",
+    )
+    parser.add_argument(
+        "--call-context-mode",
+        choices=["cg", "ch", "both"],
+        help="Context mode for EMSeq call stage. Default: cg.",
+    )
+    parser.add_argument(
+        "--call-r1-left-trimming",
+        type=int,
+        help="R1 left-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-r1-right-trimming",
+        type=int,
+        help="R1 right-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-r2-left-trimming",
+        type=int,
+        help="R2 left-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-r2-right-trimming",
+        type=int,
+        help="R2 right-end trimming for call stage. Default: 0.",
+    )
+    parser.add_argument(
+        "--call-caller-script",
+        help="Path to methy_caller script for call stage. Default: scripts-emseq/methy_caller.py.",
     )
     parser.add_argument(
         "--call-host-subsample-fraction",
@@ -325,26 +336,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--call-left-trimming",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "If set, biscuit pileup -5 N (read 5' end distance). "
-            "If omitted, use workflow default or biscuit built-in default."
-        ),
-    )
-    parser.add_argument(
-        "--call-right-trimming",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "If set, biscuit pileup -3 N (read 3' end distance). "
-            "If omitted, use workflow default or biscuit built-in default."
-        ),
-    )
-    parser.add_argument(
         "--spike-in-index",
         action="append",
         default=None,
@@ -353,7 +344,7 @@ def parse_args() -> argparse.Namespace:
             "May be specified multiple times."
         ),
     )
-    # M-bias stage (scripts-emseq/mbias.py; runs after split, before call).
+    # M-bias stage (scripts-emseq/mbias.py; runs after pool, before call).
     parser.add_argument(
         "--mbias-script",
         help=(
@@ -687,44 +678,28 @@ def build_pool_command(args: argparse.Namespace, sample_work: Path, mode: str) -
     return quoted(command)
 
 
-def build_split_command(args: argparse.Namespace, sample_work: Path) -> str:
-    """Build scripts/split_bams.py invocation."""
-    script_path = Path("scripts/split_bams.py")
-    command = [
-        sys.executable,
-        str(script_path),
-        "--in-bam",
-        str(sample_work / "pooled" / "pooled.byCB.bam"),
-        "--barcodes",
-        str(args.split_barcodes),
-        "--out-dir",
-        str(sample_work / "split_bams"),
-        "--cb-tag",
-        str(args.split_cb_tag),
-        "--threads-read",
-        str(args.split_threads_read),
-        "--threads-write",
-        str(args.split_threads_write),
-    ]
-    if args.split_smoke:
-        command.append("--smoke")
-    return quoted(command)
+CALL_TRIM_FIELDS = ("r1_left", "r1_right", "r2_left", "r2_right")
 
 
-def build_split_sort_command(args: argparse.Namespace, sample_work: Path) -> str:
-    """Build scripts/bam_sort_parallel.py invocation."""
-    script_path = Path("scripts/bam_sort_parallel.py")
-    command = [
-        sys.executable,
-        str(script_path),
-        "--work-path",
-        str(sample_work),
-        "--samtools-bin",
-        args.samtools_bin,
-        "--jobs",
-        str(args.split_sort_jobs),
-    ]
-    return quoted(command)
+def resolve_call_trim_target(
+    cfg_target: object,
+    flat_defaults: dict[str, int],
+    target_label: str,
+) -> dict[str, int]:
+    if cfg_target is None:
+        cfg_target = {}
+    if not isinstance(cfg_target, dict):
+        raise ValueError(f"call_trimming.{target_label} must be an object")
+    result: dict[str, int] = {}
+    for field in CALL_TRIM_FIELDS:
+        raw = cfg_target.get(field, flat_defaults[field])
+        if raw is None:
+            raw = 0
+        value = int(raw)
+        if value < 0:
+            raise ValueError(f"call_trimming.{target_label}.{field} must be >= 0")
+        result[field] = value
+    return result
 
 
 def build_mbias_command(
@@ -769,10 +744,10 @@ def build_call_command(
     sample_work: Path,
     mode: str,
     spike_name: str | None = None,
-    spike_references: list[str] | None = None,
 ) -> str:
     script_path = Path("scripts-emseq/call.py")
-    command: list[str] = [
+    trim = args.call_trim_spike if mode == "spike" else args.call_trim_host
+    command = [
         sys.executable,
         str(script_path),
         "--work-path",
@@ -781,27 +756,47 @@ def build_call_command(
         mode,
         "--reference-file",
         args.call_reference_file,
-        "--jobs",
-        str(args.call_jobs),
-        "--host-threads",
-        str(args.call_host_threads),
-        "--spike-threads",
-        str(args.call_spike_threads),
-        "--biscuit-bin",
-        args.biscuit_bin,
-        "--bgzip-bin",
-        args.call_bgzip_bin,
-        "--tabix-bin",
-        args.call_tabix_bin,
+        "--chromosomes",
+        args.call_chromosomes,
         "--mito-chromosomes",
         args.call_mito_chromosomes,
+        "--context-mode",
+        args.call_context_mode,
+        "--jobs",
+        str(args.call_jobs),
+        "--min-base-quality",
+        str(args.call_min_base_quality),
+        "--min-mapping-quality",
+        str(args.call_min_mapping_quality),
+        "--max-depth",
+        str(args.call_max_depth),
+        "--batch-size",
+        str(args.call_batch_size),
+        "--r1-left-trimming",
+        str(trim["r1_left"]),
+        "--r1-right-trimming",
+        str(trim["r1_right"]),
+        "--r2-left-trimming",
+        str(trim["r2_left"]),
+        "--r2-right-trimming",
+        str(trim["r2_right"]),
+        "--caller-script",
+        args.call_caller_script,
+        "--samtools-bin",
+        args.samtools_bin,
+        "--samtools-threads",
+        str(args.samtools_threads),
+        "--host-subsample-fraction",
+        str(args.mbias_host_subsample_fraction),
     ]
-    if args.call_left_trimming is not None:
-        command.extend(["--call-left-trimming", str(args.call_left_trimming)])
-    if args.call_right_trimming is not None:
-        command.extend(["--call-right-trimming", str(args.call_right_trimming)])
-    if spike_references:
-        for item in spike_references:
+    if args.call_sample_size is not None:
+        command.extend(["--sample-size", str(args.call_sample_size)])
+    if mode in ("all", "host"):
+        command.extend(["--barcodes", args.split_barcodes])
+        if args.call_smoke:
+            command.append("--smoke")
+    if mode in ("all", "spike"):
+        for item in args.spike_in_index:
             command.extend(["--spike-reference", item])
     if spike_name:
         command.extend(["--spike-in-name", spike_name])
@@ -1054,17 +1049,6 @@ def validate_inputs_for_stage(
         if not skip_workdir_inputs:
             wic.validate_pool_align_shards(sample_work, spike)
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
-    elif stage == "split":
-        if not skip_workdir_inputs:
-            wic.require_file(
-                "pooled.byCB.bam",
-                sample_work / "pooled" / "pooled.byCB.bam",
-            )
-        wic.require_file(
-            "split_barcodes",
-            wic.resolve_config_path(settings["split_barcodes"]),
-        )
-        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
     elif stage == "mbias":
         wic.require_script_path("mbias_script", settings["mbias_script"])
         mbias_mode = settings.get("mbias_mode") or "spike"
@@ -1073,17 +1057,34 @@ def validate_inputs_for_stage(
                 "call_reference_file",
                 wic.resolve_config_path(settings["call_reference_file"]),
             )
+            if not skip_workdir_inputs:
+                wic.require_file(
+                    "pooled.host.sorted.bam",
+                    sample_work / "pooled" / "pooled.host.sorted.bam",
+                )
         if mbias_mode in ("all", "spike") and parse_spike_names(spike):
             wic.require_spike_index_paths(spike)
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
     elif stage == "call":
         wic.require_script_path("scripts-emseq/call.py", "scripts-emseq/call.py")
+        wic.require_script_path("call_caller_script", settings["call_caller_script"])
         call_mode = settings.get("call_mode") or "all"
         if call_mode in ("all", "host"):
             wic.require_file(
                 "call_reference_file",
                 wic.resolve_config_path(settings["call_reference_file"]),
             )
+            if not settings.get("split_barcodes"):
+                raise ValueError("missing required settings: split_barcodes")
+            wic.require_file(
+                "split_barcodes",
+                wic.resolve_config_path(settings["split_barcodes"]),
+            )
+            if not skip_workdir_inputs:
+                wic.require_bam_index(
+                    "pooled.host.sorted.bam",
+                    sample_work / "pooled" / "pooled.host.sorted.bam",
+                )
         if call_mode in ("all", "spike") and parse_spike_names(spike):
             wic.require_spike_index_paths(spike)
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
@@ -1091,6 +1092,11 @@ def validate_inputs_for_stage(
         wic.require_script_path("saturation_script", settings["saturation_script"])
     elif stage == "summary":
         wic.require_script_path("summary_script", settings["summary_script"])
+        if not skip_workdir_inputs:
+            wic.require_file(
+                "pooled.host.sorted.bam",
+                sample_work / "pooled" / "pooled.host.sorted.bam",
+            )
     elif stage == "aggregate":
         wic.require_script_path("aggregate_script", settings["aggregate_script"])
     elif stage in METHSCAN_STAGES:
@@ -1133,7 +1139,7 @@ def resolve_step_slurm_cfg(
     step_name: str,
     step_keys: set[str],
 ) -> dict:
-    """Resolve nested slurm step configuration (e.g. slurm.split.split_bams)."""
+    """Resolve nested slurm step configuration (e.g. slurm.call.host)."""
     if not isinstance(stage_slurm_cfg, dict):
         raise ValueError("selected slurm config must be an object")
     if not any(key in stage_slurm_cfg for key in step_keys):
@@ -1171,13 +1177,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     else:
         slurm_stage_key = STAGE_SEQUENCE[0]
     stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, slurm_stage_key)
-
-    split_bams_slurm_cfg = resolve_step_slurm_cfg(
-        stage_slurm_cfg, "split_bams", {"split_bams", "sort"}
-    )
-    split_sort_slurm_cfg = resolve_step_slurm_cfg(
-        stage_slurm_cfg, "sort", {"split_bams", "sort"}
-    )
 
     mbias_stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, "mbias")
     mbias_host_slurm_cfg = resolve_step_slurm_cfg(
@@ -1237,15 +1236,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.split_barcodes,
             cfg.get("split_barcodes", cfg.get("barcode1_whitelist")),
         ),
-        "split_cb_tag": pick(args.split_cb_tag, cfg.get("split_cb_tag")),
-        "split_threads_read": pick(
-            args.split_threads_read, cfg.get("split_threads_read")
-        ),
-        "split_threads_write": pick(
-            args.split_threads_write, cfg.get("split_threads_write")
-        ),
-        "split_smoke": pick(args.split_smoke, cfg.get("split_smoke")),
-        "split_sort_jobs": pick(args.split_sort_jobs, cfg.get("split_sort_jobs")),
         # Call stage.
         "call_reference_file": pick(
             args.call_reference_file,
@@ -1254,14 +1244,33 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "call_chromosomes": pick(args.call_chromosomes, cfg.get("call_chromosomes")),
         "call_jobs": pick(args.call_jobs, cfg.get("call_jobs")),
         "call_mode": pick(args.call_mode, cfg.get("call_mode")),
-        "call_host_threads": pick(
-            args.call_host_threads, cfg.get("call_host_threads")
+        "call_smoke": pick(args.call_smoke, cfg.get("call_smoke")),
+        "call_min_base_quality": pick(
+            args.call_min_base_quality, cfg.get("call_min_base_quality")
         ),
-        "call_spike_threads": pick(
-            args.call_spike_threads, cfg.get("call_spike_threads")
+        "call_min_mapping_quality": pick(
+            args.call_min_mapping_quality, cfg.get("call_min_mapping_quality")
         ),
-        "call_bgzip_bin": pick(args.call_bgzip_bin, cfg.get("call_bgzip_bin")),
-        "call_tabix_bin": pick(args.call_tabix_bin, cfg.get("call_tabix_bin")),
+        "call_sample_size": pick(args.call_sample_size, cfg.get("call_sample_size")),
+        "call_max_depth": pick(args.call_max_depth, cfg.get("call_max_depth")),
+        "call_batch_size": pick(args.call_batch_size, cfg.get("call_batch_size")),
+        "call_context_mode": pick(
+            args.call_context_mode,
+            cfg.get("call_context_mode"),
+        ),
+        "call_r1_left_trimming": pick(
+            args.call_r1_left_trimming, cfg.get("call_r1_left_trimming")
+        ),
+        "call_r1_right_trimming": pick(
+            args.call_r1_right_trimming, cfg.get("call_r1_right_trimming")
+        ),
+        "call_r2_left_trimming": pick(
+            args.call_r2_left_trimming, cfg.get("call_r2_left_trimming")
+        ),
+        "call_r2_right_trimming": pick(
+            args.call_r2_right_trimming, cfg.get("call_r2_right_trimming")
+        ),
+        "call_caller_script": pick(args.call_caller_script, cfg.get("call_caller_script")),
         "host_subsample_fraction": pick(
             args.call_host_subsample_fraction, cfg.get("call_host_subsample_fraction")
         ),
@@ -1270,12 +1279,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         ),
         "call_mito_chromosomes": pick(
             args.call_mito_chromosomes, cfg.get("call_mito_chromosomes")
-        ),
-        "call_left_trimming": pick(
-            args.call_left_trimming, cfg.get("call_left_trimming")
-        ),
-        "call_right_trimming": pick(
-            args.call_right_trimming, cfg.get("call_right_trimming")
         ),
         "spike_in_index": pick(args.spike_in_index, cfg.get("spike_in_index")),
         # M-bias stage.
@@ -1401,12 +1404,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["samtools_bin"] = normalize_executable_setting(
         settings["samtools_bin"], "samtools"
     )
-    settings["call_bgzip_bin"] = normalize_executable_setting(
-        settings["call_bgzip_bin"], "bgzip"
-    )
-    settings["call_tabix_bin"] = normalize_executable_setting(
-        settings["call_tabix_bin"], "tabix"
-    )
     settings["linker1"] = settings["linker1"]
     settings["linker2"] = settings["linker2"]
     settings["tn5"] = settings["tn5"]
@@ -1444,7 +1441,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["slurm_mem"] = settings["slurm_mem"] or "16G"
     settings["slurm_cpus_per_task"] = settings["slurm_cpus_per_task"] or 8
 
-    # Pool / split defaults.
+    # Pool defaults.
     settings["samtools_threads"] = (
         int(settings["samtools_threads"])
         if settings["samtools_threads"] is not None
@@ -1457,28 +1454,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["split_barcodes"] = settings["split_barcodes"] or cfg.get(
         "barcode1_whitelist"
     )
-    settings["split_cb_tag"] = settings["split_cb_tag"] or "CB"
-    settings["split_threads_read"] = (
-        int(settings["split_threads_read"])
-        if settings["split_threads_read"] is not None
-        else 1
-    )
-    if settings["split_threads_read"] <= 0:
-        raise ValueError("split_threads_read must be > 0")
-    settings["split_threads_write"] = (
-        int(settings["split_threads_write"])
-        if settings["split_threads_write"] is not None
-        else 1
-    )
-    if settings["split_threads_write"] <= 0:
-        raise ValueError("split_threads_write must be > 0")
-    settings["split_sort_jobs"] = (
-        int(settings["split_sort_jobs"])
-        if settings["split_sort_jobs"] is not None
-        else 8
-    )
-    if settings["split_sort_jobs"] <= 0:
-        raise ValueError("split_sort_jobs must be > 0")
 
     # Call defaults.
     settings["call_jobs"] = (
@@ -1489,27 +1464,88 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["call_mode"] = settings["call_mode"] or "all"
     if settings["call_mode"] not in {"all", "host", "spike"}:
         raise ValueError("call_mode must be one of: all, host, spike")
-
-    settings["call_host_threads"] = (
-        int(settings["call_host_threads"])
-        if settings["call_host_threads"] is not None
-        else int(settings["biscuit_threads"])
+    settings["call_smoke"] = bool(settings["call_smoke"])
+    settings["call_min_base_quality"] = (
+        int(settings["call_min_base_quality"])
+        if settings["call_min_base_quality"] is not None
+        else 30
     )
-    if settings["call_host_threads"] <= 0:
-        raise ValueError("call_host_threads must be > 0")
-    settings["call_spike_threads"] = (
-        int(settings["call_spike_threads"])
-        if settings["call_spike_threads"] is not None
-        else int(settings["biscuit_threads"])
+    if settings["call_min_base_quality"] < 0:
+        raise ValueError("call_min_base_quality must be >= 0")
+    settings["call_min_mapping_quality"] = (
+        int(settings["call_min_mapping_quality"])
+        if settings["call_min_mapping_quality"] is not None
+        else 10
     )
-    if settings["call_spike_threads"] <= 0:
-        raise ValueError("call_spike_threads must be > 0")
-
-    for trim_key in ("call_left_trimming", "call_right_trimming"):
-        if settings[trim_key] is not None:
-            settings[trim_key] = int(settings[trim_key])
-            if settings[trim_key] < 0:
-                raise ValueError(f"{trim_key} must be >= 0")
+    if settings["call_min_mapping_quality"] < 0:
+        raise ValueError("call_min_mapping_quality must be >= 0")
+    if settings["call_sample_size"] is not None:
+        settings["call_sample_size"] = int(settings["call_sample_size"])
+        if settings["call_sample_size"] <= 0:
+            raise ValueError("call_sample_size must be > 0 when provided")
+    settings["call_max_depth"] = (
+        int(settings["call_max_depth"]) if settings["call_max_depth"] is not None else 50_000
+    )
+    if settings["call_max_depth"] <= 0:
+        raise ValueError("call_max_depth must be > 0")
+    settings["call_batch_size"] = (
+        int(settings["call_batch_size"])
+        if settings["call_batch_size"] is not None
+        else 10_000_000
+    )
+    if settings["call_batch_size"] <= 0:
+        raise ValueError("call_batch_size must be > 0")
+    settings["call_context_mode"] = settings["call_context_mode"] or "cg"
+    if settings["call_context_mode"] not in {"cg", "ch", "both"}:
+        raise ValueError("call_context_mode must be one of: cg, ch, both")
+    settings["call_r1_left_trimming"] = (
+        int(settings["call_r1_left_trimming"])
+        if settings["call_r1_left_trimming"] is not None
+        else 0
+    )
+    if settings["call_r1_left_trimming"] < 0:
+        raise ValueError("call_r1_left_trimming must be >= 0")
+    settings["call_r1_right_trimming"] = (
+        int(settings["call_r1_right_trimming"])
+        if settings["call_r1_right_trimming"] is not None
+        else 0
+    )
+    if settings["call_r1_right_trimming"] < 0:
+        raise ValueError("call_r1_right_trimming must be >= 0")
+    settings["call_r2_left_trimming"] = (
+        int(settings["call_r2_left_trimming"])
+        if settings["call_r2_left_trimming"] is not None
+        else 0
+    )
+    if settings["call_r2_left_trimming"] < 0:
+        raise ValueError("call_r2_left_trimming must be >= 0")
+    settings["call_r2_right_trimming"] = (
+        int(settings["call_r2_right_trimming"])
+        if settings["call_r2_right_trimming"] is not None
+        else 0
+    )
+    if settings["call_r2_right_trimming"] < 0:
+        raise ValueError("call_r2_right_trimming must be >= 0")
+    call_trimming_cfg = cfg.get("call_trimming")
+    if call_trimming_cfg is None:
+        call_trimming_cfg = {}
+    if not isinstance(call_trimming_cfg, dict):
+        raise ValueError("call_trimming must be an object")
+    flat_call_trim = {
+        "r1_left": settings["call_r1_left_trimming"],
+        "r1_right": settings["call_r1_right_trimming"],
+        "r2_left": settings["call_r2_left_trimming"],
+        "r2_right": settings["call_r2_right_trimming"],
+    }
+    settings["call_trim_host"] = resolve_call_trim_target(
+        call_trimming_cfg.get("host"), flat_call_trim, "host"
+    )
+    settings["call_trim_spike"] = resolve_call_trim_target(
+        call_trimming_cfg.get("spike"), flat_call_trim, "spike"
+    )
+    settings["call_caller_script"] = (
+        settings["call_caller_script"] or "scripts-emseq/methy_caller.py"
+    )
 
     settings["host_subsample_fraction"] = (
         float(settings["host_subsample_fraction"])
@@ -1612,31 +1648,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     if settings["mbias_min_mapping_quality"] < 0:
         raise ValueError("mbias_min_mapping_quality must be >= 0")
-
-    # Step-specific slurm for split.
-    settings["split_bams_slurm_partition"] = (
-        pick(args.slurm_partition, split_bams_slurm_cfg.get("partition"))
-        or settings["slurm_partition"]
-    )
-    settings["split_bams_slurm_mem"] = (
-        pick(args.slurm_mem, split_bams_slurm_cfg.get("mem")) or settings["slurm_mem"]
-    )
-    settings["split_bams_slurm_cpus_per_task"] = (
-        pick(args.slurm_cpus_per_task, split_bams_slurm_cfg.get("cpus_per_task"))
-        or settings["slurm_cpus_per_task"]
-    )
-
-    settings["split_sort_slurm_partition"] = (
-        pick(args.slurm_partition, split_sort_slurm_cfg.get("partition"))
-        or settings["slurm_partition"]
-    )
-    settings["split_sort_slurm_mem"] = (
-        pick(args.slurm_mem, split_sort_slurm_cfg.get("mem")) or settings["slurm_mem"]
-    )
-    settings["split_sort_slurm_cpus_per_task"] = (
-        pick(args.slurm_cpus_per_task, split_sort_slurm_cfg.get("cpus_per_task"))
-        or settings["slurm_cpus_per_task"]
-    )
 
     # Step-specific slurm for call: slurm.call.host / slurm.call.spike.
     if isinstance(stage_slurm_cfg, dict) and ("host" in stage_slurm_cfg or "spike" in stage_slurm_cfg):
@@ -1784,33 +1795,6 @@ def submit_script(path: Path, runner: str) -> None:
         subprocess.run(["sbatch", str(path)], check=True)
 
 
-def generate_split_slurm_submit_script(
-    split_script_path: Path, sort_script_path: Path, output_path: Path
-) -> None:
-    """Create a helper that submits split_bams first, then sort via dependency."""
-    lines = [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        "",
-        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-        "",
-        'split_out="$(sbatch "$SCRIPT_DIR/' + split_script_path.name + '")"',
-        'echo "$split_out"',
-        'jid_split_bams="${split_out##* }"',
-        "",
-        'sort_out="$(sbatch --dependency=afterok:${jid_split_bams} "$SCRIPT_DIR/'
-        + sort_script_path.name
-        + '")"',
-        'echo "$sort_out"',
-        'jid_split_sort="${sort_out##* }"',
-        "",
-        'echo "[split.submit] done split_bams=${jid_split_bams} split_sort=${jid_split_sort}"',
-        "",
-    ]
-    write_text(output_path, "\n".join(lines))
-    output_path.chmod(0o755)
-
-
 def parse_emseq_generated_paths(command_output: str) -> list[Path]:
     """Collect paths from child `make_cmd` stdout lines."""
     generated: list[Path] = []
@@ -1825,7 +1809,7 @@ def build_stage_passthrough_args(argv: list[str]) -> list[str]:
     """Strip `--stage` / `--runner` / `--submit` / `--dry-run` for subprocess invocations."""
     passthrough: list[str] = []
     flags_without_value = {
-        "--split-smoke",
+        "--call-smoke",
         "--submit",
         "--dry-run",
         "--skip-workdir-input-checks",
@@ -1881,7 +1865,7 @@ def generate_emseq_slurm_driver_script(
     log_dir: Path,
     driver_settings: dict,
 ) -> None:
-    """Chain stage sbatch scripts with afterok; split uses internal two-step deps."""
+    """Chain stage sbatch scripts with afterok dependencies."""
     lines = [
         "submit_with_dep() {",
         '  local script_path="$1"',
@@ -1919,27 +1903,15 @@ def generate_emseq_slurm_driver_script(
         if not scripts:
             continue
         lines.append(f'echo "[emseq.run.sbatch] stage={stage_name}"')
-        if stage_name == "split":
+        job_vars: list[str] = []
+        for index, script_path in enumerate(scripts):
+            var_name = f"jid_{stage_name}_{index}".replace("-", "_")
             lines.append(
-                f'jid_split_bams="$(submit_with_dep "$SCRIPT_DIR/{scripts[0].name}" "$prev_stage_deps")"'
+                f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
             )
-            if len(scripts) > 1:
-                lines.append(
-                    f'jid_split_sort="$(submit_with_dep "$SCRIPT_DIR/{scripts[1].name}" "$jid_split_bams")"'
-                )
-                lines.append('prev_stage_deps="$jid_split_sort"')
-            else:
-                lines.append('prev_stage_deps="$jid_split_bams"')
-        else:
-            job_vars: list[str] = []
-            for index, script_path in enumerate(scripts):
-                var_name = f"jid_{stage_name}_{index}".replace("-", "_")
-                lines.append(
-                    f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
-                )
-                job_vars.append(var_name)
-            deps_join = " ".join(f"${var_name}" for var_name in job_vars)
-            lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
+            job_vars.append(var_name)
+        deps_join = " ".join(f"${var_name}" for var_name in job_vars)
+        lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
         lines.append("")
     lines.append('echo "[emseq.run.sbatch] done final_dep=${prev_stage_deps}"')
     driver_command = "\n".join(lines)
@@ -2380,106 +2352,6 @@ def main() -> int:
                 print(
                     f"[emseq.make_cmd] submitted_count={len(generated_scripts)}"
                 )
-    elif stage == "split":
-        command_args = argparse.Namespace(
-            split_barcodes=settings["split_barcodes"],
-            split_cb_tag=settings["split_cb_tag"],
-            split_threads_read=settings["split_threads_read"],
-            split_threads_write=settings["split_threads_write"],
-            split_smoke=settings["split_smoke"],
-            samtools_bin=settings["samtools_bin"],
-            split_sort_jobs=settings["split_sort_jobs"],
-        )
-
-        print(f"[emseq.make_cmd] runner={settings['runner']}")
-        print(f"[emseq.make_cmd] stage={stage}")
-        print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
-
-        if settings["runner"] == "local":
-            script_path = command_dir / "05_split.sh"
-            split_command = build_split_command(command_args, sample_work)
-            sort_command = build_split_sort_command(command_args, sample_work)
-            command = f"{split_command}\n{sort_command}"
-            print(f"[emseq.make_cmd] script={script_path}")
-            print(f"[emseq.make_cmd] command={split_command}")
-            print(f"[emseq.make_cmd] command={sort_command}")
-            if settings["dry_run"]:
-                return 0
-            generate_local_script(command, script_path)
-            print(f"[emseq.make_cmd] generated={script_path}")
-            if settings["submit"]:
-                submit_script(script_path, settings["runner"])
-                print("[emseq.make_cmd] submitted_count=1")
-        else:
-            split_script_path = command_dir / "05_split_bams.sbatch"
-            sort_script_path = command_dir / "05_split_sort.sbatch"
-            split_submit_helper_path = command_dir / "05_split_submit.sh"
-            split_command = build_split_command(command_args, sample_work)
-            sort_command = build_split_sort_command(command_args, sample_work)
-
-            split_job_name = f"emseq_split_bams_{settings['sample_id']}"
-            sort_job_name = f"emseq_split_sort_{settings['sample_id']}"
-
-            split_output = (settings["slurm_output"] or "").replace(
-                "%x", split_job_name
-            )
-            split_error = (settings["slurm_error"] or "").replace(
-                "%x", split_job_name
-            )
-            sort_output = (settings["slurm_output"] or "").replace(
-                "%x", sort_job_name
-            )
-            sort_error = (settings["slurm_error"] or "").replace(
-                "%x", sort_job_name
-            )
-
-            split_slurm_settings = {
-                "sample_id": settings["sample_id"],
-                "stage": stage,
-                "slurm_partition": settings["split_bams_slurm_partition"],
-                "slurm_mem": settings["split_bams_slurm_mem"],
-                "slurm_cpus_per_task": settings["split_bams_slurm_cpus_per_task"],
-                "slurm_output": split_output,
-                "slurm_error": split_error,
-                "job_name": split_job_name,
-            }
-            sort_slurm_settings = {
-                "sample_id": settings["sample_id"],
-                "stage": stage,
-                "slurm_partition": settings["split_sort_slurm_partition"],
-                "slurm_mem": settings["split_sort_slurm_mem"],
-                "slurm_cpus_per_task": settings["split_sort_slurm_cpus_per_task"],
-                "slurm_output": sort_output,
-                "slurm_error": sort_error,
-                "job_name": sort_job_name,
-            }
-
-            print(f"[emseq.make_cmd] script={split_script_path}")
-            print(f"[emseq.make_cmd] command={split_command}")
-            print(f"[emseq.make_cmd] script={sort_script_path}")
-            print(f"[emseq.make_cmd] command={sort_command}")
-            print(f"[emseq.make_cmd] helper={split_submit_helper_path}")
-
-            if not settings["dry_run"]:
-                generate_slurm_script(
-                    split_command, split_script_path, log_dir, split_slurm_settings
-                )
-                print(f"[emseq.make_cmd] generated={split_script_path}")
-                generate_slurm_script(
-                    sort_command, sort_script_path, log_dir, sort_slurm_settings
-                )
-                print(f"[emseq.make_cmd] generated={sort_script_path}")
-                generate_split_slurm_submit_script(
-                    split_script_path,
-                    sort_script_path,
-                    split_submit_helper_path,
-                )
-
-                if settings["submit"]:
-                    subprocess.run(
-                        ["bash", str(split_submit_helper_path)], check=True
-                    )
-                    print("[emseq.make_cmd] submitted_count=1")
     elif stage == "mbias":
         command_args = argparse.Namespace(
             samtools_bin=settings["samtools_bin"],
@@ -2499,7 +2371,7 @@ def main() -> int:
         print(f"[emseq.make_cmd] mbias_mode={settings['mbias_mode']}")
 
         if settings["runner"] == "local":
-            script_path = command_dir / "06_mbias.sh"
+            script_path = command_dir / "05_mbias.sh"
             command = build_mbias_command(
                 command_args,
                 sample_work,
@@ -2521,7 +2393,7 @@ def main() -> int:
             generated_scripts: list[Path] = []
 
             if include_host:
-                host_script_path = command_dir / "06_mbias_host.sbatch"
+                host_script_path = command_dir / "05_mbias_host.sbatch"
                 host_job_name = f"emseq_mbias_host_{settings['sample_id']}"
                 host_command = build_mbias_command(
                     command_args, sample_work, "host"
@@ -2554,7 +2426,7 @@ def main() -> int:
             if include_spike:
                 for spike_name in parse_spike_names(settings["spike_in_index"]):
                     spike_script_path = (
-                        command_dir / f"06_mbias_spike_{spike_name}.sbatch"
+                        command_dir / f"05_mbias_spike_{spike_name}.sbatch"
                     )
                     spike_job_name = (
                         f"emseq_mbias_spike_{settings['sample_id']}_{spike_name}"
@@ -2611,16 +2483,24 @@ def main() -> int:
 
         command_args = argparse.Namespace(
             call_reference_file=settings["call_reference_file"],
-            call_jobs=settings["call_jobs"],
-            call_host_threads=settings["call_host_threads"],
-            call_spike_threads=settings["call_spike_threads"],
-            call_bgzip_bin=settings["call_bgzip_bin"],
-            call_tabix_bin=settings["call_tabix_bin"],
+            call_chromosomes=settings["call_chromosomes"],
             call_mito_chromosomes=settings["call_mito_chromosomes"],
-            call_left_trimming=settings["call_left_trimming"],
-            call_right_trimming=settings["call_right_trimming"],
-            biscuit_bin=settings["biscuit_bin"],
+            call_jobs=settings["call_jobs"],
+            call_min_base_quality=settings["call_min_base_quality"],
+            call_min_mapping_quality=settings["call_min_mapping_quality"],
+            call_sample_size=settings["call_sample_size"],
+            call_max_depth=settings["call_max_depth"],
+            call_batch_size=settings["call_batch_size"],
+            call_context_mode=settings["call_context_mode"],
+            call_trim_host=settings["call_trim_host"],
+            call_trim_spike=settings["call_trim_spike"],
+            call_caller_script=settings["call_caller_script"],
+            samtools_bin=settings["samtools_bin"],
+            samtools_threads=settings["samtools_threads"],
+            mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
             spike_in_index=settings["spike_in_index"],
+            split_barcodes=settings["split_barcodes"],
+            call_smoke=settings["call_smoke"],
         )
 
         print(f"[emseq.make_cmd] runner={settings['runner']}")
@@ -2630,16 +2510,27 @@ def main() -> int:
         print(f"[emseq.make_cmd] spike_in_count={len(spike_names)}")
 
         if settings["runner"] == "local":
-            script_path = command_dir / "08_call.sh"
-            spike_references = (
-                settings["spike_in_index"] if include_spike else []
+            script_path = command_dir / "06_call.sh"
+            call_mode = effective_mode
+            trims_differ = (
+                settings["call_trim_host"] != settings["call_trim_spike"]
             )
-            command = build_call_command(
-                command_args,
-                sample_work,
-                effective_mode,
-                spike_references=spike_references,
-            )
+            if call_mode == "all" and trims_differ:
+                sub_commands: list[str] = [
+                    build_call_command(command_args, sample_work, "host")
+                ]
+                for spike_name in spike_names:
+                    sub_commands.append(
+                        build_call_command(
+                            command_args,
+                            sample_work,
+                            "spike",
+                            spike_name=spike_name,
+                        )
+                    )
+                command = "\n\n".join(sub_commands)
+            else:
+                command = build_call_command(command_args, sample_work, call_mode)
             print(f"[emseq.make_cmd] script={script_path}")
             print(f"[emseq.make_cmd] command={command}")
             if settings["dry_run"]:
@@ -2653,7 +2544,7 @@ def main() -> int:
             generated_scripts: list[Path] = []
 
             if include_host:
-                host_script_path = command_dir / "08_call_host.sbatch"
+                host_script_path = command_dir / "06_call_host.sbatch"
                 host_job_name = f"emseq_call_host_{settings['sample_id']}"
                 host_output = (settings["slurm_output"] or "").replace(
                     "%x", host_job_name
@@ -2665,7 +2556,6 @@ def main() -> int:
                     command_args,
                     sample_work,
                     "host",
-                    spike_references=[],
                 )
                 host_slurm_settings = {
                     "sample_id": settings["sample_id"],
@@ -2689,7 +2579,7 @@ def main() -> int:
             if include_spike:
                 for spike_name in spike_names:
                     spike_script_path = (
-                        command_dir / f"08_call_spike_{spike_name}.sbatch"
+                        command_dir / f"06_call_spike_{spike_name}.sbatch"
                     )
                     spike_job_name = (
                         f"emseq_call_spike_{settings['sample_id']}_{spike_name}"
@@ -2700,17 +2590,11 @@ def main() -> int:
                     spike_error = (settings["slurm_error"] or "").replace(
                         "%x", spike_job_name
                     )
-                    spike_reference_items: list[str] = [
-                        item
-                        for item in settings["spike_in_index"]
-                        if item.split("=", 1)[0] == spike_name
-                    ]
                     spike_command = build_call_command(
                         command_args,
                         sample_work,
                         "spike",
                         spike_name=spike_name,
-                        spike_references=spike_reference_items,
                     )
                     spike_slurm_settings = {
                         "sample_id": settings["sample_id"],
@@ -2747,7 +2631,7 @@ def main() -> int:
         )
         command = build_saturation_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "09_saturation.sh"
+            script_path = command_dir / "07_saturation.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -2761,7 +2645,7 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "09_saturation.sbatch"
+            script_path = command_dir / "07_saturation.sbatch"
             job_name = f"emseq_saturation_{settings['sample_id']}"
             sat_output = (settings["slurm_output"] or "").replace("%x", job_name)
             sat_error = (settings["slurm_error"] or "").replace("%x", job_name)
@@ -2794,7 +2678,7 @@ def main() -> int:
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "10_summary.sh"
+            script_path = command_dir / "08_summary.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -2808,7 +2692,7 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "10_summary.sbatch"
+            script_path = command_dir / "08_summary.sbatch"
             job_name = f"emseq_summary_{settings['sample_id']}"
             summary_output = (settings["slurm_output"] or "").replace("%x", job_name)
             summary_error = (settings["slurm_error"] or "").replace("%x", job_name)
