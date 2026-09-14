@@ -18,7 +18,6 @@ STAGE_SEQUENCE = [
     "demux_extract_bc",
     "align",
     "pool",
-    "split",
     "mbias",
     "call",
     "saturation",
@@ -45,7 +44,6 @@ STAGE_REQUIRED_FIELDS = {
     ],
     "align": ["bwa_index", "number_of_split_parts"],
     "pool": [],
-    "split": ["split_barcodes"],
     "mbias": [],
     "call": ["call_reference_file", "call_chromosomes"],
     "saturation": [],
@@ -204,32 +202,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--split-barcodes",
-        help="Barcode whitelist path for split stage. Default: barcode1_whitelist.",
-    )
-    parser.add_argument(
-        "--split-cb-tag",
-        help="CB-like tag name used in split stage. Default: CB.",
-    )
-    parser.add_argument(
-        "--split-threads-read",
-        type=int,
-        help="Reader threads for split stage. Default: 1.",
-    )
-    parser.add_argument(
-        "--split-threads-write",
-        type=int,
-        help="Writer threads for split stage. Default: 1.",
-    )
-    parser.add_argument(
-        "--split-smoke",
-        action="store_true",
-        default=None,
-        help="Enable smoke mode for split stage and emit up to 16 spot BAMs.",
-    )
-    parser.add_argument(
-        "--split-sort-jobs",
-        type=int,
-        help="Parallel job count for bam_sort_parallel in split stage. Default: 8.",
+        help="Barcode whitelist path passed to call --barcodes. Default: barcode1_whitelist.",
     )
     parser.add_argument(
         "--mbias-host-subsample-fraction",
@@ -301,6 +274,12 @@ def parse_args() -> argparse.Namespace:
         "--call-mode",
         choices=["all", "host", "spike"],
         help="Mode for call stage. Default: all.",
+    )
+    parser.add_argument(
+        "--call-smoke",
+        action="store_true",
+        default=None,
+        help="Enable smoke mode for call stage (top 16 spots by read count).",
     )
     parser.add_argument(
         "--call-context-mode",
@@ -661,44 +640,6 @@ def build_pool_command(
     return quoted(command)
 
 
-def build_split_command(args: argparse.Namespace, sample_work: Path) -> str:
-    script_path = Path("scripts/split_bams.py")
-    command = [
-        sys.executable,
-        str(script_path),
-        "--in-bam",
-        str(sample_work / "pooled" / "pooled.byCB.bam"),
-        "--barcodes",
-        args.split_barcodes,
-        "--out-dir",
-        str(sample_work / "split_bams"),
-        "--cb-tag",
-        args.split_cb_tag,
-        "--threads-read",
-        str(args.split_threads_read),
-        "--threads-write",
-        str(args.split_threads_write),
-    ]
-    if args.split_smoke:
-        command.append("--smoke")
-    return quoted(command)
-
-
-def build_split_sort_command(args: argparse.Namespace, sample_work: Path) -> str:
-    script_path = Path("scripts/bam_sort_parallel.py")
-    command = [
-        sys.executable,
-        str(script_path),
-        "--work-path",
-        str(sample_work),
-        "--samtools-bin",
-        args.samtools_bin,
-        "--jobs",
-        str(args.split_sort_jobs),
-    ]
-    return quoted(command)
-
-
 CALL_TRIM_FIELDS = ("r1_left", "r1_right", "r2_left", "r2_right")
 
 
@@ -777,6 +718,8 @@ def build_call_command(
         command.extend(["--sample-size", str(args.call_sample_size)])
     if mode in ("all", "host"):
         command.extend(["--barcodes", args.split_barcodes])
+        if args.call_smoke:
+            command.append("--smoke")
     if mode in ("all", "spike"):
         for item in args.spike_in_index:
             command.extend(["--spike-reference", item])
@@ -1159,17 +1102,6 @@ def validate_inputs_for_stage(
         if not skip_workdir_inputs:
             wic.validate_pool_align_shards(sample_work, spike)
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
-    elif stage == "split":
-        if not skip_workdir_inputs:
-            wic.require_file(
-                "pooled.byCB.bam",
-                sample_work / "pooled" / "pooled.byCB.bam",
-            )
-        wic.require_file(
-            "split_barcodes",
-            wic.resolve_config_path(settings["split_barcodes"]),
-        )
-        wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
     elif stage == "mbias":
         wic.require_script_path("mbias_script", settings["mbias_script"])
         mbias_mode = settings.get("mbias_mode") or "spike"
@@ -1178,6 +1110,11 @@ def validate_inputs_for_stage(
                 "call_reference_file",
                 wic.resolve_config_path(settings["call_reference_file"]),
             )
+            if not skip_workdir_inputs:
+                wic.require_file(
+                    "pooled.host.sorted.bam",
+                    sample_work / "pooled" / "pooled.host.sorted.bam",
+                )
         if mbias_mode in ("all", "spike") and parse_spike_names(spike):
             wic.require_spike_index_paths(spike)
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
@@ -1189,18 +1126,16 @@ def validate_inputs_for_stage(
                 "call_reference_file",
                 wic.resolve_config_path(settings["call_reference_file"]),
             )
+            if not settings.get("split_barcodes"):
+                raise ValueError("missing required settings: split_barcodes")
+            wic.require_file(
+                "split_barcodes",
+                wic.resolve_config_path(settings["split_barcodes"]),
+            )
             if not skip_workdir_inputs:
                 wic.require_bam_index(
-                    "pooled.byCB.bam",
-                    sample_work / "pooled" / "pooled.byCB.bam",
-                )
-                wic.require_file(
-                    "per_spot_read_counts.tsv",
-                    sample_work / "split_bams" / "per_spot_read_counts.tsv",
-                )
-                wic.require_file(
-                    "split_barcodes",
-                    wic.resolve_config_path(settings["split_barcodes"]),
+                    "pooled.host.sorted.bam",
+                    sample_work / "pooled" / "pooled.host.sorted.bam",
                 )
         if call_mode in ("all", "spike") and parse_spike_names(spike):
             wic.require_spike_index_paths(spike)
@@ -1209,6 +1144,11 @@ def validate_inputs_for_stage(
         wic.require_script_path("saturation_script", settings["saturation_script"])
     elif stage == "summary":
         wic.require_script_path("summary_script", settings["summary_script"])
+        if not skip_workdir_inputs:
+            wic.require_file(
+                "pooled.host.sorted.bam",
+                sample_work / "pooled" / "pooled.host.sorted.bam",
+            )
     elif stage == "aggregate":
         wic.require_script_path("aggregate_script", settings["aggregate_script"])
     elif stage in METHSCAN_STAGES:
@@ -1253,16 +1193,6 @@ def apply_stage_slurm_settings(
     stage_settings = dict(settings)
     stage_settings["stage"] = stage
     stage_slurm_cfg = select_stage_slurm_cfg(settings["slurm_cfg_raw"], stage)
-    split_bams_slurm_cfg = resolve_step_slurm_cfg(
-        stage_slurm_cfg,
-        "split_bams",
-        {"split_bams", "sort"},
-    )
-    split_sort_slurm_cfg = resolve_step_slurm_cfg(
-        stage_slurm_cfg,
-        "sort",
-        {"split_bams", "sort"},
-    )
     call_host_slurm_cfg = resolve_step_slurm_cfg(
         stage_slurm_cfg,
         "host",
@@ -1310,47 +1240,6 @@ def apply_stage_slurm_settings(
         pick(args.slurm_error, stage_slurm_cfg.get("error"))
         or stage_settings.get("slurm_error")
         or default_error
-    )
-
-    stage_settings["split_bams_slurm_partition"] = (
-        pick(args.slurm_partition, split_bams_slurm_cfg.get("partition"))
-        or stage_settings["slurm_partition"]
-    )
-    stage_settings["split_bams_slurm_mem"] = (
-        pick(args.slurm_mem, split_bams_slurm_cfg.get("mem"))
-        or stage_settings["slurm_mem"]
-    )
-    stage_settings["split_bams_slurm_cpus_per_task"] = (
-        pick(args.slurm_cpus_per_task, split_bams_slurm_cfg.get("cpus_per_task"))
-        or stage_settings["slurm_cpus_per_task"]
-    )
-    stage_settings["split_bams_slurm_output"] = (
-        pick(args.slurm_output, split_bams_slurm_cfg.get("output"))
-        or stage_settings["slurm_output"]
-    )
-    stage_settings["split_bams_slurm_error"] = (
-        pick(args.slurm_error, split_bams_slurm_cfg.get("error"))
-        or stage_settings["slurm_error"]
-    )
-    stage_settings["split_sort_slurm_partition"] = (
-        pick(args.slurm_partition, split_sort_slurm_cfg.get("partition"))
-        or stage_settings["slurm_partition"]
-    )
-    stage_settings["split_sort_slurm_mem"] = (
-        pick(args.slurm_mem, split_sort_slurm_cfg.get("mem"))
-        or stage_settings["slurm_mem"]
-    )
-    stage_settings["split_sort_slurm_cpus_per_task"] = (
-        pick(args.slurm_cpus_per_task, split_sort_slurm_cfg.get("cpus_per_task"))
-        or stage_settings["slurm_cpus_per_task"]
-    )
-    stage_settings["split_sort_slurm_output"] = (
-        pick(args.slurm_output, split_sort_slurm_cfg.get("output"))
-        or stage_settings["slurm_output"]
-    )
-    stage_settings["split_sort_slurm_error"] = (
-        pick(args.slurm_error, split_sort_slurm_cfg.get("error"))
-        or stage_settings["slurm_error"]
     )
 
     stage_settings["call_host_slurm_partition"] = (
@@ -1474,16 +1363,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     else:
         slurm_stage_key = STAGE_SEQUENCE[0]
     stage_slurm_cfg = select_stage_slurm_cfg(slurm_cfg_raw, slurm_stage_key)
-    split_bams_slurm_cfg = resolve_step_slurm_cfg(
-        stage_slurm_cfg,
-        "split_bams",
-        {"split_bams", "sort"},
-    )
-    split_sort_slurm_cfg = resolve_step_slurm_cfg(
-        stage_slurm_cfg,
-        "sort",
-        {"split_bams", "sort"},
-    )
     call_host_slurm_cfg = resolve_step_slurm_cfg(
         stage_slurm_cfg,
         "host",
@@ -1552,15 +1431,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.split_barcodes,
             cfg.get("split_barcodes", cfg.get("barcode1_whitelist")),
         ),
-        "split_cb_tag": pick(args.split_cb_tag, cfg.get("split_cb_tag")),
-        "split_threads_read": pick(
-            args.split_threads_read, cfg.get("split_threads_read")
-        ),
-        "split_threads_write": pick(
-            args.split_threads_write, cfg.get("split_threads_write")
-        ),
-        "split_smoke": pick(args.split_smoke, cfg.get("split_smoke")),
-        "split_sort_jobs": pick(args.split_sort_jobs, cfg.get("split_sort_jobs")),
         "mbias_host_subsample_fraction": pick(
             args.mbias_host_subsample_fraction, cfg.get("mbias_host_subsample_fraction")
         ),
@@ -1589,6 +1459,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "call_max_depth": pick(args.call_max_depth, cfg.get("call_max_depth")),
         "call_batch_size": pick(args.call_batch_size, cfg.get("call_batch_size")),
         "call_mode": pick(args.call_mode, cfg.get("call_mode")),
+        "call_smoke": pick(args.call_smoke, cfg.get("call_smoke")),
         "call_context_mode": pick(
             args.call_context_mode,
             cfg.get("call_context_mode"),
@@ -1676,32 +1547,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         ),
         "slurm_output": pick(args.slurm_output, stage_slurm_cfg.get("output")),
         "slurm_error": pick(args.slurm_error, stage_slurm_cfg.get("error")),
-        "split_bams_slurm_partition": pick(
-            args.slurm_partition, split_bams_slurm_cfg.get("partition")
-        ),
-        "split_bams_slurm_mem": pick(args.slurm_mem, split_bams_slurm_cfg.get("mem")),
-        "split_bams_slurm_cpus_per_task": pick(
-            args.slurm_cpus_per_task, split_bams_slurm_cfg.get("cpus_per_task")
-        ),
-        "split_bams_slurm_output": pick(
-            args.slurm_output, split_bams_slurm_cfg.get("output")
-        ),
-        "split_bams_slurm_error": pick(
-            args.slurm_error, split_bams_slurm_cfg.get("error")
-        ),
-        "split_sort_slurm_partition": pick(
-            args.slurm_partition, split_sort_slurm_cfg.get("partition")
-        ),
-        "split_sort_slurm_mem": pick(args.slurm_mem, split_sort_slurm_cfg.get("mem")),
-        "split_sort_slurm_cpus_per_task": pick(
-            args.slurm_cpus_per_task, split_sort_slurm_cfg.get("cpus_per_task")
-        ),
-        "split_sort_slurm_output": pick(
-            args.slurm_output, split_sort_slurm_cfg.get("output")
-        ),
-        "split_sort_slurm_error": pick(
-            args.slurm_error, split_sort_slurm_cfg.get("error")
-        ),
         "call_host_slurm_partition": pick(
             args.slurm_partition, call_host_slurm_cfg.get("partition")
         ),
@@ -1827,27 +1672,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["split_barcodes"] = (
         settings["split_barcodes"] or settings["barcode1_whitelist"]
     )
-    settings["split_cb_tag"] = settings["split_cb_tag"] or "CB"
-    settings["split_threads_read"] = (
-        int(settings["split_threads_read"])
-        if settings["split_threads_read"] is not None
-        else 1
-    )
-    settings["split_threads_write"] = (
-        int(settings["split_threads_write"])
-        if settings["split_threads_write"] is not None
-        else 1
-    )
-    if settings["split_threads_read"] <= 0:
-        raise ValueError("split_threads_read must be > 0")
-    if settings["split_threads_write"] <= 0:
-        raise ValueError("split_threads_write must be > 0")
-    settings["split_smoke"] = bool(settings["split_smoke"])
-    settings["split_sort_jobs"] = (
-        int(settings["split_sort_jobs"]) if settings["split_sort_jobs"] is not None else 8
-    )
-    if settings["split_sort_jobs"] <= 0:
-        raise ValueError("split_sort_jobs must be > 0")
     settings["mbias_host_subsample_fraction"] = (
         float(settings["mbias_host_subsample_fraction"])
         if settings["mbias_host_subsample_fraction"] is not None
@@ -1917,6 +1741,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["call_mode"] = settings["call_mode"] or "all"
     if settings["call_mode"] not in {"all", "host", "spike"}:
         raise ValueError("call_mode must be one of: all, host, spike")
+    settings["call_smoke"] = bool(settings["call_smoke"])
     settings["call_context_mode"] = settings["call_context_mode"] or "cg"
     if settings["call_context_mode"] not in {"cg", "ch", "both"}:
         raise ValueError("call_context_mode must be one of: cg, ch, both")
@@ -2041,36 +1866,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         / settings["sample_id"]
         / "logs"
         / f"{stage}_%x_%j.err"
-    )
-    settings["split_bams_slurm_partition"] = (
-        settings["split_bams_slurm_partition"] or settings["slurm_partition"]
-    )
-    settings["split_bams_slurm_mem"] = (
-        settings["split_bams_slurm_mem"] or settings["slurm_mem"]
-    )
-    settings["split_bams_slurm_cpus_per_task"] = (
-        settings["split_bams_slurm_cpus_per_task"] or settings["slurm_cpus_per_task"]
-    )
-    settings["split_bams_slurm_output"] = (
-        settings["split_bams_slurm_output"] or settings["slurm_output"]
-    )
-    settings["split_bams_slurm_error"] = (
-        settings["split_bams_slurm_error"] or settings["slurm_error"]
-    )
-    settings["split_sort_slurm_partition"] = (
-        settings["split_sort_slurm_partition"] or settings["slurm_partition"]
-    )
-    settings["split_sort_slurm_mem"] = (
-        settings["split_sort_slurm_mem"] or settings["slurm_mem"]
-    )
-    settings["split_sort_slurm_cpus_per_task"] = (
-        settings["split_sort_slurm_cpus_per_task"] or settings["slurm_cpus_per_task"]
-    )
-    settings["split_sort_slurm_output"] = (
-        settings["split_sort_slurm_output"] or settings["slurm_output"]
-    )
-    settings["split_sort_slurm_error"] = (
-        settings["split_sort_slurm_error"] or settings["slurm_error"]
     )
     settings["call_host_slurm_partition"] = (
         settings["call_host_slurm_partition"] or settings["slurm_partition"]
@@ -2215,7 +2010,7 @@ def join_dependency_ids(job_ids: list[str]) -> str:
 def build_stage_passthrough_args(argv: list[str]) -> list[str]:
     passthrough: list[str] = []
     flags_without_value = {
-        "--split-smoke",
+        "--call-smoke",
         "--submit",
         "--dry-run",
         "--skip-workdir-input-checks",
@@ -2263,32 +2058,6 @@ def generate_local_driver_script(stage_scripts: list[tuple[str, list[Path]]], ou
     output_path.chmod(0o755)
 
 
-def generate_split_slurm_submit_script(
-    split_script_path: Path, sort_script_path: Path, output_path: Path
-) -> None:
-    lines = [
-        "#!/usr/bin/env bash",
-        "set -euo pipefail",
-        "",
-        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-        "",
-        'split_out="$(sbatch "$SCRIPT_DIR/' + split_script_path.name + '")"',
-        'echo "$split_out"',
-        'jid_split_bams="${split_out##* }"',
-        "",
-        'sort_out="$(sbatch --dependency=afterok:${jid_split_bams} "$SCRIPT_DIR/'
-        + sort_script_path.name
-        + '")"',
-        'echo "$sort_out"',
-        'jid_split_sort="${sort_out##* }"',
-        "",
-        'echo "[split.submit] done split_bams=${jid_split_bams} split_sort=${jid_split_sort}"',
-        "",
-    ]
-    write_text(output_path, "\n".join(lines))
-    output_path.chmod(0o755)
-
-
 def generate_slurm_driver_script(
     stage_scripts: list[tuple[str, list[Path]]],
     output_path: Path,
@@ -2332,27 +2101,15 @@ def generate_slurm_driver_script(
         if not scripts:
             continue
         lines.append(f'echo "[run.sbatch] stage={stage_name}"')
-        if stage_name == "split":
+        job_vars: list[str] = []
+        for index, script_path in enumerate(scripts):
+            var_name = f"jid_{stage_name}_{index}".replace("-", "_")
             lines.append(
-                f'jid_split_bams="$(submit_with_dep "$SCRIPT_DIR/{scripts[0].name}" "$prev_stage_deps")"'
+                f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
             )
-            if len(scripts) > 1:
-                lines.append(
-                    f'jid_split_sort="$(submit_with_dep "$SCRIPT_DIR/{scripts[1].name}" "$jid_split_bams")"'
-                )
-                lines.append('prev_stage_deps="$jid_split_sort"')
-            else:
-                lines.append('prev_stage_deps="$jid_split_bams"')
-        else:
-            job_vars: list[str] = []
-            for index, script_path in enumerate(scripts):
-                var_name = f"jid_{stage_name}_{index}".replace("-", "_")
-                lines.append(
-                    f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
-                )
-                job_vars.append(var_name)
-            deps_join = " ".join(f"${var_name}" for var_name in job_vars)
-            lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
+            job_vars.append(var_name)
+        deps_join = " ".join(f"${var_name}" for var_name in job_vars)
+        lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
         lines.append("")
     lines.append('echo "[run.sbatch] done final_dep=${prev_stage_deps}"')
     driver_command = "\n".join(lines)
@@ -2375,19 +2132,11 @@ def generate_slurm_driver_script(
 def submit_generated_stage_scripts(
     generated_scripts: list[Path],
     runner: str,
-    stage: str,
 ) -> str | None:
     if runner == "local":
         for script_path in generated_scripts:
             submit_script(script_path, runner)
         return None
-
-    if stage == "split":
-        if len(generated_scripts) < 2:
-            raise ValueError("missing split stage scripts for slurm submission")
-        jid_split_bams = submit_slurm_script(generated_scripts[0])
-        jid_split_sort = submit_slurm_script(generated_scripts[1], jid_split_bams)
-        return jid_split_sort
 
     submitted_job_ids = [submit_slurm_script(script_path) for script_path in generated_scripts]
     return join_dependency_ids(submitted_job_ids)
@@ -2399,7 +2148,6 @@ def main() -> int:
     sample_work = Path(settings["work_root"]) / settings["sample_id"]
     command_dir = sample_work / "commands"
     log_dir = sample_work / "logs"
-    split_submit_helper_path: Path | None = None
 
     if settings["stage"] != "all":
         validate_inputs_for_stage(
@@ -2692,83 +2440,6 @@ def main() -> int:
                 generate_slurm_script(host_command, host_script_path, log_dir, host_slurm_args)
             generated_scripts.append(spike_script_path)
             generated_scripts.append(host_script_path)
-    elif settings["stage"] == "split":
-        command_args = argparse.Namespace(
-            split_barcodes=settings["split_barcodes"],
-            split_cb_tag=settings["split_cb_tag"],
-            split_threads_read=settings["split_threads_read"],
-            split_threads_write=settings["split_threads_write"],
-            split_smoke=settings["split_smoke"],
-            samtools_bin=settings["samtools_bin"],
-            split_sort_jobs=settings["split_sort_jobs"],
-        )
-        if settings["runner"] == "local":
-            script_path = command_dir / "05_split.sh"
-            split_command = build_split_command(command_args, sample_work)
-            sort_command = build_split_sort_command(command_args, sample_work)
-            command = f"{split_command}\n{sort_command}"
-            print(f"[make_cmd] runner={settings['runner']}")
-            print(f"[make_cmd] stage={settings['stage']}")
-            print(f"[make_cmd] sample_id={settings['sample_id']}")
-            print(f"[make_cmd] script={script_path}")
-            print(f"[make_cmd] command={split_command}")
-            print(f"[make_cmd] command={sort_command}")
-            if settings["dry_run"]:
-                return 0
-            generate_local_script(command, script_path)
-            generated_scripts.append(script_path)
-        else:
-            split_script_path = command_dir / "05_split_bams.sbatch"
-            sort_script_path = command_dir / "05_split_sort.sbatch"
-            split_submit_helper_path = command_dir / "05_split_submit.sh"
-            split_command = build_split_command(command_args, sample_work)
-            sort_command = build_split_sort_command(command_args, sample_work)
-            print(f"[make_cmd] runner={settings['runner']}")
-            print(f"[make_cmd] stage={settings['stage']}")
-            print(f"[make_cmd] sample_id={settings['sample_id']}")
-            print(f"[make_cmd] script={split_script_path}")
-            print(f"[make_cmd] command={split_command}")
-            print(f"[make_cmd] script={sort_script_path}")
-            print(f"[make_cmd] command={sort_command}")
-            print(f"[make_cmd] helper={split_submit_helper_path}")
-            if not settings["dry_run"]:
-                split_slurm_args = argparse.Namespace(
-                    job_name=f"dbit_split_bams_{settings['sample_id']}",
-                    slurm_partition=settings["split_bams_slurm_partition"],
-                    slurm_mem=settings["split_bams_slurm_mem"],
-                    slurm_cpus_per_task=settings["split_bams_slurm_cpus_per_task"],
-                    slurm_output=settings["split_bams_slurm_output"].replace(
-                        "%x", f"dbit_split_bams_{settings['sample_id']}"
-                    ),
-                    slurm_error=settings["split_bams_slurm_error"].replace(
-                        "%x", f"dbit_split_bams_{settings['sample_id']}"
-                    ),
-                    module_line="",
-                )
-                sort_slurm_args = argparse.Namespace(
-                    job_name=f"dbit_split_sort_{settings['sample_id']}",
-                    slurm_partition=settings["split_sort_slurm_partition"],
-                    slurm_mem=settings["split_sort_slurm_mem"],
-                    slurm_cpus_per_task=settings["split_sort_slurm_cpus_per_task"],
-                    slurm_output=settings["split_sort_slurm_output"].replace(
-                        "%x", f"dbit_split_sort_{settings['sample_id']}"
-                    ),
-                    slurm_error=settings["split_sort_slurm_error"].replace(
-                        "%x", f"dbit_split_sort_{settings['sample_id']}"
-                    ),
-                    module_line="",
-                )
-                generate_slurm_script(
-                    split_command, split_script_path, log_dir, split_slurm_args
-                )
-                generate_slurm_script(
-                    sort_command, sort_script_path, log_dir, sort_slurm_args
-                )
-                generate_split_slurm_submit_script(
-                    split_script_path, sort_script_path, split_submit_helper_path
-                )
-            generated_scripts.append(split_script_path)
-            generated_scripts.append(sort_script_path)
     elif settings["stage"] == "mbias":
         command_args = argparse.Namespace(
             samtools_bin=settings["samtools_bin"],
@@ -2879,6 +2550,7 @@ def main() -> int:
             mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
             spike_in_index=settings["spike_in_index"],
             split_barcodes=settings["split_barcodes"],
+            call_smoke=settings["call_smoke"],
         )
         if settings["runner"] == "local":
             script_path = command_dir / "07_call.sh"
@@ -3117,14 +2789,11 @@ def main() -> int:
 
     for script_path in generated_scripts:
         print(f"[make_cmd] generated={script_path}")
-    if split_submit_helper_path and not settings["dry_run"] and split_submit_helper_path.exists():
-        print(f"[make_cmd] helper_generated={split_submit_helper_path}")
 
     if settings["submit"]:
         final_dependency = submit_generated_stage_scripts(
             generated_scripts,
             settings["runner"],
-            settings["stage"],
         )
         if final_dependency:
             print(f"[make_cmd] final_slurm_dependency={final_dependency}")
