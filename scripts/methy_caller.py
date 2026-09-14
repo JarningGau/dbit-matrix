@@ -7,6 +7,7 @@ import argparse
 import multiprocessing
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from collections import defaultdict
@@ -219,9 +220,25 @@ def spot_is_allowed(spot_id: Optional[str], allowed: Optional[Set[str]]) -> bool
     return spot_id in allowed
 
 
+def load_barcode_whitelist(path: str) -> Tuple[List[str], BarcodeMap, int]:
+    whitelist = Path(path)
+    if not whitelist.is_file():
+        raise ValueError(f"barcode whitelist not found: {whitelist}")
+    barcodes, barcode_to_index = read_barcodes(path)
+    if not barcodes:
+        raise ValueError("barcode whitelist is empty")
+    barcode_len = len(barcodes[0])
+    if any(len(barcode) != barcode_len for barcode in barcodes):
+        raise ValueError("barcode whitelist has unequal lengths")
+    return barcodes, barcode_to_index, barcode_len
+
+
 def load_spot_roster(path: str) -> List[str]:
+    roster_path = Path(path)
+    if not roster_path.is_file():
+        raise ValueError(f"spot roster not found: {roster_path}")
     spots: List[str] = []
-    with Path(path).open(encoding="utf-8") as handle:
+    with roster_path.open(encoding="utf-8") as handle:
         header = handle.readline()
         if not header:
             raise ValueError(f"spot roster is empty: {path}")
@@ -527,6 +544,117 @@ def append_parts(
             shutil.copyfileobj(part_handle, handles[context], length=16 * 1024 * 1024)
 
 
+HOST_CG_FIELDS = 7
+HOST_CH_FIELDS = 9
+
+
+def _spot_sort_key(line: str, field_index: int) -> str:
+    fields = line.rstrip("\n").split("\t")
+    if len(fields) < field_index:
+        return ""
+    return fields[field_index - 1]
+
+
+def sort_part_by_spot(part_path: Path, field_index: int) -> Path:
+    """Sort a combined part file by the spot_id column. Returns a temp path."""
+    sorted_path = part_path.with_name(part_path.name + f".sorted.{os.getpid()}")
+    sort_dir = str(part_path.parent)
+    try:
+        subprocess.run(
+            [
+                "sort",
+                "-s",
+                "-t",
+                "\t",
+                "-k",
+                f"{field_index},{field_index}",
+                "-T",
+                sort_dir,
+                "-o",
+                str(sorted_path),
+                str(part_path),
+            ],
+            check=True,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        with part_path.open(encoding="utf-8") as handle:
+            lines = sorted(handle, key=lambda line: _spot_sort_key(line, field_index))
+        sorted_path.write_text("".join(lines), encoding="utf-8")
+    return sorted_path
+
+
+def replace_atomic(temp_path: Path, final_path: Path) -> None:
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(temp_path, final_path)
+
+
+def write_empty_cov(path: Path) -> None:
+    temp_path = path.with_name(path.name + f".tmp.{os.getpid()}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path.write_text("", encoding="utf-8")
+    os.replace(temp_path, path)
+
+
+def stream_sorted_parts(
+    part_path: Path,
+    suffix: str,
+    expected_fields: int,
+    out_dir: Path,
+    allowed_spots: Set[str],
+    skip_spots: Set[str],
+) -> None:
+    if not part_path.is_file() or part_path.stat().st_size == 0:
+        return
+    sorted_path = sort_part_by_spot(part_path, expected_fields)
+    current_spot: Optional[str] = None
+    current_temp: Optional[Path] = None
+    current_handle = None
+    try:
+        def close_current() -> None:
+            nonlocal current_spot, current_temp, current_handle
+            if current_handle is not None:
+                current_handle.close()
+                current_handle = None
+            if current_spot is not None and current_temp is not None:
+                replace_atomic(current_temp, host_cov_path(out_dir, current_spot, suffix))
+            current_spot = None
+            current_temp = None
+
+        with sorted_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) != expected_fields:
+                    continue
+                spot_id = fields[-1]
+                if spot_id not in allowed_spots or spot_id in skip_spots:
+                    continue
+                if spot_id != current_spot:
+                    close_current()
+                    current_spot = spot_id
+                    final_path = host_cov_path(out_dir, spot_id, suffix)
+                    current_temp = final_path.with_name(
+                        final_path.name + f".tmp.{os.getpid()}"
+                    )
+                    final_path.parent.mkdir(parents=True, exist_ok=True)
+                    current_handle = current_temp.open("w", encoding="utf-8")
+                assert current_handle is not None
+                current_handle.write("\t".join(fields[:-1]) + "\n")
+        close_current()
+    finally:
+        if current_handle is not None:
+            current_handle.close()
+        if current_temp is not None:
+            try:
+                current_temp.unlink()
+            except FileNotFoundError:
+                pass
+        try:
+            sorted_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def shuffle_host_parts(
     combined_cg: Path,
     combined_ch: Optional[Path],
@@ -535,41 +663,15 @@ def shuffle_host_parts(
     skip_spots: Set[str],
     context_mode: str,
 ) -> None:
-    handles: Dict[Tuple[str, str], BinaryIO] = {}
-    temps: Dict[Tuple[str, str], Path] = {}
-
-    def get_handle(spot_id: str, suffix: str) -> BinaryIO:
-        key = (spot_id, suffix)
-        if key not in handles:
-            final_path = host_cov_path(out_dir, spot_id, suffix)
-            final_path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = final_path.with_name(final_path.name + f".tmp.{os.getpid()}")
-            temps[key] = temp_path
-            handles[key] = temp_path.open("wb")
-        return handles[key]
-
-    def consume(part_path: Path, suffix: str, extra_cols: int) -> None:
-        if not part_path.is_file() or part_path.stat().st_size == 0:
-            return
-        with part_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                fields = line.rstrip("\n").split("\t")
-                spot_id = fields[-1]
-                body = "\t".join(fields[:-1]) + "\n"
-                if extra_cols and len(fields) < 7 + extra_cols:
-                    continue
-                get_handle(spot_id, suffix).write(body.encode("utf-8"))
-
-    try:
-        if context_mode in {"cg", "both"}:
-            consume(combined_cg, "CG", 0)
-        if context_mode in {"ch", "both"} and combined_ch is not None:
-            consume(combined_ch, "CH", 1)
-    finally:
-        for handle in handles.values():
-            handle.close()
-    for (spot_id, suffix), temp_path in temps.items():
-        os.replace(temp_path, host_cov_path(out_dir, spot_id, suffix))
+    allowed_spots = set(roster)
+    if context_mode in {"cg", "both"}:
+        stream_sorted_parts(
+            combined_cg, "CG", HOST_CG_FIELDS, out_dir, allowed_spots, skip_spots
+        )
+    if context_mode in {"ch", "both"} and combined_ch is not None:
+        stream_sorted_parts(
+            combined_ch, "CH", HOST_CH_FIELDS, out_dir, allowed_spots, skip_spots
+        )
     suffixes = []
     if context_mode in {"cg", "both"}:
         suffixes.append("CG")
@@ -581,8 +683,7 @@ def shuffle_host_parts(
         for suffix in suffixes:
             path = host_cov_path(out_dir, spot_id, suffix)
             if not path.exists():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("", encoding="utf-8")
+                write_empty_cov(path)
 
 
 def process_chromosome(
@@ -725,8 +826,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     try:
         validate_runtime(args)
-        chromosomes = parse_chromosomes(args.chromosomes)
-        validate_chromosomes(args.reference, chromosomes)
+        if args.mode == "host":
+            if not Path(args.barcodes).is_file():
+                raise ValueError(f"barcode whitelist not found: {args.barcodes}")
+            if not Path(args.spot_roster).is_file():
+                raise ValueError(f"spot roster not found: {args.spot_roster}")
         bam_path = Path(args.bam)
         if not bam_path.is_file():
             raise ValueError(f"BAM not found: {bam_path}")
@@ -734,7 +838,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             raise ValueError(f"BAM index not found: {bam_path}")
         if not Path(args.reference).is_file() or not Path(str(args.reference) + ".fai").is_file():
             raise ValueError(f"reference FASTA/.fai not found: {args.reference}")
-    except ValueError as exc:
+        chromosomes = parse_chromosomes(args.chromosomes)
+        validate_chromosomes(args.reference, chromosomes)
+    except (ValueError, OSError) as exc:
         print(f"[methy_caller] error: {exc}", file=sys.stderr)
         return 1
 
@@ -746,14 +852,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     roster: List[str] = []
     if host:
         try:
-            barcodes, barcode_to_index = read_barcodes(args.barcodes)
-            if not barcodes:
-                raise ValueError("barcode whitelist is empty")
-            barcode_len = len(barcodes[0])
-            if any(len(barcode) != barcode_len for barcode in barcodes):
-                raise ValueError("barcode whitelist has unequal lengths")
+            _, barcode_to_index, barcode_len = load_barcode_whitelist(args.barcodes)
             roster = load_spot_roster(args.spot_roster)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             print(f"[methy_caller] error: {exc}", file=sys.stderr)
             return 1
         allowed_spots = set(roster)
