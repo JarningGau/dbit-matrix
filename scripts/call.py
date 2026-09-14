@@ -24,14 +24,15 @@ from scripts.host_subsample_bam import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Call methylation sites from pooled/pooled.byCB.bam (host) and pooled "
-            "spike-in BAMs under a sample work directory."
+            "Call methylation sites from pooled/pooled.host.sorted.bam (host) and pooled "
+            "spike-in BAMs under a sample work directory. Host calling writes "
+            "coverage/per_spot_read_counts.tsv and supports --smoke."
         )
     )
     parser.add_argument(
         "--work-path",
         required=True,
-        help="Sample work directory containing pooled/, split_bams/, and qc/mbias/.",
+        help="Sample work directory containing pooled/ and qc/mbias/.",
     )
     parser.add_argument(
         "--mode",
@@ -180,6 +181,20 @@ def parse_args() -> argparse.Namespace:
         help=f"Host subsampling seed for mito BAM fallback. Default: {HOST_SUBSAMPLE_SEED}.",
     )
     parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Forwarded to methy_caller: limit host calling to a small spot subset.",
+    )
+    parser.add_argument(
+        "--force-recount",
+        action="store_true",
+        help="Forwarded to methy_caller: rewrite per-spot read counts.",
+    )
+    parser.add_argument(
+        "--spot-roster",
+        help="Optional spot roster forwarded to methy_caller (counts TSV or one XX_YY per line).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print commands only; do not execute calling.",
@@ -195,11 +210,11 @@ def discover_spike_bams(pooled_dir: Path) -> dict[str, Path]:
     spikes: dict[str, Path] = {}
     for bam in sorted(pooled_dir.glob("pooled.*.sorted.bam")):
         stem = bam.name[: -len(".sorted.bam")]
-        if stem == "pooled.byCB":
-            continue
         if not stem.startswith("pooled."):
             continue
         spike_name = stem.split(".", 1)[1]
+        if spike_name in {"host", "byCB"}:
+            continue
         if spike_name:
             spikes[spike_name] = bam
     return spikes
@@ -228,7 +243,6 @@ def build_caller_command(
     output: Path | None = None,
     out_dir: Path | None = None,
     barcodes: Path | None = None,
-    spot_roster: Path | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -265,17 +279,23 @@ def build_caller_command(
     if args.sample_size is not None:
         command.extend(["--sample-size", str(args.sample_size)])
     if mode == "host":
-        assert out_dir is not None and barcodes is not None and spot_roster is not None
+        assert out_dir is not None and barcodes is not None
         command.extend(
             [
                 "--out-dir",
                 str(out_dir),
                 "--barcodes",
                 str(barcodes),
-                "--spot-roster",
-                str(spot_roster),
+                "--counts-tsv",
+                str(out_dir.parent / "per_spot_read_counts.tsv"),
             ]
         )
+        if args.smoke:
+            command.append("--smoke")
+        if args.force_recount:
+            command.append("--force-recount")
+        if args.spot_roster:
+            command.extend(["--spot-roster", str(args.spot_roster)])
     else:
         assert output is not None
         command.extend(["--output", str(output)])
@@ -355,7 +375,7 @@ def ensure_host_mito_bam(args: argparse.Namespace, work_path: Path) -> Path:
             run_or_skip(index_cmd, host_index, args.dry_run)
         return host_sorted
 
-    pooled_host = work_path / "pooled" / "pooled.byCB.bam"
+    pooled_host = work_path / "pooled" / "pooled.host.sorted.bam"
     if not pooled_host.exists():
         raise ValueError(
             "missing host mito BAM fallback inputs. expected one of:\n"
@@ -395,13 +415,10 @@ def run_host_mito_aggregate(args: argparse.Namespace, work_path: Path) -> list[P
 def run_host_mode(args: argparse.Namespace, work_path: Path) -> None:
     if not args.barcodes:
         raise ValueError("host calling requires --barcodes")
-    pooled = work_path / "pooled" / "pooled.byCB.bam"
-    roster = work_path / "split_bams" / "per_spot_read_counts.tsv"
+    pooled = work_path / "pooled" / "pooled.host.sorted.bam"
     out_dir = work_path / "coverage" / "host"
     if not pooled.is_file():
         raise ValueError(f"missing pooled host BAM: {pooled}")
-    if not roster.is_file():
-        raise ValueError(f"missing spot roster: {roster}")
     command = build_caller_command(
         args,
         mode="host",
@@ -410,7 +427,6 @@ def run_host_mode(args: argparse.Namespace, work_path: Path) -> None:
         chromosomes=args.chromosomes,
         out_dir=out_dir,
         barcodes=Path(args.barcodes),
-        spot_roster=roster,
     )
     run_command(command, args.dry_run)
     mito_outputs = run_host_mito_aggregate(args, work_path)
