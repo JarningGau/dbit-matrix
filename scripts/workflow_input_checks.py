@@ -17,6 +17,17 @@ def require_file(label: str, path: Path) -> None:
         raise ValueError(f"missing required file ({label}): {path}")
 
 
+def require_bam_index(label: str, bam: Path) -> None:
+    require_file(label, bam)
+    indexed = (
+        Path(str(bam) + ".bai").is_file()
+        or bam.with_suffix(".bai").is_file()
+        or Path(str(bam) + ".csi").is_file()
+    )
+    if not indexed:
+        raise ValueError(f"missing BAM index ({label}): {bam}")
+
+
 def require_dir(label: str, path: Path) -> None:
     if not path.is_dir():
         raise ValueError(f"missing required directory ({label}): {path}")

@@ -313,7 +313,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--call-min-mapping-quality",
         type=int,
-        help="min_mapping_quality passed to methy_caller in call stage. Default: 1.",
+        help="min_mapping_quality passed to methy_caller in call stage. Default: 10.",
     )
     parser.add_argument(
         "--call-sample-size",
@@ -323,7 +323,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--call-max-depth",
         type=int,
-        help="max_depth passed to methy_caller in call stage. Default: 250.",
+        help="max_depth passed to methy_caller in call stage. Default: 50000.",
     )
     parser.add_argument(
         "--call-batch-size",
@@ -363,10 +363,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--call-caller-script",
         help="Path to methy_caller script for call stage. Default: scripts/methy_caller.py.",
-    )
-    parser.add_argument(
-        "--call-ch-caller-script",
-        help="Path to CH caller script for call stage. Default: scripts/methy_caller_CH.py.",
     )
     parser.add_argument(
         "--saturation-script",
@@ -809,8 +805,6 @@ def build_call_command(
         str(trim["r2_right"]),
         "--caller-script",
         args.call_caller_script,
-        "--ch-caller-script",
-        args.call_ch_caller_script,
         "--samtools-bin",
         args.samtools_bin,
         "--samtools-threads",
@@ -820,6 +814,8 @@ def build_call_command(
     ]
     if args.call_sample_size is not None:
         command.extend(["--sample-size", str(args.call_sample_size)])
+    if mode in ("all", "host"):
+        command.extend(["--barcodes", args.split_barcodes])
     if mode in ("all", "spike"):
         for item in args.spike_in_index:
             command.extend(["--spike-reference", item])
@@ -1236,6 +1232,19 @@ def validate_inputs_for_stage(
                 "call_reference_file",
                 wic.resolve_config_path(settings["call_reference_file"]),
             )
+            if not skip_workdir_inputs:
+                wic.require_bam_index(
+                    "pooled.byCB.bam",
+                    sample_work / "pooled" / "pooled.byCB.bam",
+                )
+                wic.require_file(
+                    "per_spot_read_counts.tsv",
+                    sample_work / "split_bams" / "per_spot_read_counts.tsv",
+                )
+                wic.require_file(
+                    "split_barcodes",
+                    wic.resolve_config_path(settings["split_barcodes"]),
+                )
         if call_mode in ("all", "spike") and parse_spike_names(spike):
             wic.require_spike_index_paths(spike)
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
@@ -1644,10 +1653,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_r2_right_trimming, cfg.get("call_r2_right_trimming")
         ),
         "call_caller_script": pick(args.call_caller_script, cfg.get("call_caller_script")),
-        "call_ch_caller_script": pick(
-            args.call_ch_caller_script,
-            cfg.get("call_ch_caller_script"),
-        ),
         "saturation_script": pick(args.saturation_script, cfg.get("saturation_script")),
         "saturation_reads_threshold": pick(
             args.saturation_reads_threshold,
@@ -1946,7 +1951,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["call_min_mapping_quality"] = (
         int(settings["call_min_mapping_quality"])
         if settings["call_min_mapping_quality"] is not None
-        else 1
+        else 10
     )
     if settings["call_min_mapping_quality"] < 0:
         raise ValueError("call_min_mapping_quality must be >= 0")
@@ -1955,7 +1960,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         if settings["call_sample_size"] <= 0:
             raise ValueError("call_sample_size must be > 0 when provided")
     settings["call_max_depth"] = (
-        int(settings["call_max_depth"]) if settings["call_max_depth"] is not None else 250
+        int(settings["call_max_depth"]) if settings["call_max_depth"] is not None else 50_000
     )
     if settings["call_max_depth"] <= 0:
         raise ValueError("call_max_depth must be > 0")
@@ -2019,9 +2024,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
     settings["call_caller_script"] = (
         settings["call_caller_script"] or "scripts/methy_caller.py"
-    )
-    settings["call_ch_caller_script"] = (
-        settings["call_ch_caller_script"] or "scripts/methy_caller_CH.py"
     )
     settings["saturation_script"] = settings["saturation_script"] or "scripts/saturation.py"
     settings["saturation_reads_threshold"] = (
@@ -2931,11 +2933,11 @@ def main() -> int:
             call_trim_host=settings["call_trim_host"],
             call_trim_spike=settings["call_trim_spike"],
             call_caller_script=settings["call_caller_script"],
-            call_ch_caller_script=settings["call_ch_caller_script"],
             samtools_bin=settings["samtools_bin"],
             samtools_threads=settings["samtools_threads"],
             mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
             spike_in_index=settings["spike_in_index"],
+            split_barcodes=settings["split_barcodes"],
         )
         if settings["runner"] == "local":
             script_path = command_dir / "07_call.sh"
