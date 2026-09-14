@@ -371,7 +371,7 @@ def main() -> int:
     args = parse_args()
     work_path = Path(args.work_path)
     sample_id = work_path.name
-    read_counts_path = work_path / "split_bams" / "per_spot_read_counts.tsv"
+    read_counts_path = work_path / "coverage" / "per_spot_read_counts.tsv"
     host_cov_paths = sorted((work_path / "coverage" / "host").rglob("*.CG.cov"))
     output_dir = Path(args.output_dir) if args.output_dir else work_path / "qc" / "saturation"
     plot_path = output_dir / "saturation_curve.png"

@@ -725,13 +725,13 @@ def main() -> int:
     work_path = Path(args.work_path)
     coverage_dir = work_path / "coverage"
     host_cov_paths = sorted((coverage_dir / "host").rglob("*.CG.cov"))
-    read_counts_path = work_path / "split_bams" / "per_spot_read_counts.tsv"
+    read_counts_path = work_path / "coverage" / "per_spot_read_counts.tsv"
     fastp_json_path = work_path / "shard_fastq" / "fastp.json"
     fastp_json_legacy_path = work_path / "fastp.json"
     demux_dir = work_path / "demux"
     saturation_summary_path = work_path / "qc" / "saturation" / "saturation_summary.tsv"
     pooled_dir = work_path / "pooled"
-    host_bam_path = pooled_dir / "pooled.byCB.bam"
+    host_bam_path = pooled_dir / "pooled.host.sorted.bam"
     host_mito_cov_path = coverage_dir / "host_mito.CG.cov"
     summary_dir = work_path / "summary"
     per_spot_out = summary_dir / "per_spot_summary.tsv"

@@ -155,11 +155,11 @@ def discover_spike_bams(pooled_dir: Path) -> dict[str, Path]:
     spikes: dict[str, Path] = {}
     for bam_path in sorted(pooled_dir.glob("pooled.*.sorted.bam")):
         stem = bam_path.name[: -len(".sorted.bam")]
-        if stem == "pooled.byCB":
-            continue
         if not stem.startswith("pooled."):
             continue
         spike_name = stem.split(".", 1)[1].strip()
+        if spike_name in {"host", "byCB"}:
+            continue
         if spike_name:
             spikes[spike_name] = bam_path
     return spikes
@@ -410,7 +410,7 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
         raise ValueError("host mode requires --reference-file")
     if not args.chromosomes:
         raise ValueError("host mode requires --chromosomes")
-    pooled_host = work_path / "pooled" / "pooled.byCB.bam"
+    pooled_host = work_path / "pooled" / "pooled.host.sorted.bam"
     if not pooled_host.exists():
         raise ValueError(f"missing host pooled BAM: {pooled_host}")
 
