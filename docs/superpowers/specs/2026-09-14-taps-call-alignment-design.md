@@ -1,7 +1,7 @@
 # TAPS methylation calling alignment with DBiT-spatial-Methylation
 
 Date: 2026-09-14  
-Status: draft, pending user review  
+Status: approved  
 Scope: TAPS and TAPS v2 `call` only
 
 ## Goal
