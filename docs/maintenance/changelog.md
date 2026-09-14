@@ -4,6 +4,8 @@ This page is the active release history for the repository.
 
 ## Current
 
+## 3.0.0
+
 - **BREAKING host pooled BAM:** Host pooled BAM is `pooled/pooled.host.sorted.bam`, coordinate-sorted and indexed. `pooled.byCB.bam` is no longer written. See [contracts](../developers/contracts.md#pool).
 - **BREAKING splitless mainline:** `split` is removed from `--stage all` and from `STAGE_CHOICES`. Mainline is `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`. See [contracts](../developers/contracts.md).
 - **BREAKING per-spot read counts:** `saturation` / `summary` read `coverage/per_spot_read_counts.tsv`, written by `call`.
