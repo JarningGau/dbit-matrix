@@ -20,7 +20,7 @@ import pysam
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from scripts.split_bams import parse_cb_value, read_barcodes
+from scripts import methy_call_core as core
 
 TOP_FLAGS: Set[int] = {99, 147}
 BOT_FLAGS: Set[int] = {83, 163}
@@ -33,6 +33,7 @@ WORKER_CHROMOSOME_SEQUENCE: Optional[str] = None
 BarcodeMap = Dict[str, int]
 CgCounts = Dict[str, Dict[int, List[int]]]
 ChCounts = Dict[str, Dict[int, List[object]]]
+CONVERTED_MEANS_METHYLATED = True
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -58,8 +59,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--barcodes", help="Whitelist TSV for host mode.")
     parser.add_argument(
         "--spot-roster",
-        help="split_bams/per_spot_read_counts.tsv for host mode.",
+        help="Optional .cov write-set (counts TSV or one XX_YY per line).",
     )
+    parser.add_argument(
+        "--counts-tsv",
+        help="Host counts output. Default: <out-dir>/../per_spot_read_counts.tsv",
+    )
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--force-recount", action="store_true")
     parser.add_argument("--out-dir", help="Host output directory (coverage/host).")
     parser.add_argument("--output", help="Aggregate CG/CH stem path without suffix.")
     parser.add_argument("--dry-run", action="store_true")
@@ -95,23 +102,11 @@ def bam_index_exists(path: Path) -> bool:
 
 
 def classify_cg_observation(dinucleotide: str) -> Optional[bool]:
-    if dinucleotide in {"TG", "CA"}:
-        return True
-    if dinucleotide == "CG":
-        return False
-    return None
+    return core.classify_cg_observation(dinucleotide, CONVERTED_MEANS_METHYLATED)
 
 
 def classify_ch_observation(base: str, strand: str) -> Optional[Tuple[int, int]]:
-    if strand == "+":
-        if base not in {"C", "T"}:
-            return None
-        methylated = base == "T"
-    else:
-        if base not in {"G", "A"}:
-            return None
-        methylated = base == "A"
-    return (1, 0) if methylated else (0, 1)
+    return core.classify_ch_observation(base, strand, CONVERTED_MEANS_METHYLATED)
 
 
 def ch_neighbor_matches(context: str, strand: str, base: str) -> bool:
@@ -201,15 +196,7 @@ def is_trimmed(
 def spot_id_from_cb(
     cb: str, barcode_to_index: BarcodeMap, barcode_len: int
 ) -> Optional[str]:
-    parsed = parse_cb_value(cb, barcode_len)
-    if parsed is None:
-        return None
-    x_barcode, y_barcode = parsed
-    x_index = barcode_to_index.get(x_barcode)
-    y_index = barcode_to_index.get(y_barcode)
-    if x_index is None or y_index is None:
-        return None
-    return f"{x_index:02d}_{y_index:02d}"
+    return core.spot_id_from_cb(cb, barcode_to_index, barcode_len)
 
 
 def spot_is_allowed(spot_id: Optional[str], allowed: Optional[Set[str]]) -> bool:
@@ -221,35 +208,15 @@ def spot_is_allowed(spot_id: Optional[str], allowed: Optional[Set[str]]) -> bool
 
 
 def load_barcode_whitelist(path: str) -> Tuple[List[str], BarcodeMap, int]:
-    whitelist = Path(path)
-    if not whitelist.is_file():
-        raise ValueError(f"barcode whitelist not found: {whitelist}")
-    barcodes, barcode_to_index = read_barcodes(path)
-    if not barcodes:
-        raise ValueError("barcode whitelist is empty")
-    barcode_len = len(barcodes[0])
-    if any(len(barcode) != barcode_len for barcode in barcodes):
-        raise ValueError("barcode whitelist has unequal lengths")
-    return barcodes, barcode_to_index, barcode_len
+    return core.load_barcode_whitelist(path)
 
 
-def load_spot_roster(path: str) -> List[str]:
-    roster_path = Path(path)
-    if not roster_path.is_file():
-        raise ValueError(f"spot roster not found: {roster_path}")
-    spots: List[str] = []
-    with roster_path.open(encoding="utf-8") as handle:
-        header = handle.readline()
-        if not header:
-            raise ValueError(f"spot roster is empty: {path}")
-        for line in handle:
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) < 3:
-                continue
-            spots.append(fields[2])
-    if not spots:
-        raise ValueError(f"spot roster has no spots: {path}")
-    return spots
+def resolved_counts_path(args: argparse.Namespace) -> Optional[Path]:
+    if args.counts_tsv:
+        return Path(args.counts_tsv)
+    if args.out_dir:
+        return Path(args.out_dir).resolve().parent / "per_spot_read_counts.tsv"
+    return None
 
 
 def host_cov_path(out_dir: Path, spot_id: str, suffix: str) -> Path:
@@ -783,8 +750,8 @@ def validate_runtime(args: argparse.Namespace) -> None:
     if args.sample_size is not None and args.sample_size <= 0:
         raise ValueError("--sample-size must be > 0 when provided")
     if args.mode == "host":
-        if not args.barcodes or not args.spot_roster or not args.out_dir:
-            raise ValueError("host mode requires --barcodes, --spot-roster, and --out-dir")
+        if not args.barcodes or not args.out_dir:
+            raise ValueError("host mode requires --barcodes and --out-dir")
     elif not args.output:
         raise ValueError("aggregate mode requires --output")
 
@@ -804,6 +771,8 @@ def print_resolved_parameters(args: argparse.Namespace) -> None:
         print(f"[methy_caller] barcodes={args.barcodes}")
         print(f"[methy_caller] spot_roster={args.spot_roster}")
         print(f"[methy_caller] out_dir={args.out_dir}")
+        print(f"[methy_caller] smoke={int(bool(args.smoke))}")
+        print(f"[methy_caller] counts_tsv={resolved_counts_path(args)}")
     else:
         print(f"[methy_caller] output={args.output}")
 
@@ -812,6 +781,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     print_resolved_parameters(args)
     if args.dry_run:
+        if args.mode == "host":
+            print("[methy_caller] roster_spots=0")
         print("[methy_caller] dry_run=1")
         return 0
     try:
@@ -819,7 +790,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.mode == "host":
             if not Path(args.barcodes).is_file():
                 raise ValueError(f"barcode whitelist not found: {args.barcodes}")
-            if not Path(args.spot_roster).is_file():
+            if args.spot_roster and not Path(args.spot_roster).is_file():
                 raise ValueError(f"spot roster not found: {args.spot_roster}")
         bam_path = Path(args.bam)
         if not bam_path.is_file():
@@ -843,7 +814,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if host:
         try:
             _, barcode_to_index, barcode_len = load_barcode_whitelist(args.barcodes)
-            roster = load_spot_roster(args.spot_roster)
+            counts_path = resolved_counts_path(args)
+            assert counts_path is not None
+            if counts_path.is_file() and not args.force_recount:
+                counts = core.counts_dict_from_rows(core.load_counts_tsv(counts_path))
+            else:
+                with pysam.AlignmentFile(args.bam, "rb") as bam_in:
+                    counts = core.count_records_by_spot(
+                        bam_in.fetch(until_eof=True),
+                        args.cb_tag,
+                        barcode_to_index,
+                        barcode_len,
+                    )
+                core.write_counts_tsv(counts_path, counts)
+            roster_ids = (
+                core.load_roster_ids(Path(args.spot_roster)) if args.spot_roster else None
+            )
+            roster = core.resolve_write_set(counts, args.smoke, roster_ids)
         except (ValueError, OSError) as exc:
             print(f"[methy_caller] error: {exc}", file=sys.stderr)
             return 1

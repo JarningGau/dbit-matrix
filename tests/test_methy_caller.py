@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -134,6 +134,37 @@ class DryRunTests(unittest.TestCase):
             self.assertEqual(mc.main(argv), 0)
             self.assertFalse(out.exists())
 
+    def test_host_dry_run_prints_scan_keys_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "coverage" / "host"
+            expected_counts = out_dir.resolve().parent / "per_spot_read_counts.tsv"
+            argv = [
+                "--mode",
+                "host",
+                "--bam",
+                str(root / "missing.bam"),
+                "--reference",
+                str(root / "missing.fa"),
+                "--chromosomes",
+                "chr1",
+                "--barcodes",
+                str(root / "barcodes.tsv"),
+                "--out-dir",
+                str(out_dir),
+                "--dry-run",
+            ]
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(mc.main(argv), 0)
+            text = stdout.getvalue()
+            self.assertIn("smoke=", text)
+            self.assertIn("counts_tsv=", text)
+            self.assertIn("roster_spots=", text)
+            self.assertIn(str(expected_counts), text)
+            self.assertFalse(out_dir.exists())
+            self.assertFalse(expected_counts.exists())
+
 
 class SamplePositionTests(unittest.TestCase):
     SEQ = "ACGCATGCT"
@@ -188,11 +219,6 @@ class MissingHostInputsTests(unittest.TestCase):
     def test_missing_barcodes_exits_1_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            roster = root / "roster.tsv"
-            roster.write_text(
-                "X_index\tY_index\tspot\treads\n0\t0\t00_00\t1\n",
-                encoding="utf-8",
-            )
             argv = [
                 "--mode",
                 "host",
@@ -204,8 +230,6 @@ class MissingHostInputsTests(unittest.TestCase):
                 "chr1",
                 "--barcodes",
                 str(root / "missing_barcodes.tsv"),
-                "--spot-roster",
-                str(roster),
                 "--out-dir",
                 str(root / "out"),
             ]
