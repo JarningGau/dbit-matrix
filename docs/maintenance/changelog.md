@@ -9,6 +9,7 @@ This page is the active release history for the repository.
 - **BREAKING per-spot read counts:** `saturation` / `summary` read `coverage/per_spot_read_counts.tsv`, written by `call`.
 - **BREAKING call_smoke:** `split_smoke` is replaced by `call_smoke` (deterministic top 16). See [config reference](../developers/config-reference.md).
 - **BREAKING EMSeq call:** EMSeq host/mito/spike calling no longer uses biscuit pileup or VCF intermediates. EMSeq CG percentages and site sets will move. Caller is pooled pysam (`scripts-emseq/methy_caller.py` / `scripts-emseq/call.py`). Compare against the frozen biscuit baseline with `scripts-emseq/compare_cov_to_biscuit.py` and `work/test-DNAme-EMSeq` (do not overwrite).
+- **EMSeq biscuit compare (16-spot roster on sibling work tree `work/test-DNAme-EMSeq-pooled-call`):** shared_sites=1160, only_baseline=885, only_new=42, covered_shared=1160, pearson_meth=0.921, pearson_unmeth=0.957, mean_abs_pct_delta=0.73, disagree_majority_fraction=0.0069 (pass bar `< 0.5`).
 - **BREAKING EMSeq trim keys:** EMSeq trim keys `call_left_trimming` / `call_right_trimming` are removed; use `call_trimming` like TAPS.
 - **BREAKING EMSeq `.CG.cov` coordinates:** EMSeq `.CG.cov` positions are pysam 0-based, not biscuit's transformed coordinate. `pct` has two decimal places.
 - **BREAKING TAPS/TAPS v2 call:** host methylation calling reads
