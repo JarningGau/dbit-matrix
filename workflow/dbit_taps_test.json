@@ -27,10 +27,6 @@
     "host_sort_mem": "12G",
     "split_barcodes": "configs/barcodes_50a.tsv",
     "split_cb_tag": "CB",
-    "split_threads_read": 1,
-    "split_threads_write": 1,
-    "split_smoke": true,
-    "split_sort_jobs": 8,
     "aggregate_sort_mem": "8G",
     "mbias_mode": "all",
     "mbias_host_subsample_fraction": 0.1,
@@ -90,18 +86,6 @@
             "partition": "amd-ep2,intel-sc3",
             "mem": "64G",
             "cpus_per_task": 4
-        },
-        "split": {
-            "split_bams": {
-                "partition": "amd-ep2,intel-sc3",
-                "mem": "8G",
-                "cpus_per_task": 1
-            },
-            "sort": {
-                "partition": "amd-ep2,intel-sc3",
-                "mem": "8G",
-                "cpus_per_task": 8
-            }
         },
         "mbias": {
             "host": {
@@ -177,5 +161,6 @@
             "mem": "8G",
             "cpus_per_task": 1
         }
-    }
+    },
+    "call_smoke": true
 }
