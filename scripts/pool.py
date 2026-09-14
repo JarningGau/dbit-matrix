@@ -142,8 +142,8 @@ def main() -> int:
         host_shards = discover_host_shards(align_dir)
         if not host_shards:
             raise ValueError(f"no host shards found: {align_dir}/*.cb.bam")
-        host_tmp = pooled_dir / "pooled.cb.bam"
-        host_sorted = pooled_dir / "pooled.byCB.bam"
+        host_tmp = pooled_dir / "pooled.host.unsorted.bam"
+        host_sorted = pooled_dir / "pooled.host.sorted.bam"
         cat_cmd = [
             args.samtools_bin,
             "cat",
@@ -158,21 +158,20 @@ def main() -> int:
             args.host_sort_mem,
             "-@",
             str(args.samtools_threads),
-            "-t",
-            "CB",
             "-o",
             str(host_sorted),
             str(host_tmp),
         ]
-        rm_cmd = ["rm", str(host_tmp)]
+        index_cmd = [args.samtools_bin, "index", str(host_sorted)]
         print("[pool] target=host")
         print(f"[pool] host_shard_count={len(host_shards)}")
         print(f"[pool] command={quoted(cat_cmd)}")
         print(f"[pool] command={quoted(sort_cmd)}")
-        print(f"[pool] command={quoted(rm_cmd)}")
+        print(f"[pool] command={quoted(index_cmd)}")
         if not args.dry_run:
             run_command(cat_cmd)
             run_command(sort_cmd)
+            run_command(index_cmd)
             host_tmp.unlink(missing_ok=True)
 
     print("[pool] done")
