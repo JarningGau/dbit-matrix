@@ -43,7 +43,7 @@
     "call_jobs": 8,
     "call_min_base_quality": 30,
     "call_min_mapping_quality": 10,
-    "call_max_depth": 250,
+    "call_max_depth": 50000,
     "call_batch_size": 10000000,
     "call_mode": "all",
     "call_context_mode": "cg",
@@ -62,7 +62,6 @@
         }
     },
     "call_caller_script": "scripts/methy_caller.py",
-    "call_ch_caller_script": "scripts/methy_caller_CH.py",
     "saturation_script": "scripts/saturation.py",
     "saturation_reads_threshold": 500,
     "summary_script": "scripts-v2/summary.py",
