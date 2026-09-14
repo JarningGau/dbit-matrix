@@ -63,7 +63,9 @@ Calling fields:
 - `call_r2_left_trimming` (legacy; global fallback default)
 - `call_r2_right_trimming` (legacy; global fallback default)
 - `call_caller_script`
-- `call_ch_caller_script`
+- `call_jobs`
+- `call_min_mapping_quality`
+- `call_max_depth`
 
 Notes:
 
@@ -89,8 +91,10 @@ Notes:
   compatibility and as the fallback default when a nested field is omitted.
   New configs should prefer `call_trimming`.
 - TAPS `call_context_mode` accepts `cg`, `ch`, or `both`
-- `call_caller_script` remains the CpG caller path
-- `call_ch_caller_script` selects the CH caller path
+- `call_caller_script` selects the TAPS caller ([`scripts/methy_caller.py`](../../scripts/methy_caller.py)); CG and CH share one pass
+- `call_jobs` sets interval workers inside each chromosome (default `8`)
+- `call_min_mapping_quality` defaults to `10`; `call_max_depth` defaults to `50000`
+- host `call` requires `split_barcodes` (same path as the `split` stage)
 
 ## EMSeq Fields
 

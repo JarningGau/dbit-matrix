@@ -8,6 +8,8 @@ Run these before merging a TAPS workflow change:
 
 ```bash
 pixi run python scripts/make_cmd.py --help
+pixi run python scripts/methy_caller.py --help
+pixi run python scripts/call.py --help
 
 pixi run python scripts/make_cmd.py \
   --workflow-config workflow/dbit_taps_test.json \
@@ -29,6 +31,7 @@ pixi run python scripts/make_cmd.py \
 - `--stage all` covers the fixed mainline only
 - `methscan_*` stages are optional, explicit, and not part of `--stage all` (see [Methscan optional stages](../developers/contracts.md#methscan-optional-stages-methscan_) in contracts)
 - no path resolution errors appear
+- generated call commands must not reference `methy_caller_CH.py`
 - Slurm dry-run resolves tools from the active `pixi` environment unless explicit `--*-bin` overrides are used
 
 ## Optional methscan checks

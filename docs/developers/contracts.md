@@ -159,7 +159,8 @@ Purpose: generate host per-spot, host mitochondrial aggregate, and spike-in meth
 
 Inputs:
 
-- host per-spot: `split_bams/**/*.sorted.bam`
+- host: `pooled/pooled.byCB.bam` (indexed) plus `split_barcodes` and
+  `split_bams/per_spot_read_counts.tsv`
 - host mito fallback source: `qc/mbias/host.subsampled.sorted.bam`
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
 
@@ -174,7 +175,10 @@ Outputs:
 
 Contract:
 
+- host calling does not read `split_bams/**/*.sorted.bam`
 - host outputs are per-spot
+- spot filenames still `{X_index}/{X_index}_{Y_index}`
+- smoke calling uses the split roster
 - `host_mito.CG.cov` is a single aggregate output
 - `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only

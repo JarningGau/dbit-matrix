@@ -79,5 +79,7 @@ More output guidance: [Results guide](results.md)
 - missing whitelist paths
 - missing reference paths
 - skipping the dry-run
+- running host `call` without an indexed `pooled/pooled.byCB.bam` or
+  `split_bams/per_spot_read_counts.tsv`
 
 Developer details such as stage contracts and full config fields are documented separately.
