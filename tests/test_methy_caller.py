@@ -226,10 +226,10 @@ class ShuffleHostPartsTests(unittest.TestCase):
             out_dir = root / "out"
             combined_cg = root / "combined.CG"
             combined_cg.write_text(
+                "chr1\t11\t11\t50.00\t1\t1\t00_00\n"
                 "chr1\t10\t10\t100.00\t1\t0\t00_01\n"
                 "chr1\t20\t20\t0.00\t0\t1\t99_99\n"
                 "badline\n"
-                "chr1\t11\t11\t50.00\t1\t1\t00_00\n"
                 "chr1\t12\t12\t0.00\t0\t2\t00_00\n",
                 encoding="utf-8",
             )

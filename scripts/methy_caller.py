@@ -548,17 +548,8 @@ HOST_CG_FIELDS = 7
 HOST_CH_FIELDS = 9
 
 
-def _spot_sort_key(line: str, field_index: int) -> str:
-    fields = line.rstrip("\n").split("\t")
-    if len(fields) < field_index:
-        return ""
-    return fields[field_index - 1]
-
-
-def sort_part_by_spot(part_path: Path, field_index: int) -> Path:
-    """Sort a combined part file by the spot_id column. Returns a temp path."""
-    sorted_path = part_path.with_name(part_path.name + f".sorted.{os.getpid()}")
-    sort_dir = str(part_path.parent)
+def sort_part_by_spot(part_path: Path, field_index: int, sorted_path: Path) -> None:
+    """Sort a combined part file by the spot_id column into sorted_path."""
     try:
         subprocess.run(
             [
@@ -569,7 +560,7 @@ def sort_part_by_spot(part_path: Path, field_index: int) -> Path:
                 "-k",
                 f"{field_index},{field_index}",
                 "-T",
-                sort_dir,
+                str(part_path.parent),
                 "-o",
                 str(sorted_path),
                 str(part_path),
@@ -577,11 +568,8 @@ def sort_part_by_spot(part_path: Path, field_index: int) -> Path:
             check=True,
             env={**os.environ, "LC_ALL": "C"},
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        with part_path.open(encoding="utf-8") as handle:
-            lines = sorted(handle, key=lambda line: _spot_sort_key(line, field_index))
-        sorted_path.write_text("".join(lines), encoding="utf-8")
-    return sorted_path
+    except FileNotFoundError as exc:
+        raise ValueError("GNU sort is required for host coverage shuffle") from exc
 
 
 def replace_atomic(temp_path: Path, final_path: Path) -> None:
@@ -606,11 +594,13 @@ def stream_sorted_parts(
 ) -> None:
     if not part_path.is_file() or part_path.stat().st_size == 0:
         return
-    sorted_path = sort_part_by_spot(part_path, expected_fields)
+    sorted_path = part_path.with_name(part_path.name + f".sorted.{os.getpid()}")
     current_spot: Optional[str] = None
     current_temp: Optional[Path] = None
     current_handle = None
     try:
+        sort_part_by_spot(part_path, expected_fields, sorted_path)
+
         def close_current() -> None:
             nonlocal current_spot, current_temp, current_handle
             if current_handle is not None:
@@ -914,6 +904,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             for suffix, temp_path in combined_temps.items():
                 os.replace(temp_path, Path(str(args.output) + f".{suffix}.cov"))
+    except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"[methy_caller] error: {exc}", file=sys.stderr)
+        return 1
     finally:
         for handle in handles.values():
             handle.close()
