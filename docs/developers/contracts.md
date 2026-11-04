@@ -117,8 +117,7 @@ Inputs:
 
 Outputs:
 
-- `qc/mbias/host.subsampled.sorted.bam`
-- `qc/mbias/host.subsampled.sorted.bam.bai`
+- `qc/mbias/host.subsampled.bam` (unsorted; streamed with `fetch(until_eof=True)`)
 - `qc/mbias/host.mbias.tsv`
 - `qc/mbias/host.mbias.png`
 - `qc/mbias/<spike_name>.mbias.tsv`
@@ -130,6 +129,7 @@ Host counting note:
 - Mitochondrial contigs such as `chrM` are excluded from `host.mbias.tsv`
 - Only cycles with `coverage > 500` are included in TSV output and plots
 - Host subsample uses name-hash `samtools view -s`; expected size is capped by lowering the fraction from `samtools idxstats` mapped counts (`HOST_SUBSAMPLE_MAX_READS`), not by truncating a coordinate-ordered stream
+- Host subsample is not coordinate-sorted or indexed; mbias does not need sort order
 
 Workflow-specific note:
 

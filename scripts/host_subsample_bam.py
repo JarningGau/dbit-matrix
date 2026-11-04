@@ -11,25 +11,15 @@ HOST_SUBSAMPLE_SEED = 11
 # Cap expected alignment records via idxstats-adjusted -s (not user-configurable).
 HOST_SUBSAMPLE_MAX_READS = 10_000_000
 HOST_SUBSAMPLED_BAM_BASENAME = "host.subsampled.bam"
-HOST_SUBSAMPLED_SORTED_BAM_BASENAME = "host.subsampled.sorted.bam"
 
 
 @dataclass(frozen=True)
 class HostSubsamplePaths:
     subsampled_bam: Path
-    sorted_bam: Path
-    sorted_bam_index: Path
 
 
 def get_host_subsample_paths(output_dir: Path) -> HostSubsamplePaths:
-    subsampled_bam = output_dir / HOST_SUBSAMPLED_BAM_BASENAME
-    sorted_bam = output_dir / HOST_SUBSAMPLED_SORTED_BAM_BASENAME
-    sorted_bam_index = output_dir / f"{HOST_SUBSAMPLED_SORTED_BAM_BASENAME}.bai"
-    return HostSubsamplePaths(
-        subsampled_bam=subsampled_bam,
-        sorted_bam=sorted_bam,
-        sorted_bam_index=sorted_bam_index,
-    )
+    return HostSubsamplePaths(subsampled_bam=output_dir / HOST_SUBSAMPLED_BAM_BASENAME)
 
 
 def build_subsample_fraction(seed: int, fraction: float) -> str:
@@ -101,7 +91,7 @@ def build_subsample_view_command(
     host_subsample_fraction: float,
     host_subsample_seed: int,
 ) -> list[str]:
-    """Build ``samtools view [-s] -b -o`` (no coordinate-ordered head cap)."""
+    """Build ``samtools view [-s] -b -o`` (unsorted; mbias streams until EOF)."""
     subsample_arg = build_subsample_fraction(
         host_subsample_seed, host_subsample_fraction
     )
@@ -142,18 +132,4 @@ def build_prepare_host_subsample_commands(
         host_subsample_fraction=fraction,
         host_subsample_seed=host_subsample_seed,
     )
-    sort_cmd = [
-        samtools_bin,
-        "sort",
-        "-@",
-        str(samtools_threads),
-        "-o",
-        str(paths.sorted_bam),
-        str(paths.subsampled_bam),
-    ]
-    index_cmd = [samtools_bin, "index", str(paths.sorted_bam)]
-    return [
-        (subsample_cmd, paths.subsampled_bam),
-        (sort_cmd, paths.sorted_bam),
-        (index_cmd, paths.sorted_bam_index),
-    ]
+    return [(subsample_cmd, paths.subsampled_bam)]

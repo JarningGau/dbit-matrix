@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         "--samtools-threads",
         type=int,
         default=4,
-        help="Threads for samtools view/sort. Default: 4.",
+        help="Threads for samtools view while subsampling host BAM. Default: 4.",
     )
     parser.add_argument(
         "--host-subsample-fraction",
@@ -360,8 +360,6 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
     output_dir.mkdir(parents=True, exist_ok=True)
     host_paths = get_host_subsample_paths(output_dir)
     host_subsampled = host_paths.subsampled_bam
-    host_sorted = host_paths.sorted_bam
-    host_index = host_paths.sorted_bam_index
     host_tsv = output_dir / "host.mbias.tsv"
     host_png = output_dir / "host.mbias.png"
 
@@ -388,12 +386,12 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
         print(f"[mbias] skip_existing_output={host_png}")
     else:
         rows: list[dict[str, object]] = []
-        print(f"[mbias] host_input={host_sorted}")
+        print(f"[mbias] host_input={host_subsampled}")
         print(f"[mbias] host_output={host_tsv}")
         print(f"[mbias] host_plot={host_png}")
         if not args.dry_run:
             rows = count_mbias_rows(
-                host_sorted,
+                host_subsampled,
                 reference_file=args.reference_file,
                 max_cycle=args.max_cycle,
                 min_mapping_quality=args.min_mapping_quality,
