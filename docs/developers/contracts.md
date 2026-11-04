@@ -8,6 +8,8 @@ Main stage order:
 
 `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 
+TAPS / TAPS v2: when `hmc_spike.enabled` is true, `--stage all` inserts `hmc_spike` after `saturation` and before `summary`. Data dependency is demux `*.R1.spike-in.fq.gz` only; `align` does not wait on `hmc_spike`. EMSeq does not implement this stage.
+
 ### `fastp_split`
 
 Purpose: quality control and chunking of paired FASTQ input.
@@ -192,6 +194,30 @@ Outputs:
 
 Extrapolation model: fits both a through-origin linear model and an exponential saturation curve. When the linear fit reaches `--linear-r2-threshold` (default `0.99`) the curve is treated as undersaturated, `extrapolation_model=linear` is reported, and `saturation_rate`/theoretical max are `NA`; otherwise the saturation curve is used.
 
+### `hmc_spike`
+
+Purpose (TAPS / TAPS v2): score a named synthetic 5hmC oligo on demux reject R1 (`*.R1.spike-in.fq.gz`) via C→N-masked motif match, then report hmC→T conversion. Distinct from genome `spike_in_index` (lambda/pUC) and from the methylated-linker QC motif.
+
+Inputs:
+
+- `demux/*.R1.spike-in.fq.gz`
+- workflow `hmc_spike` block (`enabled`, `name`, `sequence`, `hmc_positions`, `score_positions`, `edit_distance`)
+
+Outputs:
+
+- `qc/hmc_spike/summary.json`
+- `qc/hmc_spike/site_conversion.tsv`
+- `qc/hmc_spike/site_conversion.png`
+
+Contract:
+
+- Match uses C→N masking of `sequence` with unique hit ≤ `edit_distance` on non-N bases
+- Score bases at `hmc_positions` (must be `C` in `sequence`): C = retained/protected, T = converted (hmC→T); other bases ignored in rate denominators
+- Site conversion = `converted_T / (retained_C + converted_T)`
+- `summary.json` `mean_conversion_rate` is the mean of per-site conversion rates over `score_positions` only
+- Included in `--stage all` only when `hmc_spike.enabled` is true; missing/invalid config then fails validation. Explicit `--stage hmc_spike` always requires a valid block
+- Not a prerequisite for `align`
+
 ### `summary`
 
 Purpose: generate per-spot and per-sample reports.
@@ -207,6 +233,7 @@ Inputs include:
 - demux statistics
 - pooled BAMs
 - saturation summary
+- optional `qc/hmc_spike/summary.json` (when `hmc_spike` ran)
 
 Outputs:
 
@@ -237,6 +264,7 @@ Contract:
 - `sample_summary.tsv` methylation fields are context-split: `host_spot_mean_5mCG` / `host_spot_mean_5mCH` / `host_spot_mean_5mCA` / `host_spot_mean_5mCC` / `host_spot_mean_5mCT` (weighted by `cpg_site_count` / `ch_site_count` / `ca_site_count` / `cc_site_count` / `ct_site_count`), `host_mito_mean_5mCG` / `host_mito_mean_5mCH` / `host_mito_mean_5mCA` / `host_mito_mean_5mCC` / `host_mito_mean_5mCT`, and `{spike}_mean_5mCG` / `{spike}_mean_5mCH` / `{spike}_mean_5mCA` / `{spike}_mean_5mCC` / `{spike}_mean_5mCT`; `host_spot_median_cpg_sites` is unchanged
 - `sample_summary.tsv` includes `host_valid_reads`, plus the mito/nuclear split `host_valid_reads_mito` and `host_valid_reads_nuclear` (same valid-read filters; mito contigs from `--mito-chromosomes`, default `chrM`; nuclear is the complement). When BAM metrics succeed: `host_valid_reads_mito + host_valid_reads_nuclear == host_valid_reads`
 - TAPS v2 (`scripts-v2/summary.py`) additionally surfaces methylated-linker conversion QC columns in `sample_summary.tsv`: `spike_scored_reads`, `scored_fully_converted`, `spike_mean_conversion_rate`, `spike_fraction_all_T`, `spike_conversion_filtered_rejects`
+- When `qc/hmc_spike/summary.json` is present, `sample_summary.tsv` adds `{name}_hmc_spike_reads`, `{name}_hmc_spike_reads_rate` (`reads_matched / raw_reads`), and `{name}_hmc_spike_mean_hmCtoT` (`mean_conversion_rate`). Absent QC file: columns are omitted
 
 ## Optional TAPS And EMSeq Stages
 

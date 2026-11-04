@@ -36,6 +36,7 @@ STAGE_SEQUENCE = [
     "mbias",
     "call",
     "saturation",
+    "hmc_spike",
     "summary",
 ]
 METHSCAN_STAGES = (
@@ -62,6 +63,7 @@ STAGE_REQUIRED_FIELDS = {
     "mbias": [],
     "call": ["call_reference_file", "call_chromosomes"],
     "saturation": [],
+    "hmc_spike": [],
     "summary": ["barcode_positions"],
     "aggregate": [],
     "methscan_prepare": [],
@@ -360,6 +362,10 @@ def parse_args() -> argparse.Namespace:
             "HQ spot reads threshold for saturation stage: 'auto' (default) "
             "or a positive number."
         ),
+    )
+    parser.add_argument(
+        "--hmc-spike-script",
+        help="Path to hmc_spike script. Default: scripts/hmc_spike.py.",
     )
     parser.add_argument(
         "--summary-script",
@@ -1007,6 +1013,116 @@ def build_saturation_command(args: argparse.Namespace, sample_work: Path) -> str
     return quoted(command)
 
 
+def build_hmc_spike_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.hmc_spike_script)
+    hmc = args.hmc_spike
+    r1_glob = str(sample_work / "demux" / "*.R1.spike-in.fq.gz")
+    out_dir = sample_work / "qc" / "hmc_spike"
+    command = [
+        sys.executable,
+        str(script_path),
+        "--r1-glob",
+        r1_glob,
+        "--out-dir",
+        str(out_dir),
+        "--name",
+        str(hmc["name"]),
+        "--sequence",
+        str(hmc["sequence"]),
+        "--hmc-positions",
+        ",".join(str(p) for p in hmc["hmc_positions"]),
+        "--score-positions",
+        ",".join(str(p) for p in hmc["score_positions"]),
+        "--edit-distance",
+        str(hmc["edit_distance"]),
+    ]
+    return quoted(command)
+
+
+def normalize_hmc_spike_config(raw) -> dict | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("hmc_spike must be a JSON object")
+    return raw
+
+
+def hmc_spike_enabled(settings: dict) -> bool:
+    cfg = settings.get("hmc_spike")
+    if not isinstance(cfg, dict):
+        return False
+    return bool(cfg.get("enabled"))
+
+
+def validate_hmc_spike_config(cfg: dict) -> dict:
+    """Normalize and validate a required hmc_spike workflow block."""
+    if not isinstance(cfg, dict):
+        raise ValueError("hmc_spike must be a JSON object")
+    name = cfg.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("hmc_spike.name must be a non-empty string")
+    if any(ch.isspace() for ch in name):
+        raise ValueError("hmc_spike.name must not contain whitespace")
+    sequence = cfg.get("sequence")
+    if not isinstance(sequence, str) or not sequence.strip():
+        raise ValueError("hmc_spike.sequence must be a non-empty string")
+    sequence = sequence.strip().upper()
+    hmc_positions = cfg.get("hmc_positions")
+    score_positions = cfg.get("score_positions")
+    if not isinstance(hmc_positions, list) or not hmc_positions:
+        raise ValueError("hmc_spike.hmc_positions must be a non-empty list")
+    if not isinstance(score_positions, list) or not score_positions:
+        raise ValueError("hmc_spike.score_positions must be a non-empty list")
+    try:
+        hmc_positions_int = [int(p) for p in hmc_positions]
+        score_positions_int = [int(p) for p in score_positions]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "hmc_spike.hmc_positions and score_positions must be integers"
+        ) from exc
+    if len(set(hmc_positions_int)) != len(hmc_positions_int):
+        raise ValueError("hmc_spike.hmc_positions must not contain duplicates")
+    if len(set(score_positions_int)) != len(score_positions_int):
+        raise ValueError("hmc_spike.score_positions must not contain duplicates")
+    hmc_set = set(hmc_positions_int)
+    for pos in hmc_positions_int:
+        if pos < 0 or pos >= len(sequence):
+            raise ValueError(f"hmc_spike.hmc_positions value {pos} out of range")
+        if sequence[pos] != "C":
+            raise ValueError(
+                f"hmc_spike.hmc_positions value {pos} is {sequence[pos]!r}, expected 'C'"
+            )
+    for pos in score_positions_int:
+        if pos not in hmc_set:
+            raise ValueError(
+                f"hmc_spike.score_positions value {pos} is not in hmc_positions"
+            )
+    edit_distance = cfg.get("edit_distance", 1)
+    try:
+        edit_distance_int = int(edit_distance)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("hmc_spike.edit_distance must be an integer") from exc
+    if edit_distance_int < 0:
+        raise ValueError("hmc_spike.edit_distance must be >= 0")
+    return {
+        "enabled": bool(cfg.get("enabled", False)),
+        "name": name.strip(),
+        "sequence": sequence,
+        "hmc_positions": hmc_positions_int,
+        "score_positions": score_positions_int,
+        "edit_distance": edit_distance_int,
+    }
+
+
+def stages_for_all(settings: dict) -> list[str]:
+    stages: list[str] = []
+    for stage_name in STAGE_SEQUENCE:
+        if stage_name == "hmc_spike" and not hmc_spike_enabled(settings):
+            continue
+        stages.append(stage_name)
+    return stages
+
+
 def build_chunk_names(number_of_split_parts: int) -> list[str]:
     if number_of_split_parts <= 0:
         raise ValueError("number_of_split_parts must be > 0")
@@ -1196,6 +1312,16 @@ def validate_inputs_for_stage(
         wic.require_optional_executable_path("samtools_bin", settings["samtools_bin"])
     elif stage == "saturation":
         wic.require_script_path("saturation_script", settings["saturation_script"])
+    elif stage == "hmc_spike":
+        wic.require_script_path("hmc_spike_script", settings["hmc_spike_script"])
+        if not skip_workdir_inputs:
+            demux_dir = sample_work / "demux"
+            matches = sorted(demux_dir.glob("*.R1.spike-in.fq.gz"))
+            if not matches:
+                raise ValueError(
+                    f"missing demux spike-in R1 FASTQ under {demux_dir} "
+                    "(*.R1.spike-in.fq.gz)"
+                )
     elif stage == "summary":
         wic.require_script_path("summary_script", settings["summary_script"])
         wic.require_file(
@@ -1547,6 +1673,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.saturation_reads_threshold,
             cfg.get("saturation_reads_threshold"),
         ),
+        "hmc_spike_script": pick(args.hmc_spike_script, cfg.get("hmc_spike_script")),
+        "hmc_spike": normalize_hmc_spike_config(cfg.get("hmc_spike")),
         "summary_script": pick(args.summary_script, cfg.get("summary_script")),
         "aggregate_script": pick(args.aggregate_script, cfg.get("aggregate_script")),
         "aggregate_sort_mem": pick(
@@ -1885,6 +2013,23 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             if threshold_value <= 0:
                 raise ValueError("saturation_reads_threshold must be > 0")
             settings["saturation_reads_threshold"] = f"{threshold_value:g}"
+    settings["hmc_spike_script"] = (
+        settings["hmc_spike_script"] or "scripts/hmc_spike.py"
+    )
+    need_hmc_spike = stage == "hmc_spike" or (
+        stage == "all" and hmc_spike_enabled(settings)
+    )
+    if need_hmc_spike:
+        if settings.get("hmc_spike") is None:
+            raise ValueError(
+                "hmc_spike config block is required when the stage is enabled "
+                "or --stage hmc_spike is requested"
+            )
+        settings["hmc_spike"] = validate_hmc_spike_config(settings["hmc_spike"])
+        if stage == "all" and not settings["hmc_spike"]["enabled"]:
+            raise ValueError("hmc_spike.enabled must be true when included in --stage all")
+    elif settings.get("hmc_spike") is not None and settings["hmc_spike"].get("enabled"):
+        settings["hmc_spike"] = validate_hmc_spike_config(settings["hmc_spike"])
     settings["summary_script"] = settings["summary_script"] or "scripts-v2/summary.py"
     settings["aggregate_script"] = (
         settings["aggregate_script"] or "scripts/aggregate.py"
@@ -2013,7 +2158,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
 
     if stage == "all":
-        for stage_name in STAGE_SEQUENCE:
+        for stage_name in stages_for_all(settings):
             validate_required_for_stage(stage_name, settings)
     else:
         validate_required_for_stage(stage, settings)
@@ -2244,7 +2389,8 @@ def main() -> int:
     if settings["stage"] == "all":
         # Same checks as each per-stage subprocess (--skip-workdir-input-checks), but in
         # the parent so bad paths fail with a clear ValueError before any subprocess.
-        for stage_name in STAGE_SEQUENCE:
+        all_stages = stages_for_all(settings)
+        for stage_name in all_stages:
             validate_inputs_for_stage(
                 stage_name,
                 settings,
@@ -2253,7 +2399,7 @@ def main() -> int:
             )
         passthrough_args = build_stage_passthrough_args(sys.argv[1:])
         stage_scripts: list[tuple[str, list[Path]]] = []
-        for stage_name in STAGE_SEQUENCE:
+        for stage_name in all_stages:
             stage_argv = [
                 sys.executable,
                 __file__,
@@ -2288,7 +2434,7 @@ def main() -> int:
             print(f"[make_cmd] script={driver_path}")
             if not settings["dry_run"]:
                 driver_settings = apply_stage_slurm_settings(
-                    settings, args, STAGE_SEQUENCE[-1]
+                    settings, args, all_stages[-1]
                 )
                 generate_slurm_driver_script(
                     stage_scripts, driver_path, log_dir, driver_settings
@@ -2773,16 +2919,14 @@ def main() -> int:
                 )
                 generate_slurm_script(command, script_path, log_dir, slurm_args)
             generated_scripts.append(script_path)
-    elif settings["stage"] == "summary":
+    elif settings["stage"] == "hmc_spike":
         command_args = argparse.Namespace(
-            summary_script=settings["summary_script"],
-            spike_in_index=settings["spike_in_index"],
-            call_mito_chromosomes=settings["call_mito_chromosomes"],
-            barcode_positions=settings["barcode_positions"],
+            hmc_spike_script=settings["hmc_spike_script"],
+            hmc_spike=settings["hmc_spike"],
         )
-        command = build_summary_command(command_args, sample_work)
+        command = build_hmc_spike_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "08_summary.sh"
+            script_path = command_dir / "08_hmc_spike.sh"
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")
@@ -2793,7 +2937,49 @@ def main() -> int:
             generate_local_script(command, script_path)
             generated_scripts.append(script_path)
         else:
-            script_path = command_dir / "08_summary.sbatch"
+            script_path = command_dir / "08_hmc_spike.sbatch"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if not settings["dry_run"]:
+                slurm_args = argparse.Namespace(
+                    job_name=f"dbit_hmc_spike_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=settings["slurm_output"].replace(
+                        "%x", f"dbit_hmc_spike_{settings['sample_id']}"
+                    ),
+                    slurm_error=settings["slurm_error"].replace(
+                        "%x", f"dbit_hmc_spike_{settings['sample_id']}"
+                    ),
+                    module_line="",
+                )
+                generate_slurm_script(command, script_path, log_dir, slurm_args)
+            generated_scripts.append(script_path)
+    elif settings["stage"] == "summary":
+        command_args = argparse.Namespace(
+            summary_script=settings["summary_script"],
+            spike_in_index=settings["spike_in_index"],
+            call_mito_chromosomes=settings["call_mito_chromosomes"],
+            barcode_positions=settings["barcode_positions"],
+        )
+        command = build_summary_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "09_summary.sh"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            script_path = command_dir / "09_summary.sbatch"
             print(f"[make_cmd] runner={settings['runner']}")
             print(f"[make_cmd] stage={settings['stage']}")
             print(f"[make_cmd] sample_id={settings['sample_id']}")

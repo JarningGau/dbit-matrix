@@ -67,6 +67,14 @@
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
         "puc19": "/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa"
     },
+    "hmc_spike": {
+        "enabled": false,
+        "name": "ClaI",
+        "sequence": "AAGGTGCAATCAGGTGTCAGTCTTAAAGGATCGATAAGGAAGCGGAA",
+        "hmc_positions": [6, 10, 17, 21, 31, 42],
+        "score_positions": [10, 17, 21],
+        "edit_distance": 1
+    },
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
@@ -158,6 +166,11 @@
             "cpus_per_task": 10
         },
         "saturation": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "8G",
+            "cpus_per_task": 1
+        },
+        "hmc_spike": {
             "partition": "amd-ep2,intel-sc3",
             "mem": "8G",
             "cpus_per_task": 1

@@ -13,6 +13,7 @@ Use these rules when working in this repository.
 
 - TAPS, TAPS v2, and EMSeq share this mainline:
   `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+- TAPS / TAPS v2 may insert `hmc_spike` after `saturation` and before `summary` when `hmc_spike.enabled` is true. It depends only on demux `*.spike-in.fq.gz` (not a prerequisite for `align`). EMSeq does not implement `hmc_spike`.
 - `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
 - `split` is not in `--stage all` or `STAGE_CHOICES`. `scripts/split_bams.py` exists but is not a workflow stage.
 - `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
@@ -63,6 +64,7 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
   - `mbias`: split host and spike jobs; use `slurm.mbias.host` and `slurm.mbias.spike`
   - `call`: split host and spike jobs; use `slurm.call.host` and `slurm.call.spike`
   - `saturation`: one sbatch; use `slurm.saturation`
+  - `hmc_spike` (TAPS / TAPS v2, when enabled): one sbatch; use `slurm.hmc_spike`
   - `summary`: one sbatch; use `slurm.summary`
 
 ## Key Contracts

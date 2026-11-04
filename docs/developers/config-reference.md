@@ -106,6 +106,32 @@ Saturation fields:
 - `saturation_script` (default: `scripts/saturation.py`)
 - `saturation_reads_threshold`: `"auto"` (default) or a positive number. `"auto"` resolves the HQ cutoff at runtime from `coverage/per_spot_read_counts.tsv` (steepest slope on barcode rank vs `log10(reads+1)` after dropping `reads <= 10`). See [contracts](contracts.md#saturation).
 
+5hmC oligo QC (`hmc_spike`, TAPS / TAPS v2 only):
+
+- `hmc_spike_script` (default: `scripts/hmc_spike.py`)
+- `hmc_spike` object:
+  - `enabled` (boolean): when true, include `hmc_spike` in `--stage all` after `saturation` and before `summary`; when false or omitted, skip. Explicit `--stage hmc_spike` requires a valid block regardless
+  - `name` (string, no whitespace): prefix for summary columns (`{name}_hmc_spike_*`)
+  - `sequence` (string): oligo to locate via C→N masking
+  - `hmc_positions` (int list, 0-based): 5hmC sites within `sequence` (each must be `C`)
+  - `score_positions` (int list): subset of `hmc_positions` used for mean hmC→T in summary
+  - `edit_distance` (int, default `1`): max mismatches on non-N masked bases
+
+Example:
+
+```json
+"hmc_spike": {
+  "enabled": false,
+  "name": "ClaI",
+  "sequence": "AAGGTGCAATCAGGTGTCAGTCTTAAAGGATCGATAAGGAAGCGGAA",
+  "hmc_positions": [6, 10, 17, 21, 31, 42],
+  "score_positions": [10, 17, 21],
+  "edit_distance": 1
+}
+```
+
+This is not `spike_in_index` (genome lambda/pUC) and not the methylated-linker motif. See [contracts](contracts.md#hmc_spike).
+
 ## EMSeq Fields
 
 Core fields:
@@ -229,6 +255,7 @@ Slurm resources should remain stage-specific. Examples:
 - `slurm.call.host`
 - `slurm.call.spike`
 - `slurm.saturation`
+- `slurm.hmc_spike` (TAPS / TAPS v2 when enabled)
 - `slurm.summary`
 - `slurm.methscan_prepare`, `slurm.methscan_filter`, `slurm.methscan_profile`, `slurm.methscan_smooth`, `slurm.methscan_scan`, `slurm.methscan_matrix`, `slurm.methscan_all` (methscan optional stages)
 

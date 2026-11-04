@@ -305,6 +305,46 @@ def format_percentage(numerator: int | None, denominator: int | None) -> str:
     return f"{(numerator / denominator) * 100:.2f}%"
 
 
+def load_hmc_spike_summary(summary_json_path: Path) -> dict | None:
+    if not summary_json_path.exists():
+        return None
+    try:
+        payload = json.loads(summary_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    return payload
+
+
+def apply_hmc_spike_columns(
+    row: dict[str, str],
+    hmc_summary: dict | None,
+    raw_reads: int | None,
+) -> None:
+    if hmc_summary is None:
+        return
+    name = str(hmc_summary["name"]).strip()
+    matched = hmc_summary.get("reads_matched")
+    matched_int: int | None
+    try:
+        matched_int = int(matched) if matched is not None else None
+    except (TypeError, ValueError):
+        matched_int = None
+    mean_rate = hmc_summary.get("mean_conversion_rate")
+    mean_float: float | None
+    try:
+        mean_float = float(mean_rate) if mean_rate is not None else None
+    except (TypeError, ValueError):
+        mean_float = None
+    row[f"{name}_hmc_spike_reads"] = format_optional_int(matched_int)
+    row[f"{name}_hmc_spike_reads_rate"] = format_percentage(matched_int, raw_reads)
+    row[f"{name}_hmc_spike_mean_hmCtoT"] = format_float(mean_float)
+
+
 def parse_fastp_raw_reads(fastp_json_path: Path) -> int | None:
     if not fastp_json_path.exists():
         return None
@@ -1001,6 +1041,10 @@ def main() -> int:
         host_valid_reads_nuclear,
         spike_mapped_reads,
     )
+    hmc_summary = load_hmc_spike_summary(
+        work_path / "qc" / "hmc_spike" / "summary.json"
+    )
+    apply_hmc_spike_columns(sample_row, hmc_summary, raw_reads)
     sample_fields = list(sample_row.keys())
     write_tsv(sample_out, sample_fields, [sample_row])
     write_summary_heatmaps(per_spot_out, summary_dir, reads_threshold=reads_threshold)
