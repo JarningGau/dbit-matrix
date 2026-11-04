@@ -7,7 +7,7 @@ This page explains what users should check first after a run.
 Start with these files under `work/<sample>/`:
 
 - `summary/sample_summary.tsv`
-- `summary/per_spot_summary.tsv` (`barcode` = `<bcB><bcA>host`, plus `array_row` / `array_col` from `barcode_positions`)
+- `summary/per_spot_summary.tsv` (`barcode` = `<bcB><bcA>`, plus `array_row` / `array_col` from `barcode_positions`)
 - `summary/*.heatmap.png` (plotted on `array_row` / `array_col`)
 - `qc/saturation/saturation_summary.tsv`
 - `qc/saturation/saturation_curve.png`

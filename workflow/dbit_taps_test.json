@@ -30,7 +30,7 @@
     "split_cb_tag": "CB",
     "aggregate_sort_mem": "8G",
     "mbias_mode": "all",
-    "mbias_host_subsample_fraction": 0.1,
+    "mbias_host_subsample_fraction": 1,
     "mbias_max_cycle": 150,
     "mbias_min_mapping_quality": 10,
     "mbias_script": "scripts/mbias.py",

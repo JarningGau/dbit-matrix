@@ -98,7 +98,7 @@ Outputs:
 Contract:
 
 - host is coordinate-sorted (no `-t CB`) and indexed
-- spike-in sort and index are unchanged
+- spike-in `pooled/pooled.<spike_name>.sorted.bam` contains mapped reads only (`samtools view -F 4` before sort; secondary/supplementary mapped reads are kept)
 
 ### `split` (legacy script, not a workflow stage)
 
@@ -219,9 +219,10 @@ Contract:
 - `sample_summary.tsv` is one row per sample
 - missing upstream inputs should preserve fixed columns and write `NA`
 - `per_spot_summary.tsv` fixed columns: `barcode`, `array_row`, `array_col`, `mean_methylation`, `cpg_site_count`, `reads`
-- summary `barcode` is `<bcB><bcA>host` (CB from cov stem / counts, plus a literal `host` suffix)
-- `array_row` / `array_col` are copied from `barcode_positions` by joining on CB (summary barcode with trailing `host` stripped); missing positions write `NA`
+- summary `barcode` is `<bcB><bcA>` (same CB as cov stem / counts; no `host` suffix)
+- `array_row` / `array_col` are copied from `barcode_positions` by joining on CB; missing positions write `NA`
 - heatmaps plot metrics on `array_col` (x) and `array_row` (y), 0-based inclusive
+- all summary heatmaps place `(array_col=0, array_row=0)` at the top-right (`array_col` increases leftward, `array_row` increases downward)
 - `X_index`, `Y_index`, and `spot` (`XX_YY`) are removed
 - `sample_summary.tsv` includes `host_valid_reads`, plus the mito/nuclear split `host_valid_reads_mito` and `host_valid_reads_nuclear` (same valid-read filters; mito contigs from `--mito-chromosomes`, default `chrM`; nuclear is the complement). When BAM metrics succeed: `host_valid_reads_mito + host_valid_reads_nuclear == host_valid_reads`
 - TAPS v2 (`scripts-v2/summary.py`) additionally surfaces methylated-linker conversion QC columns in `sample_summary.tsv`: `spike_scored_reads`, `scored_fully_converted`, `spike_mean_conversion_rate`, `spike_fraction_all_T`, `spike_conversion_filtered_rejects`

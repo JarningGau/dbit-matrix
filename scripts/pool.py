@@ -106,14 +106,26 @@ def main() -> int:
                     f"no spike-in shards found for '{spike_name}': "
                     f"{align_dir}/*.{spike_name}.bam"
                 )
-            spike_tmp = pooled_dir / f"pooled.{spike_name}.bam"
+            spike_cat_tmp = pooled_dir / f"pooled.{spike_name}.cat.bam"
+            spike_mapped_tmp = pooled_dir / f"pooled.{spike_name}.mapped.bam"
             spike_sorted = pooled_dir / f"pooled.{spike_name}.sorted.bam"
             cat_cmd = [
                 args.samtools_bin,
                 "cat",
                 "-o",
-                str(spike_tmp),
+                str(spike_cat_tmp),
                 *[str(path) for path in spike_shards],
+            ]
+            # Keep mapped reads only (-F 4); secondary/supplementary mapped stay.
+            view_cmd = [
+                args.samtools_bin,
+                "view",
+                "-b",
+                "-F",
+                "4",
+                "-o",
+                str(spike_mapped_tmp),
+                str(spike_cat_tmp),
             ]
             sort_cmd = [
                 args.samtools_bin,
@@ -122,21 +134,22 @@ def main() -> int:
                 str(args.samtools_threads),
                 "-o",
                 str(spike_sorted),
-                str(spike_tmp),
+                str(spike_mapped_tmp),
             ]
             index_cmd = [args.samtools_bin, "index", str(spike_sorted)]
-            rm_cmd = ["rm", str(spike_tmp)]
             print(f"[pool] spike_in={spike_name}")
             print(f"[pool] spike_shard_count={len(spike_shards)}")
             print(f"[pool] command={quoted(cat_cmd)}")
+            print(f"[pool] command={quoted(view_cmd)}")
             print(f"[pool] command={quoted(sort_cmd)}")
             print(f"[pool] command={quoted(index_cmd)}")
-            print(f"[pool] command={quoted(rm_cmd)}")
             if not args.dry_run:
                 run_command(cat_cmd)
+                run_command(view_cmd)
                 run_command(sort_cmd)
                 run_command(index_cmd)
-                spike_tmp.unlink(missing_ok=True)
+                spike_cat_tmp.unlink(missing_ok=True)
+                spike_mapped_tmp.unlink(missing_ok=True)
 
     if args.mode in ("all", "host"):
         host_shards = discover_host_shards(align_dir)

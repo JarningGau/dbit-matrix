@@ -4,7 +4,10 @@ This page is the active release history for the repository.
 
 ## Current
 
-- **BREAKING CB / coverage / summary identity:** Intermediate CB is concatenated `<bcB><bcA>` (no `+`) from demux through call. Host cov paths are `coverage/host/<cb[0:3]>/<cb>.{CG,CH}.cov`. `coverage/per_spot_read_counts.tsv` columns are `barcode`, `reads`. `per_spot_summary.tsv` columns are `barcode` (`<bcB><bcA>host`), `array_row`, `array_col`, `mean_methylation`, `cpg_site_count`, `reads`; heatmaps use `barcode_positions` (`configs/barcodes_50a_positions.txt`). Removed `X_index`, `Y_index`, and `spot` (`XX_YY`). Applies to TAPS, TAPS v2, and EMSeq. See [contracts](../developers/contracts.md#call) and [contracts](../developers/contracts.md#summary).
+- **BREAKING summary barcode:** `per_spot_summary.tsv` `barcode` is `<bcB><bcA>` with no literal `host` suffix. See [contracts](../developers/contracts.md#summary).
+- **Summary heatmap origin:** all summary heatmaps (`reads`, `cpg_site_count`, `mean_methylation`) place `(array_col=0, array_row=0)` at the top-right. See [contracts](../developers/contracts.md#summary).
+- **BREAKING spike pooled BAM:** `pooled/pooled.<spike_name>.sorted.bam` keeps mapped reads only (`samtools view -F 4` before sort). Host pooled BAM is unchanged. See [contracts](../developers/contracts.md#pool).
+- **BREAKING CB / coverage / summary identity:** Intermediate CB is concatenated `<bcB><bcA>` (no `+`) from demux through call. Host cov paths are `coverage/host/<cb[0:3]>/<cb>.{CG,CH}.cov`. `coverage/per_spot_read_counts.tsv` columns are `barcode`, `reads`. `per_spot_summary.tsv` columns are `barcode` (`<bcB><bcA>`), `array_row`, `array_col`, `mean_methylation`, `cpg_site_count`, `reads`; heatmaps use `barcode_positions` (`configs/barcodes_50a_positions.txt`). Removed `X_index`, `Y_index`, and `spot` (`XX_YY`). Applies to TAPS, TAPS v2, and EMSeq. See [contracts](../developers/contracts.md#call) and [contracts](../developers/contracts.md#summary).
 
 ## 3.0.0
 

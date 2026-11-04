@@ -25,6 +25,7 @@ HEATMAP_SPECS = (
         "cmap": "viridis",
         "vmin": 0.0,
         "vmax": None,
+        "origin_corner": "upper_right",
     },
     {
         "field": "cpg_site_count",
@@ -34,6 +35,7 @@ HEATMAP_SPECS = (
         "cmap": "magma",
         "vmin": 0.0,
         "vmax": None,
+        "origin_corner": "upper_right",
     },
     {
         "field": "mean_methylation",
@@ -43,6 +45,7 @@ HEATMAP_SPECS = (
         "cmap": "coolwarm",
         "vmin": 0.0,
         "vmax": 100.0,
+        "origin_corner": "upper_right",
     },
 )
 VALID_FLAGS = {99, 147, 83, 163}
@@ -119,8 +122,8 @@ def read_barcode_positions(path: str | Path) -> dict[str, tuple[str, str]]:
 
 
 def summary_barcode_from_cb(cb: str) -> str:
-    """Summary barcode column: <bcB><bcA>host."""
-    return f"{cb}host"
+    """Summary barcode column: <bcB><bcA>."""
+    return cb
 
 
 def parse_mito_chromosomes(chromosome_csv: str) -> frozenset[str]:
@@ -536,8 +539,10 @@ def write_heatmap_from_rows(
     cmap_name: str,
     vmin: float | None,
     vmax: float | None,
+    origin_corner: str = "lower_left",
 ) -> None:
     # x = array_col (bcB), y = array_row (bcA); both 0-based inclusive.
+    # lower_left: (0,0) bottom-left; upper_right: (0,0) top-right.
     points: list[tuple[int, int, float]] = []
     max_col = 0
     max_row = 0
@@ -586,8 +591,12 @@ def write_heatmap_from_rows(
     y_ticks = compute_tick_values(max_row)
     ax.set_xticks(x_ticks)
     ax.set_yticks(y_ticks)
-    ax.set_xlim(-0.5, max_col + 0.5)
-    ax.set_ylim(-0.5, max_row + 0.5)
+    if origin_corner == "upper_right":
+        ax.set_xlim(max_col + 0.5, -0.5)
+        ax.set_ylim(max_row + 0.5, -0.5)
+    else:
+        ax.set_xlim(-0.5, max_col + 0.5)
+        ax.set_ylim(-0.5, max_row + 0.5)
 
     colorbar = fig.colorbar(image, ax=ax, shrink=0.9)
     colorbar.set_label(colorbar_label)
@@ -610,6 +619,7 @@ def write_summary_heatmaps(per_spot_summary_path: Path, summary_dir: Path) -> li
             cmap_name=spec["cmap"],
             vmin=spec["vmin"],
             vmax=spec["vmax"],
+            origin_corner=spec.get("origin_corner", "lower_left"),
         )
         outputs.append(output_path)
     return outputs
