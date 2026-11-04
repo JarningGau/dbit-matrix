@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 import math
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -18,6 +19,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pysam
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+import theme_nature as tn
+
+tn.apply_theme()
 
 
 HEATMAP_SPECS = (
@@ -42,13 +48,23 @@ HEATMAP_SPECS = (
         "origin_corner": "upper_right",
     },
     {
-        "field": "mean_methylation",
-        "output_name": "mean_methylation_heatmap.png",
-        "title": "Mean Methylation per Spot",
-        "colorbar_label": "Mean methylation (%)",
+        "field": "mean_5mCG",
+        "output_name": "mean_5mCG_heatmap.png",
+        "title": "Mean 5mCG per Spot",
+        "colorbar_label": "Mean 5mCG (%)",
+        "cmap": "coolwarm",
+        "vmin": 50.0,
+        "vmax": 80.0,
+        "origin_corner": "upper_right",
+    },
+    {
+        "field": "mean_5mCH",
+        "output_name": "mean_5mCH_heatmap.png",
+        "title": "Mean 5mCH per Spot",
+        "colorbar_label": "Mean 5mCH (%)",
         "cmap": "coolwarm",
         "vmin": 0.0,
-        "vmax": 100.0,
+        "vmax": 10.0,
         "origin_corner": "upper_right",
     },
 )
@@ -466,25 +482,71 @@ def parse_optional_coord(text: str | None) -> int | None:
     return parsed
 
 
+def ch_cov_path_from_cg(cg_cov_path: Path) -> Path:
+    """Sibling CH cov path for a CG cov path (suffix swap)."""
+    name = cg_cov_path.name
+    if name.endswith(".CG.cov"):
+        return cg_cov_path.with_name(name[: -len(".CG.cov")] + ".CH.cov")
+    return cg_cov_path.with_suffix("").with_suffix(".CH.cov")
+
+
+def weighted_mean_from_rows(
+    rows: list[dict[str, str]],
+    mean_field: str,
+    count_field: str,
+) -> tuple[float | None, list[int]]:
+    """Site-count-weighted mean and the list of positive site counts."""
+    weighted_sum = 0.0
+    total_sites = 0
+    counts: list[int] = []
+    for row in rows:
+        mean_text = row[mean_field]
+        count_text = row[count_field]
+        if mean_text == "NA" or count_text == "NA":
+            continue
+        site_count = int(count_text)
+        if site_count <= 0:
+            continue
+        weighted_sum += float(mean_text) * site_count
+        total_sites += site_count
+        counts.append(site_count)
+    if total_sites <= 0:
+        return None, counts
+    return weighted_sum / total_sites, counts
+
+
+def median_of_ints(values: list[int]) -> float | None:
+    if not values:
+        return None
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+    mid = n // 2
+    if n % 2 == 1:
+        return float(sorted_values[mid])
+    return (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
+
+
 def summarize_per_spot(
     host_cov_paths: list[Path],
     read_counts: dict[str, str],
     positions: dict[str, tuple[str, str]],
 ) -> list[dict[str, str]]:
-    by_cov: dict[str, tuple[float | None, int | None]] = {}
-    for cov_path in host_cov_paths:
-        cb = cov_path.name[: -len(".CG.cov")].upper()
-        cov_stats = parse_cov_stats(cov_path)
-        if cov_stats is None:
-            by_cov[cb] = (None, None)
-        else:
-            mean_methylation, cpg_count = cov_stats
-            by_cov[cb] = (mean_methylation, cpg_count)
+    # cb -> (mean_5mCG, cpg_count, mean_5mCH, ch_count)
+    by_cov: dict[str, tuple[float | None, int | None, float | None, int | None]] = {}
+    for cg_cov_path in host_cov_paths:
+        cb = cg_cov_path.name[: -len(".CG.cov")].upper()
+        cg_stats = parse_cov_stats(cg_cov_path)
+        ch_stats = parse_cov_stats(ch_cov_path_from_cg(cg_cov_path))
+        mean_5mcg, cpg_count = (None, None) if cg_stats is None else cg_stats
+        mean_5mch, ch_count = (None, None) if ch_stats is None else ch_stats
+        by_cov[cb] = (mean_5mcg, cpg_count, mean_5mch, ch_count)
 
     all_cbs = sorted(set(by_cov.keys()) | set(read_counts.keys()))
     rows: list[dict[str, str]] = []
     for cb in all_cbs:
-        mean_methylation, cpg_count = by_cov.get(cb, (None, None))
+        mean_5mcg, cpg_count, mean_5mch, ch_count = by_cov.get(
+            cb, (None, None, None, None)
+        )
         array_row, array_col = positions.get(cb, ("NA", "NA"))
         reads = read_counts.get(cb, "NA") or "NA"
         rows.append(
@@ -492,8 +554,10 @@ def summarize_per_spot(
                 "barcode": summary_barcode_from_cb(cb),
                 "array_row": array_row if array_row else "NA",
                 "array_col": array_col if array_col else "NA",
-                "mean_methylation": format_float(mean_methylation),
+                "mean_5mCG": format_float(mean_5mcg),
+                "mean_5mCH": format_float(mean_5mch),
                 "cpg_site_count": str(cpg_count) if cpg_count is not None else "NA",
+                "ch_site_count": str(ch_count) if ch_count is not None else "NA",
                 "reads": reads,
             }
         )
@@ -503,8 +567,10 @@ def summarize_per_spot(
 def build_sample_summary_row(
     sample_id: str,
     per_spot_rows: list[dict[str, str]],
-    host_mito_cov_path: Path,
-    spike_cov_paths: dict[str, Path],
+    host_mito_cg_cov_path: Path,
+    host_mito_ch_cov_path: Path,
+    spike_cg_cov_paths: dict[str, Path],
+    spike_ch_cov_paths: dict[str, Path],
     saturation_rate: str | None,
     raw_reads: int | None,
     barcoded_reads: int | None,
@@ -515,54 +581,42 @@ def build_sample_summary_row(
     spike_mapped_reads: dict[str, int | None],
     methylated_linker_qc: dict[str, int | float | None] | None = None,
 ) -> dict[str, str]:
-    weighted_sum = 0.0
-    total_cpg = 0
-    cpg_counts_for_median: list[int] = []
-    for row in per_spot_rows:
-        mean_text = row["mean_methylation"]
-        cpg_text = row["cpg_site_count"]
-        if mean_text == "NA" or cpg_text == "NA":
-            continue
-        cpg_count = int(cpg_text)
-        if cpg_count <= 0:
-            continue
-        mean_value = float(mean_text)
-        weighted_sum += mean_value * cpg_count
-        total_cpg += cpg_count
-        cpg_counts_for_median.append(cpg_count)
+    host_spot_mean_5mcg, cpg_counts_for_median = weighted_mean_from_rows(
+        per_spot_rows, "mean_5mCG", "cpg_site_count"
+    )
+    host_spot_mean_5mch, _ = weighted_mean_from_rows(
+        per_spot_rows, "mean_5mCH", "ch_site_count"
+    )
+    host_spot_median_cpg = median_of_ints(cpg_counts_for_median)
 
-    host_spot_mean = (weighted_sum / total_cpg) if total_cpg > 0 else None
-    host_spot_median_cpg: float | None
-    if not cpg_counts_for_median:
-        host_spot_median_cpg = None
-    else:
-        sorted_counts = sorted(cpg_counts_for_median)
-        n = len(sorted_counts)
-        mid = n // 2
-        if n % 2 == 1:
-            host_spot_median_cpg = float(sorted_counts[mid])
-        else:
-            host_spot_median_cpg = (sorted_counts[mid - 1] + sorted_counts[mid]) / 2.0
-
-    host_mito_stats = parse_cov_stats(host_mito_cov_path)
-    host_mito_mean = host_mito_stats[0] if host_mito_stats else None
+    host_mito_cg_stats = parse_cov_stats(host_mito_cg_cov_path)
+    host_mito_ch_stats = parse_cov_stats(host_mito_ch_cov_path)
+    host_mito_mean_5mcg = host_mito_cg_stats[0] if host_mito_cg_stats else None
+    host_mito_mean_5mch = host_mito_ch_stats[0] if host_mito_ch_stats else None
 
     row: dict[str, str] = {"sample_id": sample_id}
     row.update({
         "saturation_rate": saturation_rate if saturation_rate else "NA",
-        "host_spot_mean_methylation": format_float(host_spot_mean),
+        "host_spot_mean_5mCG": format_float(host_spot_mean_5mcg),
+        "host_spot_mean_5mCH": format_float(host_spot_mean_5mch),
         "host_spot_median_cpg_sites": format_float(host_spot_median_cpg),
-        "host_mito_mean_methylation": format_float(host_mito_mean),
+        "host_mito_mean_5mCG": format_float(host_mito_mean_5mcg),
+        "host_mito_mean_5mCH": format_float(host_mito_mean_5mch),
     })
-    for spike_name in sorted(spike_cov_paths.keys()):
-        spike_stats = parse_cov_stats(spike_cov_paths[spike_name])
-        spike_mean = spike_stats[0] if spike_stats else None
-        row[f"{spike_name}_mean_methylation"] = format_float(spike_mean)
+    for spike_name in sorted(spike_cg_cov_paths.keys()):
+        spike_cg_stats = parse_cov_stats(spike_cg_cov_paths[spike_name])
+        spike_ch_stats = parse_cov_stats(spike_ch_cov_paths[spike_name])
+        row[f"{spike_name}_mean_5mCG"] = format_float(
+            spike_cg_stats[0] if spike_cg_stats else None
+        )
+        row[f"{spike_name}_mean_5mCH"] = format_float(
+            spike_ch_stats[0] if spike_ch_stats else None
+        )
     row["raw_reads"] = format_optional_int(raw_reads)
     row["barcoded_reads"] = format_optional_int(barcoded_reads)
     row["barcoded_reads_rate"] = format_percentage(barcoded_reads, raw_reads)
     row["host_mapped_reads"] = format_optional_int(host_mapped_reads)
-    for spike_name in sorted(spike_cov_paths.keys()):
+    for spike_name in sorted(spike_cg_cov_paths.keys()):
         row[f"{spike_name}_mapped_reads"] = format_optional_int(
             spike_mapped_reads.get(spike_name)
         )
@@ -648,12 +702,13 @@ def compute_tick_values(max_index: int) -> list[int]:
 
 
 def write_empty_heatmap(output_path: Path, title: str) -> None:
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=(2.2, 2.0))
     ax.axis("off")
-    ax.text(0.5, 0.5, "No valid data", ha="center", va="center", fontsize=12)
-    ax.set_title(title)
+    ax.text(0.5, 0.5, "No valid data", ha="center", va="center", fontsize=6)
+    ax.set_title(title, fontsize=6)
+    tn.style_axes(ax)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
+    fig.savefig(output_path)
     plt.close(fig)
 
 
@@ -697,9 +752,7 @@ def write_heatmap_from_rows(
     cmap = plt.get_cmap(cmap_name).copy()
     cmap.set_bad("#f2f2f2")
 
-    fig_width = min(max(6.0, n_cols * 0.22), 12.0)
-    fig_height = min(max(5.0, n_rows * 0.22), 12.0)
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    fig, ax = plt.subplots(figsize=(2.2, 2.0))
     image = ax.imshow(
         matrix,
         origin="lower",
@@ -710,9 +763,9 @@ def write_heatmap_from_rows(
         vmin=vmin,
         vmax=vmax,
     )
-    ax.set_title(title)
-    ax.set_xlabel("array_col")
-    ax.set_ylabel("array_row")
+    ax.set_title(title, fontsize=6)
+    ax.set_xlabel("array_col", fontsize=6)
+    ax.set_ylabel("array_row", fontsize=6)
 
     x_ticks = compute_tick_values(max_col)
     y_ticks = compute_tick_values(max_row)
@@ -726,9 +779,11 @@ def write_heatmap_from_rows(
         ax.set_ylim(-0.5, max_row + 0.5)
 
     colorbar = fig.colorbar(image, ax=ax, shrink=0.9)
-    colorbar.set_label(colorbar_label)
+    colorbar.set_label(colorbar_label, fontsize=6)
+    colorbar.ax.tick_params(labelsize=5, width=0.5, length=2)
+    tn.style_axes(ax)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
+    fig.savefig(output_path)
     plt.close(fig)
 
 
@@ -764,7 +819,8 @@ def main() -> int:
     saturation_summary_path = work_path / "qc" / "saturation" / "saturation_summary.tsv"
     pooled_dir = work_path / "pooled"
     host_bam_path = pooled_dir / "pooled.host.sorted.bam"
-    host_mito_cov_path = coverage_dir / "host_mito.CG.cov"
+    host_mito_cg_cov_path = coverage_dir / "host_mito.CG.cov"
+    host_mito_ch_cov_path = coverage_dir / "host_mito.CH.cov"
     summary_dir = work_path / "summary"
     per_spot_out = summary_dir / "per_spot_summary.tsv"
     sample_out = summary_dir / "sample_summary.tsv"
@@ -779,8 +835,11 @@ def main() -> int:
                 spike_names.append(item)
     else:
         spike_names = discover_spike_names(coverage_dir)
-    spike_cov_paths = {
+    spike_cg_cov_paths = {
         spike_name: coverage_dir / f"{spike_name}.CG.cov" for spike_name in spike_names
+    }
+    spike_ch_cov_paths = {
+        spike_name: coverage_dir / f"{spike_name}.CH.cov" for spike_name in spike_names
     }
     spike_bam_paths = {
         spike_name: pooled_dir / f"pooled.{spike_name}.sorted.bam"
@@ -796,11 +855,14 @@ def main() -> int:
     print(f"[summary] demux_dir={demux_dir}")
     print(f"[summary] saturation_summary={saturation_summary_path}")
     print(f"[summary] host_bam={host_bam_path}")
-    print(f"[summary] host_mito_cov={host_mito_cov_path}")
+    print(f"[summary] host_mito_cg_cov={host_mito_cg_cov_path}")
+    print(f"[summary] host_mito_ch_cov={host_mito_ch_cov_path}")
     print(f"[summary] mito_chromosomes={','.join(sorted(mito_chromosomes))}")
     print(f"[summary] spike_names={','.join(spike_names) if spike_names else 'none'}")
-    for spike_name, spike_cov_path in spike_cov_paths.items():
-        print(f"[summary] spike_cov[{spike_name}]={spike_cov_path}")
+    for spike_name, spike_cov_path in spike_cg_cov_paths.items():
+        print(f"[summary] spike_cg_cov[{spike_name}]={spike_cov_path}")
+    for spike_name, spike_cov_path in spike_ch_cov_paths.items():
+        print(f"[summary] spike_ch_cov[{spike_name}]={spike_cov_path}")
     for spike_name, spike_bam_path in spike_bam_paths.items():
         print(f"[summary] spike_bam[{spike_name}]={spike_bam_path}")
     print(f"[summary] output_per_spot={per_spot_out}")
@@ -819,8 +881,10 @@ def main() -> int:
         "barcode",
         "array_row",
         "array_col",
-        "mean_methylation",
+        "mean_5mCG",
+        "mean_5mCH",
         "cpg_site_count",
+        "ch_site_count",
         "reads",
     ]
     write_tsv(per_spot_out, per_spot_fields, per_spot_rows)
@@ -847,8 +911,10 @@ def main() -> int:
     sample_row = build_sample_summary_row(
         sample_id,
         per_spot_rows,
-        host_mito_cov_path,
-        spike_cov_paths,
+        host_mito_cg_cov_path,
+        host_mito_ch_cov_path,
+        spike_cg_cov_paths,
+        spike_ch_cov_paths,
         saturation_rate,
         raw_reads,
         barcoded_reads,
