@@ -64,7 +64,41 @@ HEATMAP_SPECS = (
         "origin_corner": "upper_right",
         "hq_filter": True,
     },
+    {
+        "field": "mean_5mCA",
+        "output_name": "mean_5mCA_heatmap.png",
+        "title": "Mean 5mCA per Spot",
+        "colorbar_label": "Mean 5mCA (%)",
+        "cmap": "coolwarm",
+        "vmin": 0.0,
+        "vmax": 10.0,
+        "origin_corner": "upper_right",
+        "hq_filter": True,
+    },
+    {
+        "field": "mean_5mCC",
+        "output_name": "mean_5mCC_heatmap.png",
+        "title": "Mean 5mCC per Spot",
+        "colorbar_label": "Mean 5mCC (%)",
+        "cmap": "coolwarm",
+        "vmin": 0.0,
+        "vmax": 10.0,
+        "origin_corner": "upper_right",
+        "hq_filter": True,
+    },
+    {
+        "field": "mean_5mCT",
+        "output_name": "mean_5mCT_heatmap.png",
+        "title": "Mean 5mCT per Spot",
+        "colorbar_label": "Mean 5mCT (%)",
+        "cmap": "coolwarm",
+        "vmin": 0.0,
+        "vmax": 10.0,
+        "origin_corner": "upper_right",
+        "hq_filter": True,
+    },
 )
+CH_CONTEXTS = ("CA", "CC", "CT")
 VALID_FLAGS = {99, 147, 83, 163}
 
 
@@ -176,6 +210,64 @@ def parse_cov_stats(cov_path: Path) -> tuple[float, int] | None:
     if cpg_count == 0:
         return None
     return methylation_sum / cpg_count, cpg_count
+
+
+def _finalize_mean_count(
+    methylation_sum: float, site_count: int
+) -> tuple[float, int] | None:
+    if site_count <= 0:
+        return None
+    return methylation_sum / site_count, site_count
+
+
+def parse_ch_cov_stats(
+    cov_path: Path,
+) -> tuple[tuple[float, int] | None, dict[str, tuple[float, int] | None]]:
+    """Parse .CH.cov: overall CH mean plus CA/CC/CT means from the context column.
+
+    Rows without a recognized context still count toward overall CH only.
+    """
+    empty_contexts: dict[str, tuple[float, int] | None] = {
+        context: None for context in CH_CONTEXTS
+    }
+    if not cov_path.exists():
+        return None, empty_contexts
+
+    ch_sum = 0.0
+    ch_count = 0
+    context_sums = {context: 0.0 for context in CH_CONTEXTS}
+    context_counts = {context: 0 for context in CH_CONTEXTS}
+    with cov_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            fields = line.split("\t")
+            if len(fields) < 6:
+                continue
+            try:
+                methylation = float(fields[3])
+                methylated_count = int(fields[4])
+                unmethylated_count = int(fields[5])
+            except ValueError:
+                continue
+            if methylated_count + unmethylated_count <= 0:
+                continue
+            ch_sum += methylation
+            ch_count += 1
+            if len(fields) < 7:
+                continue
+            context = fields[6].strip().upper()
+            if context not in context_sums:
+                continue
+            context_sums[context] += methylation
+            context_counts[context] += 1
+
+    context_stats = {
+        context: _finalize_mean_count(context_sums[context], context_counts[context])
+        for context in CH_CONTEXTS
+    }
+    return _finalize_mean_count(ch_sum, ch_count), context_stats
 
 
 def to_optional_int(value: object) -> int | None:
@@ -418,26 +510,46 @@ def median_of_ints(values: list[int]) -> float | None:
     return (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
 
 
+def _site_count_str(stats: tuple[float, int] | None) -> str:
+    if stats is None:
+        return "NA"
+    return str(stats[1])
+
+
+def _mean_from_stats(stats: tuple[float, int] | None) -> float | None:
+    if stats is None:
+        return None
+    return stats[0]
+
+
 def summarize_per_spot(
     host_cov_paths: list[Path],
     read_counts: dict[str, str],
     positions: dict[str, tuple[str, str]],
 ) -> list[dict[str, str]]:
-    # cb -> (mean_5mCG, cpg_count, mean_5mCH, ch_count)
-    by_cov: dict[str, tuple[float | None, int | None, float | None, int | None]] = {}
+    # cb -> (cg_stats, ch_stats, context_stats)
+    by_cov: dict[
+        str,
+        tuple[
+            tuple[float, int] | None,
+            tuple[float, int] | None,
+            dict[str, tuple[float, int] | None],
+        ],
+    ] = {}
+    empty_contexts: dict[str, tuple[float, int] | None] = {
+        context: None for context in CH_CONTEXTS
+    }
     for cg_cov_path in host_cov_paths:
         cb = cg_cov_path.name[: -len(".CG.cov")].upper()
         cg_stats = parse_cov_stats(cg_cov_path)
-        ch_stats = parse_cov_stats(ch_cov_path_from_cg(cg_cov_path))
-        mean_5mcg, cpg_count = (None, None) if cg_stats is None else cg_stats
-        mean_5mch, ch_count = (None, None) if ch_stats is None else ch_stats
-        by_cov[cb] = (mean_5mcg, cpg_count, mean_5mch, ch_count)
+        ch_stats, context_stats = parse_ch_cov_stats(ch_cov_path_from_cg(cg_cov_path))
+        by_cov[cb] = (cg_stats, ch_stats, context_stats)
 
     all_cbs = sorted(set(by_cov.keys()) | set(read_counts.keys()))
     rows: list[dict[str, str]] = []
     for cb in all_cbs:
-        mean_5mcg, cpg_count, mean_5mch, ch_count = by_cov.get(
-            cb, (None, None, None, None)
+        cg_stats, ch_stats, context_stats = by_cov.get(
+            cb, (None, None, empty_contexts)
         )
         array_row, array_col = positions.get(cb, ("NA", "NA"))
         reads = read_counts.get(cb, "NA") or "NA"
@@ -446,10 +558,16 @@ def summarize_per_spot(
                 "barcode": summary_barcode_from_cb(cb),
                 "array_row": array_row if array_row else "NA",
                 "array_col": array_col if array_col else "NA",
-                "mean_5mCG": format_float(mean_5mcg),
-                "mean_5mCH": format_float(mean_5mch),
-                "cpg_site_count": str(cpg_count) if cpg_count is not None else "NA",
-                "ch_site_count": str(ch_count) if ch_count is not None else "NA",
+                "mean_5mCG": format_float(_mean_from_stats(cg_stats)),
+                "mean_5mCH": format_float(_mean_from_stats(ch_stats)),
+                "mean_5mCA": format_float(_mean_from_stats(context_stats["CA"])),
+                "mean_5mCC": format_float(_mean_from_stats(context_stats["CC"])),
+                "mean_5mCT": format_float(_mean_from_stats(context_stats["CT"])),
+                "cpg_site_count": _site_count_str(cg_stats),
+                "ch_site_count": _site_count_str(ch_stats),
+                "ca_site_count": _site_count_str(context_stats["CA"]),
+                "cc_site_count": _site_count_str(context_stats["CC"]),
+                "ct_site_count": _site_count_str(context_stats["CT"]),
                 "reads": reads,
             }
         )
@@ -478,30 +596,62 @@ def build_sample_summary_row(
     host_spot_mean_5mch, _ = weighted_mean_from_rows(
         per_spot_rows, "mean_5mCH", "ch_site_count"
     )
+    host_spot_mean_5mca, _ = weighted_mean_from_rows(
+        per_spot_rows, "mean_5mCA", "ca_site_count"
+    )
+    host_spot_mean_5mcc, _ = weighted_mean_from_rows(
+        per_spot_rows, "mean_5mCC", "cc_site_count"
+    )
+    host_spot_mean_5mct, _ = weighted_mean_from_rows(
+        per_spot_rows, "mean_5mCT", "ct_site_count"
+    )
     host_spot_median_cpg = median_of_ints(cpg_counts_for_median)
 
     host_mito_cg_stats = parse_cov_stats(host_mito_cg_cov_path)
-    host_mito_ch_stats = parse_cov_stats(host_mito_ch_cov_path)
+    host_mito_ch_stats, host_mito_context_stats = parse_ch_cov_stats(
+        host_mito_ch_cov_path
+    )
     host_mito_mean_5mcg = host_mito_cg_stats[0] if host_mito_cg_stats else None
-    host_mito_mean_5mch = host_mito_ch_stats[0] if host_mito_ch_stats else None
+    host_mito_mean_5mch = _mean_from_stats(host_mito_ch_stats)
 
     row: dict[str, str] = {"sample_id": sample_id}
     row.update({
         "saturation_rate": saturation_rate if saturation_rate else "NA",
         "host_spot_mean_5mCG": format_float(host_spot_mean_5mcg),
         "host_spot_mean_5mCH": format_float(host_spot_mean_5mch),
+        "host_spot_mean_5mCA": format_float(host_spot_mean_5mca),
+        "host_spot_mean_5mCC": format_float(host_spot_mean_5mcc),
+        "host_spot_mean_5mCT": format_float(host_spot_mean_5mct),
         "host_spot_median_cpg_sites": format_float(host_spot_median_cpg),
         "host_mito_mean_5mCG": format_float(host_mito_mean_5mcg),
         "host_mito_mean_5mCH": format_float(host_mito_mean_5mch),
+        "host_mito_mean_5mCA": format_float(
+            _mean_from_stats(host_mito_context_stats["CA"])
+        ),
+        "host_mito_mean_5mCC": format_float(
+            _mean_from_stats(host_mito_context_stats["CC"])
+        ),
+        "host_mito_mean_5mCT": format_float(
+            _mean_from_stats(host_mito_context_stats["CT"])
+        ),
     })
     for spike_name in sorted(spike_cg_cov_paths.keys()):
         spike_cg_stats = parse_cov_stats(spike_cg_cov_paths[spike_name])
-        spike_ch_stats = parse_cov_stats(spike_ch_cov_paths[spike_name])
+        spike_ch_stats, spike_context_stats = parse_ch_cov_stats(
+            spike_ch_cov_paths[spike_name]
+        )
         row[f"{spike_name}_mean_5mCG"] = format_float(
             spike_cg_stats[0] if spike_cg_stats else None
         )
-        row[f"{spike_name}_mean_5mCH"] = format_float(
-            spike_ch_stats[0] if spike_ch_stats else None
+        row[f"{spike_name}_mean_5mCH"] = format_float(_mean_from_stats(spike_ch_stats))
+        row[f"{spike_name}_mean_5mCA"] = format_float(
+            _mean_from_stats(spike_context_stats["CA"])
+        )
+        row[f"{spike_name}_mean_5mCC"] = format_float(
+            _mean_from_stats(spike_context_stats["CC"])
+        )
+        row[f"{spike_name}_mean_5mCT"] = format_float(
+            _mean_from_stats(spike_context_stats["CT"])
         )
     row["raw_reads"] = format_optional_int(raw_reads)
     row["barcoded_reads"] = format_optional_int(barcoded_reads)
@@ -785,7 +935,7 @@ def main() -> int:
     if reads_threshold is None:
         print(
             "[summary] warning=missing_reads_threshold; "
-            "mean_5mCG/mean_5mCH heatmaps use all spots"
+            "mean_5mCG/mean_5mCH/mean_5mCA/mean_5mCC/mean_5mCT heatmaps use all spots"
         )
         print("[summary] hq_reads_threshold=NA")
         print("[summary] hq_filter=off")
@@ -806,8 +956,14 @@ def main() -> int:
         "array_col",
         "mean_5mCG",
         "mean_5mCH",
+        "mean_5mCA",
+        "mean_5mCC",
+        "mean_5mCT",
         "cpg_site_count",
         "ch_site_count",
+        "ca_site_count",
+        "cc_site_count",
+        "ct_site_count",
         "reads",
     ]
     write_tsv(per_spot_out, per_spot_fields, per_spot_rows)

@@ -8,7 +8,7 @@ Start with these files under `work/<sample>/`:
 
 - `summary/sample_summary.tsv`
 - `summary/per_spot_summary.tsv` (`barcode` = `<bcB><bcA>`, plus `array_row` / `array_col` from `barcode_positions`)
-- `summary/*_heatmap.png` (reads, CpG site count, mean 5mCG, mean 5mCH; plotted on `array_row` / `array_col`)
+- `summary/*_heatmap.png` (reads, CpG site count, mean 5mCG, mean 5mCH, mean 5mCA, mean 5mCC, mean 5mCT; plotted on `array_row` / `array_col`)
 - `qc/saturation/saturation_summary.tsv`
 - `qc/saturation/saturation_curve.png`
 
