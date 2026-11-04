@@ -72,7 +72,7 @@ STAGE_REQUIRED_FIELDS = {
     "mbias": [],
     "call": ["call_reference_file", "call_chromosomes"],
     "saturation": [],
-    "summary": [],
+    "summary": ["barcode1_whitelist", "barcode2_whitelist"],
     "aggregate": [],
     "methscan_prepare": [],
     "methscan_filter": [],
@@ -827,6 +827,10 @@ def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
         str(sample_work),
         "--mito-chromosomes",
         args.call_mito_chromosomes,
+        "--barcode1-whitelist",
+        args.barcode1_whitelist,
+        "--barcode2-whitelist",
+        args.barcode2_whitelist,
     ]
     for spike_name in parse_spike_names(args.spike_in_index):
         command.extend(["--spike-in-name", spike_name])
@@ -1092,6 +1096,14 @@ def validate_inputs_for_stage(
         wic.require_script_path("saturation_script", settings["saturation_script"])
     elif stage == "summary":
         wic.require_script_path("summary_script", settings["summary_script"])
+        wic.require_file(
+            "barcode1_whitelist",
+            wic.resolve_config_path(settings["barcode1_whitelist"]),
+        )
+        wic.require_file(
+            "barcode2_whitelist",
+            wic.resolve_config_path(settings["barcode2_whitelist"]),
+        )
         if not skip_workdir_inputs:
             wic.require_file(
                 "pooled.host.sorted.bam",
@@ -2675,6 +2687,8 @@ def main() -> int:
             summary_script=settings["summary_script"],
             spike_in_index=settings["spike_in_index"],
             call_mito_chromosomes=settings["call_mito_chromosomes"],
+            barcode1_whitelist=settings["barcode1_whitelist"],
+            barcode2_whitelist=settings["barcode2_whitelist"],
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":

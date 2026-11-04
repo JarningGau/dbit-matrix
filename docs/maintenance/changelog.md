@@ -4,6 +4,8 @@ This page is the active release history for the repository.
 
 ## Current
 
+- **Summary per-spot barcode column:** `summary/per_spot_summary.tsv` gains a leading `barcode` column (`barcodeB+barcodeA`) derived at summary time from `barcode1_whitelist` / `barcode2_whitelist` and existing `X_index` / `Y_index`. Intermediate demux CB tags and other stage outputs are unchanged. See [contracts](../developers/contracts.md#summary).
+
 ## 3.0.0
 
 - **BREAKING host pooled BAM:** Host pooled BAM is `pooled/pooled.host.sorted.bam`, coordinate-sorted and indexed. `pooled.byCB.bam` is no longer written. See [contracts](../developers/contracts.md#pool).

@@ -78,11 +78,53 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--barcode1-whitelist",
+        required=True,
+        help="Whitelist for barcodeA (X); used to fill the barcode column.",
+    )
+    parser.add_argument(
+        "--barcode2-whitelist",
+        required=True,
+        help="Whitelist for barcodeB (Y); used to fill the barcode column.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print resolved inputs/outputs and exit without writing files.",
     )
     return parser.parse_args()
+
+
+def read_barcode_list(path: str | Path) -> list[str]:
+    barcodes: list[str] = []
+    with Path(path).open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            barcode = line.split("\t", 1)[0].strip().upper()
+            if barcode:
+                barcodes.append(barcode)
+    if not barcodes:
+        raise ValueError(f"empty barcode whitelist: {path}")
+    return barcodes
+
+
+def barcode_from_indices(
+    x_index: str,
+    y_index: str,
+    barcode1: list[str],
+    barcode2: list[str],
+) -> str:
+    """Return barcodeB+barcodeA from 0-based X/Y whitelist indices."""
+    try:
+        x = int(str(x_index).strip())
+        y = int(str(y_index).strip())
+    except (TypeError, ValueError):
+        return "NA"
+    if x < 0 or y < 0 or x >= len(barcode1) or y >= len(barcode2):
+        return "NA"
+    return f"{barcode2[y]}+{barcode1[x]}"
 
 
 def parse_mito_chromosomes(chromosome_csv: str) -> frozenset[str]:
@@ -333,6 +375,8 @@ def parse_optional_index(text: str | None) -> int | None:
 def summarize_per_spot(
     host_cov_paths: list[Path],
     read_counts: dict[str, tuple[str, str, str]],
+    barcode1: list[str],
+    barcode2: list[str],
 ) -> list[dict[str, str]]:
     by_cov: dict[str, tuple[float | None, int | None]] = {}
     for cov_path in host_cov_paths:
@@ -357,10 +401,13 @@ def summarize_per_spot(
                 x_index = x_index or guessed_x
                 y_index = y_index or guessed_y
             reads = reads or "NA"
+        x_text = x_index if x_index else "NA"
+        y_text = y_index if y_index else "NA"
         rows.append(
             {
-                "X_index": x_index if x_index else "NA",
-                "Y_index": y_index if y_index else "NA",
+                "barcode": barcode_from_indices(x_text, y_text, barcode1, barcode2),
+                "X_index": x_text,
+                "Y_index": y_text,
                 "spot": spot,
                 "mean_methylation": format_float(mean_methylation),
                 "cpg_site_count": str(cpg_count) if cpg_count is not None else "NA",
@@ -631,6 +678,8 @@ def main() -> int:
     print(f"[summary] work_path={work_path}")
     print(f"[summary] host_spot_cov_count={len(host_cov_paths)}")
     print(f"[summary] reads_table={read_counts_path}")
+    print(f"[summary] barcode1_whitelist={args.barcode1_whitelist}")
+    print(f"[summary] barcode2_whitelist={args.barcode2_whitelist}")
     print(f"[summary] fastp_json={fastp_json_path}")
     print(f"[summary] fastp_json_legacy={fastp_json_legacy_path}")
     print(f"[summary] demux_dir={demux_dir}")
@@ -652,9 +701,14 @@ def main() -> int:
         print("[summary] dry_run=1")
         return 0
 
+    barcode1 = read_barcode_list(args.barcode1_whitelist)
+    barcode2 = read_barcode_list(args.barcode2_whitelist)
     read_counts = read_per_spot_reads(read_counts_path)
-    per_spot_rows = summarize_per_spot(host_cov_paths, read_counts)
+    per_spot_rows = summarize_per_spot(
+        host_cov_paths, read_counts, barcode1, barcode2
+    )
     per_spot_fields = [
+        "barcode",
         "X_index",
         "Y_index",
         "spot",

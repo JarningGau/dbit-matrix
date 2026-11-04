@@ -197,6 +197,7 @@ Inputs include:
 - host mitochondrial coverage
 - spike-in coverage
 - per-spot read counts (`coverage/per_spot_read_counts.tsv`, written by `call`)
+- `barcode1_whitelist` and `barcode2_whitelist` (for the per-spot `barcode` column only)
 - fastp statistics
 - demux statistics
 - pooled BAMs
@@ -215,7 +216,8 @@ Contract:
 - `per_spot_summary.tsv` is one row per spot
 - `sample_summary.tsv` is one row per sample
 - missing upstream inputs should preserve fixed columns and write `NA`
-- `per_spot_summary.tsv` keeps fixed columns for `X_index`, `Y_index`, `spot`, `mean_methylation`, `cpg_site_count`, and `reads`
+- `per_spot_summary.tsv` keeps fixed columns for `barcode`, `X_index`, `Y_index`, `spot`, `mean_methylation`, `cpg_site_count`, and `reads`
+- `barcode` is `barcodeB+barcodeA` (= Y whitelist sequence + X whitelist sequence), derived at summary time from `barcode2_whitelist[Y_index]` and `barcode1_whitelist[X_index]` (0-based line order). Out-of-range indices write `NA`. Intermediate CB tags remain `barcodeA+barcodeB` and are unchanged.
 - `sample_summary.tsv` includes `host_valid_reads`, plus the mito/nuclear split `host_valid_reads_mito` and `host_valid_reads_nuclear` (same valid-read filters; mito contigs from `--mito-chromosomes`, default `chrM`; nuclear is the complement). When BAM metrics succeed: `host_valid_reads_mito + host_valid_reads_nuclear == host_valid_reads`
 - TAPS v2 (`scripts-v2/summary.py`) additionally surfaces methylated-linker conversion QC columns in `sample_summary.tsv`: `spike_scored_reads`, `scored_fully_converted`, `spike_mean_conversion_rate`, `spike_fraction_all_T`, `spike_conversion_filtered_rejects`
 
