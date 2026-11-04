@@ -47,3 +47,5 @@ template/
 
 docs/superpowers/
 .superpowers/
+
+run.sh
