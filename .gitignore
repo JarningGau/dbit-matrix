@@ -4,8 +4,11 @@ data/
 # Runtime outputs and generated command files
 work/
 
+.cursor/
+
 # Workflow JSON: only test fixtures are tracked
 workflow/*
+workflow2/*
 !workflow/dbit_emseq_test.json
 !workflow/dbit_taps_test.json
 !workflow/dbit_taps_v2_test.json

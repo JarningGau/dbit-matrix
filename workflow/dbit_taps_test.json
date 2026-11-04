@@ -1,9 +1,9 @@
 {
     "runner": "local",
-    "stage": "fastp_split",
+    "stage": "all",
     "sample_id": "test-DNAme-TAPS",
-    "r1": "data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R1.fq.gz",
-    "r2": "data/raw/test-DNAme-TAPS/250812_intestine_dbit_taps_R2.fq.gz",
+    "r1": "data/raw/test-DNAme-TAPS/261008-S10-TAPS_R1_first1M.fq.gz",
+    "r2": "data/raw/test-DNAme-TAPS/261008-S10-TAPS_R2_first1M.fq.gz",
     "work_root": "work",
     "fastp_threads": 2,
     "number_of_split_parts": 2,
@@ -42,7 +42,7 @@
     "call_max_depth": 50000,
     "call_batch_size": 10000000,
     "call_mode": "all",
-    "call_context_mode": "cg",
+    "call_context_mode": "both",
     "call_trimming": {
         "host": {
             "r1_left": 0,
@@ -162,5 +162,5 @@
             "cpus_per_task": 1
         }
     },
-    "call_smoke": true
+    "call_smoke": false
 }
