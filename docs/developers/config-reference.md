@@ -104,7 +104,7 @@ Notes:
 Saturation fields:
 
 - `saturation_script` (default: `scripts/saturation.py`)
-- `saturation_reads_threshold`: `"auto"` (default) or a positive number. `"auto"` resolves the HQ cutoff at runtime from `coverage/per_spot_read_counts.tsv` (steepest slope on barcode rank vs `log10(reads+1)` after dropping `reads <= 10`). See [contracts](contracts.md#saturation).
+- `saturation_reads_threshold`: `"auto"` (default) or a positive number. `"auto"` resolves the HQ cutoff at runtime from `coverage/per_spot_read_counts.tsv` (leftmost half-steep slope on barcode rank vs `log10(reads+1)` after dropping `reads <= 10` and excluding the top 5% of ranks). See [contracts](contracts.md#saturation).
 
 5hmC oligo QC (`hmc_spike`, TAPS / TAPS v2 only):
 

@@ -9,6 +9,7 @@ import json
 import math
 import statistics
 from pathlib import Path
+from typing import NamedTuple
 
 import matplotlib
 
@@ -39,6 +40,14 @@ DEFAULT_FRACTIONS = [
 DEFAULT_LINEAR_R2_THRESHOLD = 0.99
 KNEE_MIN_READS = 10.0
 KNEE_SMOOTH_WINDOW = 51
+KNEE_EXCLUDE_TOP_FRACTION = 0.05
+KNEE_HALF_STEEP_FRACTION = 0.5
+
+
+class AutoKneeResult(NamedTuple):
+    threshold: float
+    knee_rank: int  # 1-based barcode rank on the truncated curve
+    exclude_start: int  # 0-based index where slope search begins
 
 
 def _rolling_mean(values: list[float], window: int) -> list[float]:
@@ -67,11 +76,16 @@ def auto_reads_threshold(
     *,
     min_reads: float = KNEE_MIN_READS,
     smooth_window: int = KNEE_SMOOTH_WINDOW,
-) -> float:
-    """Return HQ reads cutoff at steepest drop on (rank, log10(reads+1)).
+    exclude_top_fraction: float = KNEE_EXCLUDE_TOP_FRACTION,
+    half_steep_fraction: float = KNEE_HALF_STEEP_FRACTION,
+) -> AutoKneeResult:
+    """Return HQ reads cutoff on (rank, log10(reads+1)).
 
-    Spots are sorted descending; the long discrete tail with reads <= min_reads
-    is dropped before the slope search.
+    Spots are sorted descending; reads <= min_reads are dropped. The top
+    ``exclude_top_fraction`` of remaining ranks are excluded from the slope
+    search. Among searchable ranks, candidates with slope at least
+    ``half_steep_fraction`` as steep as the minimum slope are kept, and the
+    leftmost such rank is the knee (avoids a steeper right-hand tail cliff).
     """
     sorted_reads = sorted((float(value) for value in reads), reverse=True)
     truncated = [value for value in sorted_reads if value > min_reads]
@@ -79,6 +93,13 @@ def auto_reads_threshold(
         raise ValueError(
             "auto reads threshold needs at least 2 spots with reads > "
             f"{min_reads:g} (got {len(truncated)})"
+        )
+    exclude_start = int(math.floor(len(truncated) * exclude_top_fraction))
+    if len(truncated) - exclude_start < 2:
+        raise ValueError(
+            "auto reads threshold needs at least 2 searchable spots after "
+            f"excluding top {exclude_top_fraction:.0%} "
+            f"(n={len(truncated)}, exclude_start={exclude_start})"
         )
     log_reads = [math.log10(value + 1.0) for value in truncated]
     window = smooth_window if smooth_window < len(truncated) else (
@@ -97,8 +118,19 @@ def auto_reads_threshold(
             slopes.append(smoothed[-1] - smoothed[-2])
         else:
             slopes.append(0.5 * (smoothed[index + 1] - smoothed[index - 1]))
-    steepest_index = min(range(len(slopes)), key=lambda index: slopes[index])
-    return float(truncated[steepest_index])
+
+    search = range(exclude_start, len(slopes))
+    min_slope = min(slopes[index] for index in search)
+    slope_cutoff = half_steep_fraction * min_slope
+    candidates = [index for index in search if slopes[index] <= slope_cutoff]
+    if not candidates:
+        raise ValueError("auto reads threshold found no half-steep slope candidates")
+    knee_index = min(candidates)
+    return AutoKneeResult(
+        threshold=float(truncated[knee_index]),
+        knee_rank=knee_index + 1,
+        exclude_start=exclude_start,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -118,9 +150,10 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help=(
             "HQ spot threshold for per_spot_read_counts.tsv reads. "
-            "Use 'auto' (default) to pick the steepest drop on the barcode "
-            "rank vs log10(reads+1) curve after dropping reads <= 10, or a "
-            "positive number for a manual cutoff."
+            "Use 'auto' (default) to pick the leftmost half-steep drop on "
+            "barcode rank vs log10(reads+1) after dropping reads <= 10 and "
+            "excluding the top 5%% of ranks, or a positive number for a "
+            "manual cutoff."
         ),
     )
     parser.add_argument(
@@ -197,7 +230,7 @@ def resolve_reads_threshold(
     read_counts: dict[str, float],
 ) -> float:
     if mode == "auto":
-        return auto_reads_threshold(list(read_counts.values()))
+        return auto_reads_threshold(list(read_counts.values())).threshold
     if manual_threshold is None:
         raise ValueError("manual reads threshold is missing")
     return float(manual_threshold)
@@ -562,12 +595,20 @@ def main() -> int:
         parse_per_spot_reads(read_counts_path) if read_counts_path.exists() else {}
     )
     resolved_threshold: float | None = None
+    knee_rank: int | None = None
+    exclude_start: int | None = None
     if threshold_mode == "manual":
         resolved_threshold = manual_threshold
     elif read_counts_preview:
-        resolved_threshold = resolve_reads_threshold(
-            threshold_mode, manual_threshold, read_counts_preview
-        )
+        if threshold_mode == "auto":
+            auto_knee = auto_reads_threshold(list(read_counts_preview.values()))
+            resolved_threshold = auto_knee.threshold
+            knee_rank = auto_knee.knee_rank
+            exclude_start = auto_knee.exclude_start
+        else:
+            resolved_threshold = resolve_reads_threshold(
+                threshold_mode, manual_threshold, read_counts_preview
+            )
 
     print(f"[saturation] work_path={work_path}")
     print(f"[saturation] reads_table={read_counts_path}")
@@ -577,6 +618,10 @@ def main() -> int:
         "[saturation] reads_threshold="
         + (f"{resolved_threshold:g}" if resolved_threshold is not None else "unresolved")
     )
+    if knee_rank is not None:
+        print(f"[saturation] knee_rank={knee_rank}")
+    if exclude_start is not None:
+        print(f"[saturation] exclude_start={exclude_start}")
     print(f"[saturation] linear_r2_threshold={args.linear_r2_threshold}")
     print(f"[saturation] fastp_json={fastp_json_path}")
     print(
@@ -592,9 +637,12 @@ def main() -> int:
         return 0
 
     read_counts = parse_per_spot_reads(read_counts_path)
-    reads_threshold = resolve_reads_threshold(
-        threshold_mode, manual_threshold, read_counts
-    )
+    if threshold_mode == "auto":
+        reads_threshold = auto_reads_threshold(list(read_counts.values())).threshold
+    else:
+        reads_threshold = resolve_reads_threshold(
+            threshold_mode, manual_threshold, read_counts
+        )
     write_reads_knee_plot(
         knee_plot_path,
         sample_id,

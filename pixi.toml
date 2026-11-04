@@ -19,6 +19,8 @@ scipy = ">=1.11"
 [tasks]
 make-cmd-dry-run = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --dry-run"
 make-cmd-submit = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --submit"
+make-cmd-beta-dry-run = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --sample-id test-DNAme-TAPSbeta --r1 data/raw/test-DNAme-TAPSbeta/261008-S12-Beta_R1_first1M.fq.gz --r2 data/raw/test-DNAme-TAPSbeta/261008-S12-Beta_R2_first1M.fq.gz --dry-run"
+make-cmd-beta-submit = "python scripts/make_cmd.py --workflow-config workflow/dbit_taps_test.json --sample-id test-DNAme-TAPSbeta --r1 data/raw/test-DNAme-TAPSbeta/261008-S12-Beta_R1_first1M.fq.gz --r2 data/raw/test-DNAme-TAPSbeta/261008-S12-Beta_R2_first1M.fq.gz --submit"
 taps = "python scripts/make_cmd.py"
 
 [pypi-dependencies]
