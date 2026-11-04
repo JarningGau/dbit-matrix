@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 import matplotlib
@@ -50,6 +51,7 @@ HEATMAP_SPECS = (
         "vmin": 50.0,
         "vmax": 80.0,
         "origin_corner": "upper_right",
+        "hq_filter": True,
     },
     {
         "field": "mean_5mCH",
@@ -60,6 +62,7 @@ HEATMAP_SPECS = (
         "vmin": 0.0,
         "vmax": 10.0,
         "origin_corner": "upper_right",
+        "hq_filter": True,
     },
 )
 VALID_FLAGS = {99, 147, 83, 163}
@@ -530,6 +533,19 @@ def read_saturation_rate(summary_path: Path, sample_id: str) -> str | None:
     return None
 
 
+def read_reads_threshold(summary_path: Path, sample_id: str) -> float | None:
+    """HQ cutoff from saturation_summary.tsv (`reads > threshold`)."""
+    if not summary_path.exists():
+        return None
+    with summary_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            if (row.get("sample_id") or "").strip() != sample_id:
+                continue
+            return parse_optional_float(row.get("reads_threshold"))
+    return None
+
+
 def write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -593,24 +609,32 @@ def write_heatmap_from_rows(
     vmin: float | None,
     vmax: float | None,
     origin_corner: str = "lower_left",
+    include_row: Callable[[dict[str, str]], bool] | None = None,
 ) -> None:
     # x = array_col (bcB), y = array_row (bcA); both 0-based inclusive.
     # lower_left: (0,0) bottom-left; upper_right: (0,0) top-right.
+    # Grid extent uses all rows with valid coords; values may be filtered.
     points: list[tuple[int, int, float]] = []
-    max_col = 0
-    max_row = 0
+    max_col = -1
+    max_row = -1
+    has_coords = False
     for row in rows:
         array_row = parse_optional_coord(row.get("array_row"))
         array_col = parse_optional_coord(row.get("array_col"))
-        value = parse_optional_float(row.get(field))
-        if array_row is None or array_col is None or value is None:
+        if array_row is None or array_col is None:
             continue
-        points.append((array_col, array_row, value))
+        has_coords = True
         max_col = max(max_col, array_col)
         max_row = max(max_row, array_row)
+        if include_row is not None and not include_row(row):
+            continue
+        value = parse_optional_float(row.get(field))
+        if value is None:
+            continue
+        points.append((array_col, array_row, value))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if not points:
+    if not has_coords:
         write_empty_heatmap(output_path, title)
         return
 
@@ -658,11 +682,25 @@ def write_heatmap_from_rows(
     plt.close(fig)
 
 
-def write_summary_heatmaps(per_spot_summary_path: Path, summary_dir: Path) -> list[Path]:
+def write_summary_heatmaps(
+    per_spot_summary_path: Path,
+    summary_dir: Path,
+    reads_threshold: float | None = None,
+) -> list[Path]:
     rows = read_tsv_rows(per_spot_summary_path)
     outputs: list[Path] = []
+
+    def is_hq_spot(row: dict[str, str]) -> bool:
+        reads = parse_optional_float(row.get("reads"))
+        if reads is None or reads_threshold is None:
+            return False
+        return reads > reads_threshold
+
     for spec in HEATMAP_SPECS:
         output_path = summary_dir / spec["output_name"]
+        include_row = None
+        if spec.get("hq_filter") and reads_threshold is not None:
+            include_row = is_hq_spot
         write_heatmap_from_rows(
             rows=rows,
             field=spec["field"],
@@ -673,6 +711,7 @@ def write_summary_heatmaps(per_spot_summary_path: Path, summary_dir: Path) -> li
             vmin=spec["vmin"],
             vmax=spec["vmax"],
             origin_corner=spec.get("origin_corner", "lower_left"),
+            include_row=include_row,
         )
         outputs.append(output_path)
     return outputs
@@ -741,6 +780,19 @@ def main() -> int:
     for heatmap_path in heatmap_outputs:
         print(f"[summary] output_heatmap={heatmap_path}")
 
+    sample_id = work_path.name
+    reads_threshold = read_reads_threshold(saturation_summary_path, sample_id)
+    if reads_threshold is None:
+        print(
+            "[summary] warning=missing_reads_threshold; "
+            "mean_5mCG/mean_5mCH heatmaps use all spots"
+        )
+        print("[summary] hq_reads_threshold=NA")
+        print("[summary] hq_filter=off")
+    else:
+        print(f"[summary] hq_reads_threshold={reads_threshold:g}")
+        print("[summary] hq_filter=on")
+
     if args.dry_run:
         print("[summary] dry_run=1")
         return 0
@@ -760,7 +812,6 @@ def main() -> int:
     ]
     write_tsv(per_spot_out, per_spot_fields, per_spot_rows)
 
-    sample_id = work_path.name
     saturation_rate = read_saturation_rate(saturation_summary_path, sample_id)
 
     raw_reads = parse_fastp_raw_reads(fastp_json_path)
@@ -796,7 +847,7 @@ def main() -> int:
     )
     sample_fields = list(sample_row.keys())
     write_tsv(sample_out, sample_fields, [sample_row])
-    write_summary_heatmaps(per_spot_out, summary_dir)
+    write_summary_heatmaps(per_spot_out, summary_dir, reads_threshold=reads_threshold)
     print(f"[summary] per_spot_rows={len(per_spot_rows)}")
     print("[summary] done")
     return 0

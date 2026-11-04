@@ -228,6 +228,7 @@ Contract:
 - `array_row` / `array_col` are copied from `barcode_positions` by joining on CB; missing positions write `NA`
 - heatmaps plot metrics on `array_col` (x) and `array_row` (y), 0-based inclusive
 - all summary heatmaps place `(array_col=0, array_row=0)` at the top-right (`array_col` increases leftward, `array_row` increases downward)
+- `mean_5mCG_heatmap.png` / `mean_5mCH_heatmap.png` plot only HQ spots (`reads > reads_threshold` from `qc/saturation/saturation_summary.tsv`); non-HQ and missing values stay gray (`#f2f2f2`). Grid extent uses all spots with valid `array_row`/`array_col`. `reads_heatmap.png` and `cpg_site_count_heatmap.png` are unchanged. If `reads_threshold` is missing, methylation heatmaps fall back to all spots with a warning.
 - `X_index`, `Y_index`, and `spot` (`XX_YY`) are removed
 - `sample_summary.tsv` methylation fields are context-split: `host_spot_mean_5mCG` / `host_spot_mean_5mCH` (weighted by `cpg_site_count` / `ch_site_count`), `host_mito_mean_5mCG` / `host_mito_mean_5mCH`, and `{spike}_mean_5mCG` / `{spike}_mean_5mCH`; `host_spot_median_cpg_sites` is unchanged
 - `sample_summary.tsv` includes `host_valid_reads`, plus the mito/nuclear split `host_valid_reads_mito` and `host_valid_reads_nuclear` (same valid-read filters; mito contigs from `--mito-chromosomes`, default `chrM`; nuclear is the complement). When BAM metrics succeed: `host_valid_reads_mito + host_valid_reads_nuclear == host_valid_reads`
