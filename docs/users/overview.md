@@ -9,6 +9,7 @@ DBiT-Matrix processes DBiT-style spatial omics data and organizes results under 
 Supported workflows:
 
 - `TAPS`
+- `TAPS v2`
 - `EMSeq`
 - `RNA`
 

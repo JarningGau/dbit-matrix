@@ -40,8 +40,11 @@ RNA also needs:
 Use one of these as a starting point:
 
 - [`workflow/dbit_taps_test.json`](../../workflow/dbit_taps_test.json)
+- [`workflow/dbit_taps_v2_test.json`](../../workflow/dbit_taps_v2_test.json)
 - [`workflow/dbit_emseq_test.json`](../../workflow/dbit_emseq_test.json)
 - [`workflow/dbit_rna_test.json`](../../workflow/dbit_rna_test.json)
+
+Matching `*_slurm*.json` variants sit next to each test config in [`workflow/`](../../workflow/).
 
 ## Minimal Library Structure Assumption
 

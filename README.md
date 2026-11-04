@@ -9,7 +9,7 @@ DBiT-Matrix is a workflow repository for DBiT-style spatial omics data processin
 
 All workflows are configured with [`workflow/*.json`](workflow/) and run through `pixi`.
 
-- Current version: `3.0.0`
+- Current version: `4.0.0`
 - Version log: [`docs/maintenance/changelog.md`](docs/maintenance/changelog.md)
 
 ## Current Status

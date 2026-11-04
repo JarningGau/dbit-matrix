@@ -1,12 +1,10 @@
 # TAPS User Guide
 
-Use this guide for the TAPS workflow.
+Use this guide for the TAPS and TAPS v2 workflows.
 
 ## What It Runs
 
-The main pipeline is:
-
-`fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+The mainline stages are `fastp_split` through `summary`. Full order and optional stages: [stage contracts](../developers/contracts.md).
 
 ## Before You Start
 
@@ -63,6 +61,33 @@ pixi run python scripts/make_cmd.py \
   --submit
 ```
 
+## TAPS v2
+
+TAPS v2 uses the same mainline and output layout as TAPS. The difference is demux: it matches a C→N-masked methylated-linker and writes conversion QC in `stats.json`.
+
+Start from:
+
+- config templates: [`workflow/dbit_taps_v2_test.json`](../../workflow/dbit_taps_v2_test.json), [`workflow/dbit_taps_v2_slurm.json`](../../workflow/dbit_taps_v2_slurm.json)
+- entry script: `scripts-v2/make_cmd.py`
+
+```bash
+pixi run python scripts-v2/make_cmd.py \
+  --workflow-config workflow/dbit_taps_v2_test.json \
+  --stage all \
+  --runner local \
+  --dry-run
+```
+
+Optional demux filter: `require_c_all_t` (empty = off). Details: [TAPS v2 demux contract](../developers/contracts.md#taps-v2-demux-scriptsv2extract_bcpy) and [config reference](../developers/config-reference.md#taps-fields).
+
+## Optional: 5hmC Oligo QC (`hmc_spike`)
+
+TAPS and TAPS v2 can score a synthetic 5hmC oligo after `saturation` and before `summary`. EMSeq does not support this stage.
+
+Set `hmc_spike.enabled` to `true` in the workflow JSON (see [`workflow/dbit_taps_test.json`](../../workflow/dbit_taps_test.json)). Outputs land under `qc/hmc_spike/`.
+
+Details: [hmc_spike contract](../developers/contracts.md#hmc_spike) and [config reference](../developers/config-reference.md#taps-fields).
+
 ## Check Results
 
 Start with:
@@ -75,7 +100,7 @@ More output guidance: [Results guide](results.md)
 
 ## Common Mistakes
 
-- using the wrong entry script
+- using the wrong entry script (`scripts/make_cmd.py` vs `scripts-v2/make_cmd.py`)
 - missing whitelist paths
 - missing reference paths
 - skipping the dry-run

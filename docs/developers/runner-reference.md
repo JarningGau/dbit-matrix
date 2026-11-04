@@ -16,8 +16,7 @@ pixi run python <entry-script> \
 
 ## `all`
 
-- `TAPS` and `EMSeq` expand `all` to:
-  `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+- `TAPS`, `TAPS v2`, and `EMSeq` expand `all` in stage order from [contracts](contracts.md); `hmc_spike` is included only when `hmc_spike.enabled` is true (TAPS / TAPS v2)
 - `RNA` expands `all` to:
   `demux_extract_bc -> align`
 - `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are explicit and are not part of `all`

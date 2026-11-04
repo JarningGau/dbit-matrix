@@ -11,6 +11,8 @@ Start with these files under `work/<sample>/`:
 - `summary/*_heatmap.png` (reads, CpG site count, mean 5mCG, mean 5mCH, mean 5mCA, mean 5mCC, mean 5mCT; plotted on `array_row` / `array_col`)
 - `qc/saturation/saturation_summary.tsv`
 - `qc/saturation/saturation_curve.png`
+- `qc/saturation/reads_knee.png`
+- `qc/hmc_spike/` (TAPS / TAPS v2 when `hmc_spike.enabled` is true)
 
 Useful methylation outputs:
 

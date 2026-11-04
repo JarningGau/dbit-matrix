@@ -69,6 +69,8 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
 
 ## Key Contracts
 
+Summary only; [`docs/developers/contracts.md`](docs/developers/contracts.md) is authoritative.
+
 - `demux` writes host demux FASTQ and spike-in FASTQ:
   - `*.demux.fq.gz`
   - `*.spike-in.fq.gz`

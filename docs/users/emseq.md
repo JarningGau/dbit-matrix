@@ -4,11 +4,9 @@ Use this guide for the EMSeq workflow.
 
 ## What It Runs
 
-The main pipeline is:
+The mainline stages are `fastp_split` through `summary`. Full order and optional stages: [stage contracts](../developers/contracts.md).
 
-`fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
-
-`--stage all` runs the mainline only.
+`--stage all` runs the mainline only (no `hmc_spike`).
 
 ## Before You Start
 
