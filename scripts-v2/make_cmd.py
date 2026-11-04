@@ -62,7 +62,7 @@ STAGE_REQUIRED_FIELDS = {
     "mbias": [],
     "call": ["call_reference_file", "call_chromosomes"],
     "saturation": [],
-    "summary": ["barcode1_whitelist", "barcode2_whitelist"],
+    "summary": ["barcode_positions"],
     "aggregate": [],
     "methscan_prepare": [],
     "methscan_filter": [],
@@ -152,6 +152,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--barcode2-whitelist",
         help="Whitelist path for barcodeB, used by demux stage.",
+    )
+    parser.add_argument(
+        "--barcode-positions",
+        help=(
+            "TSV with barcode,array_row,array_col for summary heatmaps "
+            "(barcode = <bcB><bcA>)."
+        ),
     )
     parser.add_argument(
         "--linker-bc",
@@ -977,10 +984,8 @@ def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
         str(sample_work),
         "--mito-chromosomes",
         args.call_mito_chromosomes,
-        "--barcode1-whitelist",
-        args.barcode1_whitelist,
-        "--barcode2-whitelist",
-        args.barcode2_whitelist,
+        "--barcode-positions",
+        args.barcode_positions,
     ]
     for spike_name in parse_spike_names(args.spike_in_index):
         command.extend(["--spike-in-name", spike_name])
@@ -1192,12 +1197,8 @@ def validate_inputs_for_stage(
     elif stage == "summary":
         wic.require_script_path("summary_script", settings["summary_script"])
         wic.require_file(
-            "barcode1_whitelist",
-            wic.resolve_config_path(settings["barcode1_whitelist"]),
-        )
-        wic.require_file(
-            "barcode2_whitelist",
-            wic.resolve_config_path(settings["barcode2_whitelist"]),
+            "barcode_positions",
+            wic.resolve_config_path(settings["barcode_positions"]),
         )
         if not skip_workdir_inputs:
             wic.require_file(
@@ -1456,6 +1457,9 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         ),
         "barcode2_whitelist": pick(
             args.barcode2_whitelist, cfg.get("barcode2_whitelist")
+        ),
+        "barcode_positions": pick(
+            args.barcode_positions, cfg.get("barcode_positions")
         ),
         "linker_bc": pick(
             args.linker_bc,
@@ -2763,8 +2767,7 @@ def main() -> int:
             summary_script=settings["summary_script"],
             spike_in_index=settings["spike_in_index"],
             call_mito_chromosomes=settings["call_mito_chromosomes"],
-            barcode1_whitelist=settings["barcode1_whitelist"],
-            barcode2_whitelist=settings["barcode2_whitelist"],
+            barcode_positions=settings["barcode_positions"],
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":

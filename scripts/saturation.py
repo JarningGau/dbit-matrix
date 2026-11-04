@@ -135,7 +135,7 @@ def parse_per_spot_reads(path: Path) -> dict[str, float]:
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         for row in reader:
-            spot = (row.get("spot") or "").strip()
+            spot = (row.get("barcode") or "").strip().upper()
             if not spot:
                 continue
             reads_text = (row.get("reads") or "").strip()

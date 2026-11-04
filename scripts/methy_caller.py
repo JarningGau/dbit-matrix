@@ -53,7 +53,7 @@ def parse_args(
     parser.add_argument("--barcodes", help="Whitelist TSV for host mode.")
     parser.add_argument(
         "--spot-roster",
-        help="Optional .cov write-set (counts TSV or one XX_YY per line).",
+        help="Optional .cov write-set (counts TSV or one CB per line).",
     )
     parser.add_argument(
         "--counts-tsv",

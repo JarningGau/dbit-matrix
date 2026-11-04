@@ -79,8 +79,10 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
 - `pool` writes:
   - host: `pooled/pooled.host.sorted.bam` (coordinate-sorted, indexed; no `-t CB`)
   - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
-- `call` writes `coverage/per_spot_read_counts.tsv`. Smoke is `call_smoke` (top 16 spots by reads).
+- Intermediate CB is concatenated `<bcB><bcA>` (no `+`); host cov is `coverage/host/<cb[0:3]>/<cb>.CG.cov`.
+- `call` writes `coverage/per_spot_read_counts.tsv` (`barcode`, `reads`). Smoke is `call_smoke` (top 16 CBs by reads).
 - `split_barcodes` is the CB whitelist for `call`, not a split-stage input.
+- Summary uses `barcode_positions` for `array_row`/`array_col`; summary `barcode` is `<bcB><bcA>host`.
 
 ## Documentation Rules
 

@@ -4,7 +4,7 @@ This page is the active release history for the repository.
 
 ## Current
 
-- **Summary per-spot barcode column:** `summary/per_spot_summary.tsv` gains a leading `barcode` column (`barcodeB+barcodeA`) derived at summary time from `barcode1_whitelist` / `barcode2_whitelist` and existing `X_index` / `Y_index`. Intermediate demux CB tags and other stage outputs are unchanged. See [contracts](../developers/contracts.md#summary).
+- **BREAKING CB / coverage / summary identity:** Intermediate CB is concatenated `<bcB><bcA>` (no `+`) from demux through call. Host cov paths are `coverage/host/<cb[0:3]>/<cb>.{CG,CH}.cov`. `coverage/per_spot_read_counts.tsv` columns are `barcode`, `reads`. `per_spot_summary.tsv` columns are `barcode` (`<bcB><bcA>host`), `array_row`, `array_col`, `mean_methylation`, `cpg_site_count`, `reads`; heatmaps use `barcode_positions` (`configs/barcodes_50a_positions.txt`). Removed `X_index`, `Y_index`, and `spot` (`XX_YY`). Applies to TAPS, TAPS v2, and EMSeq. See [contracts](../developers/contracts.md#call) and [contracts](../developers/contracts.md#summary).
 
 ## 3.0.0
 

@@ -10,6 +10,7 @@
     "fastp_bin": "fastp",
     "barcode1_whitelist": "configs/barcodes_50a_CtoT.tsv",
     "barcode2_whitelist": "configs/barcodes_50a_CtoT.tsv",
+    "barcode_positions": "configs/barcodes_50a_positions.txt",
     "linker1": "TAAGTGTTGGTTTTTTGTATTT",
     "linker2": "ATTTATGTGTTTGAGAGGTTAGAGTATTTG",
     "tn5": "TATTGGTGTATGATTAGATGTGTATAAGAGATAG",

@@ -192,7 +192,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--spot-roster",
-        help="Optional spot roster forwarded to methy_caller (counts TSV or one XX_YY per line).",
+        help="Optional spot roster forwarded to methy_caller (counts TSV or one CB per line).",
     )
     parser.add_argument(
         "--dry-run",

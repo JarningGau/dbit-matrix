@@ -18,7 +18,7 @@ from typing import BinaryIO, Dict, Iterable, List, Optional, Set, Tuple
 
 import pysam
 
-from scripts.split_bams import parse_cb_value, read_barcodes
+from scripts.split_bams import normalize_cb_value, parse_cb_value, read_barcodes
 
 BarcodeMap = Dict[str, int]
 CgCounts = Dict[str, Dict[int, List[int]]]
@@ -39,9 +39,7 @@ WORKER_CHROMOSOME_SEQUENCE: Optional[str] = None
 
 @dataclass(frozen=True)
 class SpotCount:
-    x_index: int
-    y_index: int
-    spot: str
+    barcode: str
     reads: int
 
 
@@ -88,15 +86,14 @@ def load_barcode_whitelist(path: str) -> Tuple[List[str], BarcodeMap, int]:
 def spot_id_from_cb(
     cb: str, barcode_to_index: BarcodeMap, barcode_len: int
 ) -> Optional[str]:
+    """Return normalized <bcB><bcA> when both halves are on the whitelist."""
     parsed = parse_cb_value(cb, barcode_len)
     if parsed is None:
         return None
     x_barcode, y_barcode = parsed
-    x_index = barcode_to_index.get(x_barcode)
-    y_index = barcode_to_index.get(y_barcode)
-    if x_index is None or y_index is None:
+    if x_barcode not in barcode_to_index or y_barcode not in barcode_to_index:
         return None
-    return f"{x_index:02d}_{y_index:02d}"
+    return normalize_cb_value(cb, barcode_len)
 
 
 def count_records_by_spot(
@@ -123,17 +120,14 @@ def count_records_by_spot(
 
 
 def write_counts_tsv(path: Path, counts: Dict[str, int]) -> None:
-    rows = []
-    for spot, reads in counts.items():
-        x_text, y_text = spot.split("_", 1)
-        rows.append((int(x_text), int(y_text), spot, int(reads)))
-    rows.sort()
+    rows = [(barcode, int(reads)) for barcode, reads in counts.items()]
+    rows.sort(key=lambda item: item[0])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as handle:
-        handle.write("X_index\tY_index\tspot\treads\n")
-        for x_index, y_index, spot, reads in rows:
-            handle.write(f"{x_index}\t{y_index}\t{spot}\t{reads}\n")
+        handle.write("barcode\treads\n")
+        for barcode, reads in rows:
+            handle.write(f"{barcode}\t{reads}\n")
     tmp.replace(path)
 
 
@@ -141,21 +135,22 @@ def load_counts_tsv(path: Path) -> List[SpotCount]:
     rows: List[SpotCount] = []
     with path.open(encoding="utf-8") as handle:
         header = handle.readline()
-        if "spot" not in header:
-            raise ValueError(f"counts TSV missing header: {path}")
+        if "barcode" not in header:
+            raise ValueError(f"counts TSV missing barcode header: {path}")
+        header_fields = header.rstrip("\n").split("\t")
+        barcode_idx = header_fields.index("barcode")
+        reads_idx = header_fields.index("reads")
         for line in handle:
             fields = line.rstrip("\n").split("\t")
-            if len(fields) < 4:
+            if len(fields) <= max(barcode_idx, reads_idx):
                 continue
             rows.append(
                 SpotCount(
-                    x_index=int(fields[0]),
-                    y_index=int(fields[1]),
-                    spot=fields[2],
-                    reads=int(fields[3]),
+                    barcode=fields[barcode_idx],
+                    reads=int(fields[reads_idx]),
                 )
             )
-    rows.sort(key=lambda row: (row.x_index, row.y_index))
+    rows.sort(key=lambda row: row.barcode)
     return rows
 
 
@@ -164,10 +159,14 @@ def load_roster_ids(path: Path) -> List[str]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return []
-    if "\t" in lines[0] and "spot" in lines[0].split("\t"):
+    if "\t" in lines[0] and "barcode" in lines[0].split("\t"):
         header = lines[0].split("\t")
-        spot_idx = header.index("spot")
-        return [line.split("\t")[spot_idx] for line in lines[1:] if len(line.split("\t")) > spot_idx]
+        barcode_idx = header.index("barcode")
+        return [
+            line.split("\t")[barcode_idx]
+            for line in lines[1:]
+            if len(line.split("\t")) > barcode_idx
+        ]
     return lines
 
 
@@ -186,7 +185,7 @@ def resolve_write_set(
 
 
 def counts_dict_from_rows(rows: List[SpotCount]) -> Dict[str, int]:
-    return {row.spot: row.reads for row in rows}
+    return {row.barcode: row.reads for row in rows}
 
 
 def parse_chromosomes(csv: str) -> List[str]:
@@ -318,8 +317,10 @@ def resolved_counts_path(args: argparse.Namespace) -> Optional[Path]:
 
 
 def host_cov_path(out_dir: Path, spot_id: str, suffix: str) -> Path:
-    row = spot_id.split("_", 1)[0]
-    return out_dir / row / f"{spot_id}.{suffix}.cov"
+    """Host cov path: coverage/host/<first3>/<CB>.{CG,CH}.cov."""
+    if len(spot_id) < 3:
+        raise ValueError(f"CB spot id too short for prefix subdir: {spot_id}")
+    return out_dir / spot_id[:3] / f"{spot_id}.{suffix}.cov"
 
 
 def format_cg_line(chrom: str, pos: int, meth: int, unmeth: int) -> str:

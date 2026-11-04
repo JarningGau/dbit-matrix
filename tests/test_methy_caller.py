@@ -77,30 +77,31 @@ class YdFilterTests(unittest.TestCase):
 
 
 class SpotIdTests(unittest.TestCase):
-    def test_plus_and_concat_match_split_bams(self) -> None:
+    def test_concat_bcb_bca_spot_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "barcodes.tsv"
             path.write_text("AAAA\nCCCC\nGGGG\n", encoding="utf-8")
             _, barcode_to_index = read_barcodes(str(path))
             barcode_len = 4
-            self.assertEqual(parse_cb_value("AAAA+CCCC", barcode_len), ("AAAA", "CCCC"))
-            self.assertEqual(parse_cb_value("AAAACCCC", barcode_len), ("AAAA", "CCCC"))
+            # CB = <bcB><bcA>; parse returns (bcA/X, bcB/Y)
+            self.assertEqual(parse_cb_value("CCCCAAAA", barcode_len), ("AAAA", "CCCC"))
+            self.assertIsNone(parse_cb_value("AAAA+CCCC", barcode_len))
             self.assertEqual(
-                mc.spot_id_from_cb("AAAA+CCCC", barcode_to_index, barcode_len),
-                "00_01",
+                mc.spot_id_from_cb("CCCCAAAA", barcode_to_index, barcode_len),
+                "CCCCAAAA",
             )
             self.assertEqual(
                 mc.spot_id_from_cb("AAAACCCC", barcode_to_index, barcode_len),
-                "00_01",
+                "AAAACCCC",
             )
             self.assertIsNone(
-                mc.spot_id_from_cb("TTTT+AAAA", barcode_to_index, barcode_len)
+                mc.spot_id_from_cb("TTTTAAAA", barcode_to_index, barcode_len)
             )
 
     def test_roster_filters_unlisted_spots(self) -> None:
-        allowed = {"00_01"}
-        self.assertTrue(mc.spot_is_allowed("00_01", allowed))
-        self.assertFalse(mc.spot_is_allowed("02_03", allowed))
+        allowed = {"CCCCAAAA"}
+        self.assertTrue(mc.spot_is_allowed("CCCCAAAA", allowed))
+        self.assertFalse(mc.spot_is_allowed("GGGGAAAA", allowed))
         self.assertFalse(mc.spot_is_allowed(None, allowed))
 
 
@@ -250,60 +251,60 @@ class ShuffleHostPartsTests(unittest.TestCase):
             out_dir = root / "out"
             combined_cg = root / "combined.CG"
             combined_cg.write_text(
-                "chr1\t11\t11\t50.00\t1\t1\t00_00\n"
-                "chr1\t10\t10\t100.00\t1\t0\t00_01\n"
-                "chr1\t20\t20\t0.00\t0\t1\t99_99\n"
+                "chr1\t11\t11\t50.00\t1\t1\tAAAAAAAA\n"
+                "chr1\t10\t10\t100.00\t1\t0\tCCCCAAAA\n"
+                "chr1\t20\t20\t0.00\t0\t1\tZZZZZZZZ\n"
                 "badline\n"
-                "chr1\t12\t12\t0.00\t0\t2\t00_00\n",
+                "chr1\t12\t12\t0.00\t0\t2\tAAAAAAAA\n",
                 encoding="utf-8",
             )
-            roster = ["00_00", "00_01", "00_02"]
+            roster = ["AAAAAAAA", "CCCCAAAA", "GGGGAAAA"]
             mc.shuffle_host_parts(
                 combined_cg, None, out_dir, roster, set(), "cg"
             )
-            path_00 = out_dir / "00" / "00_00.CG.cov"
-            path_01 = out_dir / "00" / "00_01.CG.cov"
-            path_02 = out_dir / "00" / "00_02.CG.cov"
-            self.assertTrue(path_00.is_file())
-            self.assertTrue(path_01.is_file())
-            self.assertTrue(path_02.is_file())
-            self.assertEqual(path_02.read_text(encoding="utf-8"), "")
-            text_00 = path_00.read_text(encoding="utf-8")
+            path_aa = out_dir / "AAA" / "AAAAAAAA.CG.cov"
+            path_ca = out_dir / "CCC" / "CCCCAAAA.CG.cov"
+            path_ga = out_dir / "GGG" / "GGGGAAAA.CG.cov"
+            self.assertTrue(path_aa.is_file())
+            self.assertTrue(path_ca.is_file())
+            self.assertTrue(path_ga.is_file())
+            self.assertEqual(path_ga.read_text(encoding="utf-8"), "")
+            text_aa = path_aa.read_text(encoding="utf-8")
             self.assertEqual(
-                text_00,
+                text_aa,
                 "chr1\t11\t11\t50.00\t1\t1\nchr1\t12\t12\t0.00\t0\t2\n",
             )
-            self.assertNotIn("00_00", text_00)
+            self.assertNotIn("AAAAAAAA", text_aa)
             self.assertEqual(
-                path_01.read_text(encoding="utf-8"),
+                path_ca.read_text(encoding="utf-8"),
                 "chr1\t10\t10\t100.00\t1\t0\n",
             )
-            self.assertFalse((out_dir / "99").exists())
+            self.assertFalse((out_dir / "ZZZ").exists())
 
     def test_skip_spots_are_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_dir = root / "out"
-            existing = out_dir / "00" / "00_00.CG.cov"
+            existing = out_dir / "AAA" / "AAAAAAAA.CG.cov"
             existing.parent.mkdir(parents=True, exist_ok=True)
             existing.write_text("KEEP\n", encoding="utf-8")
             combined_cg = root / "combined.CG"
             combined_cg.write_text(
-                "chr1\t10\t10\t100.00\t1\t0\t00_00\n"
-                "chr1\t11\t11\t0.00\t0\t1\t00_01\n",
+                "chr1\t10\t10\t100.00\t1\t0\tAAAAAAAA\n"
+                "chr1\t11\t11\t0.00\t0\t1\tCCCCAAAA\n",
                 encoding="utf-8",
             )
             mc.shuffle_host_parts(
                 combined_cg,
                 None,
                 out_dir,
-                ["00_00", "00_01"],
-                {"00_00"},
+                ["AAAAAAAA", "CCCCAAAA"],
+                {"AAAAAAAA"},
                 "cg",
             )
             self.assertEqual(existing.read_text(encoding="utf-8"), "KEEP\n")
             self.assertEqual(
-                (out_dir / "00" / "00_01.CG.cov").read_text(encoding="utf-8"),
+                (out_dir / "CCC" / "CCCCAAAA.CG.cov").read_text(encoding="utf-8"),
                 "chr1\t11\t11\t0.00\t0\t1\n",
             )
 
@@ -313,19 +314,19 @@ class ShuffleHostPartsTests(unittest.TestCase):
             out_dir = root / "out"
             combined_ch = root / "combined.CH"
             combined_ch.write_text(
-                "chr1\t10\t10\t100.00\t1\t0\tCA\t+\t00_00\n"
-                "chr1\t11\t11\t0.00\t0\t1\t00_00\n",
+                "chr1\t10\t10\t100.00\t1\t0\tCA\t+\tAAAAAAAA\n"
+                "chr1\t11\t11\t0.00\t0\t1\tAAAAAAAA\n",
                 encoding="utf-8",
             )
             mc.shuffle_host_parts(
                 Path("/dev/null"),
                 combined_ch,
                 out_dir,
-                ["00_00"],
+                ["AAAAAAAA"],
                 set(),
                 "ch",
             )
-            text = (out_dir / "00" / "00_00.CH.cov").read_text(encoding="utf-8")
+            text = (out_dir / "AAA" / "AAAAAAAA.CH.cov").read_text(encoding="utf-8")
             self.assertEqual(text, "chr1\t10\t10\t100.00\t1\t0\tCA\t+\n")
             self.assertNotIn("00_00", text)
 

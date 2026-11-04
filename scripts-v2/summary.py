@@ -82,14 +82,12 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--barcode1-whitelist",
+        "--barcode-positions",
         required=True,
-        help="Whitelist for barcodeA (X); used to fill the barcode column.",
-    )
-    parser.add_argument(
-        "--barcode2-whitelist",
-        required=True,
-        help="Whitelist for barcodeB (Y); used to fill the barcode column.",
+        help=(
+            "TSV with columns barcode,array_row,array_col "
+            "(barcode = <bcB><bcA>); used for per-spot coords and heatmaps."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -99,36 +97,34 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_barcode_list(path: str | Path) -> list[str]:
-    barcodes: list[str] = []
-    with Path(path).open(encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
+def read_barcode_positions(path: str | Path) -> dict[str, tuple[str, str]]:
+    """Map CB (<bcB><bcA>) -> (array_row, array_col) from a positions TSV."""
+    positions: dict[str, tuple[str, str]] = {}
+    with Path(path).open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if reader.fieldnames is None:
+            raise ValueError(f"empty barcode positions file: {path}")
+        required = {"barcode", "array_row", "array_col"}
+        missing = required - {name.strip() for name in reader.fieldnames}
+        if missing:
+            raise ValueError(
+                f"barcode positions missing columns {sorted(missing)}: {path}"
+            )
+        for row in reader:
+            barcode = (row.get("barcode") or "").strip().upper()
+            array_row = (row.get("array_row") or "").strip()
+            array_col = (row.get("array_col") or "").strip()
+            if not barcode:
                 continue
-            barcode = line.split("\t", 1)[0].strip().upper()
-            if barcode:
-                barcodes.append(barcode)
-    if not barcodes:
-        raise ValueError(f"empty barcode whitelist: {path}")
-    return barcodes
+            positions[barcode] = (array_row or "NA", array_col or "NA")
+    if not positions:
+        raise ValueError(f"empty barcode positions file: {path}")
+    return positions
 
 
-def barcode_from_indices(
-    x_index: str,
-    y_index: str,
-    barcode1: list[str],
-    barcode2: list[str],
-) -> str:
-    """Return barcodeB+barcodeA from 0-based X/Y whitelist indices."""
-    try:
-        x = int(str(x_index).strip())
-        y = int(str(y_index).strip())
-    except (TypeError, ValueError):
-        return "NA"
-    if x < 0 or y < 0 or x >= len(barcode1) or y >= len(barcode2):
-        return "NA"
-    return f"{barcode2[y]}+{barcode1[x]}"
+def summary_barcode_from_cb(cb: str) -> str:
+    """Summary barcode column: <bcB><bcA>host."""
+    return f"{cb}host"
 
 
 def parse_mito_chromosomes(chromosome_csv: str) -> frozenset[str]:
@@ -421,35 +417,20 @@ def count_mapped_reads(bam_path: Path) -> int | None:
     return mapped_reads
 
 
-def read_per_spot_reads(read_counts_path: Path) -> dict[str, tuple[str, str, str]]:
+def read_per_spot_reads(read_counts_path: Path) -> dict[str, str]:
+    """Map CB barcode -> reads string from per_spot_read_counts.tsv."""
     if not read_counts_path.exists():
         return {}
-    rows: dict[str, tuple[str, str, str]] = {}
+    rows: dict[str, str] = {}
     with read_counts_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         for row in reader:
-            spot = (row.get("spot") or "").strip()
-            if not spot:
+            barcode = (row.get("barcode") or "").strip().upper()
+            if not barcode:
                 continue
-            x_index = (row.get("X_index") or "").strip()
-            y_index = (row.get("Y_index") or "").strip()
             reads = (row.get("reads") or "").strip()
-            rows[spot] = (x_index, y_index, reads)
+            rows[barcode] = reads or "NA"
     return rows
-
-
-def parse_xy_from_spot(spot: str) -> tuple[str, str]:
-    if "_" not in spot:
-        return "NA", "NA"
-    left, right = spot.split("_", 1)
-    left = left.strip()
-    right = right.strip()
-    if not left or not right:
-        return "NA", "NA"
-    try:
-        return str(int(left)), str(int(right))
-    except ValueError:
-        return left, right
 
 
 def format_float(value: float | None) -> str:
@@ -468,7 +449,8 @@ def parse_optional_float(text: str | None) -> float | None:
         return None
 
 
-def parse_optional_index(text: str | None) -> int | None:
+def parse_optional_coord(text: str | None) -> int | None:
+    """Parse 0-based array_row/array_col (inclusive; 0 is valid)."""
     value = (text or "").strip()
     if not value or value == "NA":
         return None
@@ -476,48 +458,37 @@ def parse_optional_index(text: str | None) -> int | None:
         parsed = int(value)
     except ValueError:
         return None
-    if parsed <= 0:
+    if parsed < 0:
         return None
     return parsed
 
 
 def summarize_per_spot(
     host_cov_paths: list[Path],
-    read_counts: dict[str, tuple[str, str, str]],
-    barcode1: list[str],
-    barcode2: list[str],
+    read_counts: dict[str, str],
+    positions: dict[str, tuple[str, str]],
 ) -> list[dict[str, str]]:
     by_cov: dict[str, tuple[float | None, int | None]] = {}
     for cov_path in host_cov_paths:
-        spot = cov_path.name[: -len(".CG.cov")]
+        cb = cov_path.name[: -len(".CG.cov")].upper()
         cov_stats = parse_cov_stats(cov_path)
         if cov_stats is None:
-            by_cov[spot] = (None, None)
+            by_cov[cb] = (None, None)
         else:
             mean_methylation, cpg_count = cov_stats
-            by_cov[spot] = (mean_methylation, cpg_count)
+            by_cov[cb] = (mean_methylation, cpg_count)
 
-    all_spots = sorted(set(by_cov.keys()) | set(read_counts.keys()))
+    all_cbs = sorted(set(by_cov.keys()) | set(read_counts.keys()))
     rows: list[dict[str, str]] = []
-    for spot in all_spots:
-        mean_methylation, cpg_count = by_cov.get(spot, (None, None))
-        x_index, y_index = parse_xy_from_spot(spot)
-        reads = "NA"
-        if spot in read_counts:
-            x_index, y_index, reads = read_counts[spot]
-            if not x_index or not y_index:
-                guessed_x, guessed_y = parse_xy_from_spot(spot)
-                x_index = x_index or guessed_x
-                y_index = y_index or guessed_y
-            reads = reads or "NA"
-        x_text = x_index if x_index else "NA"
-        y_text = y_index if y_index else "NA"
+    for cb in all_cbs:
+        mean_methylation, cpg_count = by_cov.get(cb, (None, None))
+        array_row, array_col = positions.get(cb, ("NA", "NA"))
+        reads = read_counts.get(cb, "NA") or "NA"
         rows.append(
             {
-                "barcode": barcode_from_indices(x_text, y_text, barcode1, barcode2),
-                "X_index": x_text,
-                "Y_index": y_text,
-                "spot": spot,
+                "barcode": summary_barcode_from_cb(cb),
+                "array_row": array_row if array_row else "NA",
+                "array_col": array_col if array_col else "NA",
                 "mean_methylation": format_float(mean_methylation),
                 "cpg_site_count": str(cpg_count) if cpg_count is not None else "NA",
                 "reads": reads,
@@ -661,12 +632,13 @@ def discover_spike_names(coverage_dir: Path) -> list[str]:
 
 
 def compute_tick_values(max_index: int) -> list[int]:
-    if max_index <= 0:
+    """Tick labels for 0-based inclusive indices 0..max_index."""
+    if max_index < 0:
         return []
     if max_index <= 10:
-        return list(range(1, max_index + 1))
-    step = max(1, math.ceil(max_index / 10))
-    ticks = list(range(1, max_index + 1, step))
+        return list(range(0, max_index + 1))
+    step = max(1, math.ceil((max_index + 1) / 10))
+    ticks = list(range(0, max_index + 1, step))
     if ticks[-1] != max_index:
         ticks.append(max_index)
     return ticks
@@ -692,33 +664,36 @@ def write_heatmap_from_rows(
     vmin: float | None,
     vmax: float | None,
 ) -> None:
+    # x = array_col (bcB), y = array_row (bcA); both 0-based inclusive.
     points: list[tuple[int, int, float]] = []
-    max_x = 0
-    max_y = 0
+    max_col = 0
+    max_row = 0
     for row in rows:
-        x_index = parse_optional_index(row.get("X_index"))
-        y_index = parse_optional_index(row.get("Y_index"))
+        array_row = parse_optional_coord(row.get("array_row"))
+        array_col = parse_optional_coord(row.get("array_col"))
         value = parse_optional_float(row.get(field))
-        if x_index is None or y_index is None or value is None:
+        if array_row is None or array_col is None or value is None:
             continue
-        points.append((x_index, y_index, value))
-        max_x = max(max_x, x_index)
-        max_y = max(max_y, y_index)
+        points.append((array_col, array_row, value))
+        max_col = max(max_col, array_col)
+        max_row = max(max_row, array_row)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if not points:
         write_empty_heatmap(output_path, title)
         return
 
-    matrix = [[math.nan for _ in range(max_x)] for _ in range(max_y)]
-    for x_index, y_index, value in points:
-        matrix[y_index - 1][x_index - 1] = value
+    n_cols = max_col + 1
+    n_rows = max_row + 1
+    matrix = [[math.nan for _ in range(n_cols)] for _ in range(n_rows)]
+    for array_col, array_row, value in points:
+        matrix[array_row][array_col] = value
 
     cmap = plt.get_cmap(cmap_name).copy()
     cmap.set_bad("#f2f2f2")
 
-    fig_width = min(max(6.0, max_x * 0.22), 12.0)
-    fig_height = min(max(5.0, max_y * 0.22), 12.0)
+    fig_width = min(max(6.0, n_cols * 0.22), 12.0)
+    fig_height = min(max(5.0, n_rows * 0.22), 12.0)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     image = ax.imshow(
         matrix,
@@ -726,20 +701,20 @@ def write_heatmap_from_rows(
         interpolation="nearest",
         cmap=cmap,
         aspect="equal",
-        extent=(0.5, max_x + 0.5, 0.5, max_y + 0.5),
+        extent=(-0.5, max_col + 0.5, -0.5, max_row + 0.5),
         vmin=vmin,
         vmax=vmax,
     )
     ax.set_title(title)
-    ax.set_xlabel("X index")
-    ax.set_ylabel("Y index")
+    ax.set_xlabel("array_col")
+    ax.set_ylabel("array_row")
 
-    x_ticks = compute_tick_values(max_x)
-    y_ticks = compute_tick_values(max_y)
+    x_ticks = compute_tick_values(max_col)
+    y_ticks = compute_tick_values(max_row)
     ax.set_xticks(x_ticks)
     ax.set_yticks(y_ticks)
-    ax.set_xlim(0.5, max_x + 0.5)
-    ax.set_ylim(0.5, max_y + 0.5)
+    ax.set_xlim(-0.5, max_col + 0.5)
+    ax.set_ylim(-0.5, max_row + 0.5)
 
     colorbar = fig.colorbar(image, ax=ax, shrink=0.9)
     colorbar.set_label(colorbar_label)
@@ -805,8 +780,7 @@ def main() -> int:
     print(f"[summary] work_path={work_path}")
     print(f"[summary] host_spot_cov_count={len(host_cov_paths)}")
     print(f"[summary] reads_table={read_counts_path}")
-    print(f"[summary] barcode1_whitelist={args.barcode1_whitelist}")
-    print(f"[summary] barcode2_whitelist={args.barcode2_whitelist}")
+    print(f"[summary] barcode_positions={args.barcode_positions}")
     print(f"[summary] fastp_json={fastp_json_path}")
     print(f"[summary] fastp_json_legacy={fastp_json_legacy_path}")
     print(f"[summary] demux_dir={demux_dir}")
@@ -828,17 +802,13 @@ def main() -> int:
         print("[summary] dry_run=1")
         return 0
 
-    barcode1 = read_barcode_list(args.barcode1_whitelist)
-    barcode2 = read_barcode_list(args.barcode2_whitelist)
+    positions = read_barcode_positions(args.barcode_positions)
     read_counts = read_per_spot_reads(read_counts_path)
-    per_spot_rows = summarize_per_spot(
-        host_cov_paths, read_counts, barcode1, barcode2
-    )
+    per_spot_rows = summarize_per_spot(host_cov_paths, read_counts, positions)
     per_spot_fields = [
         "barcode",
-        "X_index",
-        "Y_index",
-        "spot",
+        "array_row",
+        "array_col",
         "mean_methylation",
         "cpg_site_count",
         "reads",

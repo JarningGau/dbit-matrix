@@ -45,6 +45,8 @@ Contract:
 
 - stats must include retention information and reject reasons
 - matched and spike-in reads must be separated
+- FASTQ read names carry CB as concatenated `<bcB><bcA>` (no `+`): `@<bcB><bcA>:<original>`
+- barcode1 = barcodeA (X); barcode2 = barcodeB (Y); physical R1 order remains bcB–linker–bcA
 
 #### TAPS v2 demux (`scripts-v2/extract_bc.py`)
 
@@ -100,7 +102,7 @@ Contract:
 
 ### `split` (legacy script, not a workflow stage)
 
-`scripts/split_bams.py` remains in the repository. It is not in `--stage all` and is not a `STAGE_CHOICES` value. Per-spot BAM trees are not a mainline output.
+`scripts/split_bams.py` remains in the repository. It is not in `--stage all` and is not a `STAGE_CHOICES` value. When used, it writes `split_bams/<cb[0:3]>/<cb>.bam` and `split_bams/per_spot_read_counts.tsv` (`barcode`, `reads`). Per-spot BAM trees are not a mainline output.
 
 ### `mbias`
 
@@ -143,9 +145,9 @@ Inputs:
 
 Outputs:
 
-- `coverage/per_spot_read_counts.tsv`
-- `coverage/host/<X_index>/<X_index>_<Y_index>.CG.cov`
-- `coverage/host/<X_index>/<X_index>_<Y_index>.CH.cov` (optional)
+- `coverage/per_spot_read_counts.tsv` (`barcode`, `reads`; `barcode` = CB `<bcB><bcA>`)
+- `coverage/host/<cb[0:3]>/<cb>.CG.cov`
+- `coverage/host/<cb[0:3]>/<cb>.CH.cov` (optional)
 - `coverage/host_mito.CG.cov`
 - `coverage/host_mito.CH.cov` (optional)
 - `coverage/<spike_name>.CG.cov`
@@ -155,10 +157,10 @@ Contract:
 
 - `split_barcodes` is the CB whitelist for `call`, not a split-stage input
 - host calling does not read per-spot BAMs
-- host outputs are per-spot
-- spot filenames still `{X_index}/{X_index}_{Y_index}`
+- host outputs are per-spot; spot identity is the BAM `CB` tag (`<bcB><bcA>`)
+- host cov paths use the first three bases of CB as the subdirectory (64 possible prefix dirs)
 - `call` writes `coverage/per_spot_read_counts.tsv` from a full BAM scan of whitelist-assigned reads
-- smoke is `call_smoke`: write `.cov` only for the 16 spots with highest `reads` (ties broken by `spot` ascending)
+- smoke is `call_smoke`: write `.cov` only for the 16 spots with highest `reads` (ties broken by CB ascending)
 - `host_mito.CG.cov` is a single aggregate output
 - `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only
@@ -197,7 +199,7 @@ Inputs include:
 - host mitochondrial coverage
 - spike-in coverage
 - per-spot read counts (`coverage/per_spot_read_counts.tsv`, written by `call`)
-- `barcode1_whitelist` and `barcode2_whitelist` (for the per-spot `barcode` column only)
+- `barcode_positions` TSV (`barcode`, `array_row`, `array_col`) where `barcode` = `<bcB><bcA>`
 - fastp statistics
 - demux statistics
 - pooled BAMs
@@ -216,8 +218,11 @@ Contract:
 - `per_spot_summary.tsv` is one row per spot
 - `sample_summary.tsv` is one row per sample
 - missing upstream inputs should preserve fixed columns and write `NA`
-- `per_spot_summary.tsv` keeps fixed columns for `barcode`, `X_index`, `Y_index`, `spot`, `mean_methylation`, `cpg_site_count`, and `reads`
-- `barcode` is `barcodeB+barcodeA` (= Y whitelist sequence + X whitelist sequence), derived at summary time from `barcode2_whitelist[Y_index]` and `barcode1_whitelist[X_index]` (0-based line order). Out-of-range indices write `NA`. Intermediate CB tags remain `barcodeA+barcodeB` and are unchanged.
+- `per_spot_summary.tsv` fixed columns: `barcode`, `array_row`, `array_col`, `mean_methylation`, `cpg_site_count`, `reads`
+- summary `barcode` is `<bcB><bcA>host` (CB from cov stem / counts, plus a literal `host` suffix)
+- `array_row` / `array_col` are copied from `barcode_positions` by joining on CB (summary barcode with trailing `host` stripped); missing positions write `NA`
+- heatmaps plot metrics on `array_col` (x) and `array_row` (y), 0-based inclusive
+- `X_index`, `Y_index`, and `spot` (`XX_YY`) are removed
 - `sample_summary.tsv` includes `host_valid_reads`, plus the mito/nuclear split `host_valid_reads_mito` and `host_valid_reads_nuclear` (same valid-read filters; mito contigs from `--mito-chromosomes`, default `chrM`; nuclear is the complement). When BAM metrics succeed: `host_valid_reads_mito + host_valid_reads_nuclear == host_valid_reads`
 - TAPS v2 (`scripts-v2/summary.py`) additionally surfaces methylated-linker conversion QC columns in `sample_summary.tsv`: `spike_scored_reads`, `scored_fully_converted`, `spike_mean_conversion_rate`, `spike_fraction_all_T`, `spike_conversion_filtered_rejects`
 

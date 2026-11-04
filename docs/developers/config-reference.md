@@ -31,6 +31,10 @@ This document defines the workflow configuration surface for developers.
 - `barcode_hamming_distance`
 - `gzip_level`
 
+### Summary
+
+- `barcode_positions`: TSV with columns `barcode`, `array_row`, `array_col` (`barcode` = concatenated `<bcB><bcA>`). Required for the `summary` stage. Example: `configs/barcodes_50a_positions.txt`.
+
 TAPS v2 demux-only fields (`scripts-v2/make_cmd.py`, configs `workflow/dbit_taps_v2_*.json`):
 
 - `spike_edit_distance`: max mismatches on non-N positions of the C→N-masked `insert_left` (methylated-linker). Default: `1`.

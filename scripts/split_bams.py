@@ -18,8 +18,8 @@ SMOKE_SPOT_LIMIT = 16
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Split pooled.byCB.bam into per-spot BAM files using the CB tag. "
-            "Supports both legacy 16bp concatenated CB and the current X+Y format."
+            "Split pooled CB-tagged BAM into per-spot BAM files. "
+            "CB format is concatenated <bcB><bcA>; outputs use first-3-base subdirs."
         )
     )
     parser.add_argument(
@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cb-tag",
         default="CB",
-        help="Tag name containing the combined X/Y barcode. Default: CB.",
+        help="Tag name containing concatenated <bcB><bcA>. Default: CB.",
     )
     parser.add_argument(
         "--threads-read",
@@ -79,20 +79,27 @@ def read_barcodes(tsv_path: str) -> tuple[list[str], dict[str, int]]:
 
 
 def parse_cb_value(cb_value: str, barcode_len: int) -> tuple[str, str] | None:
+    """Parse CB into (barcodeA/X, barcodeB/Y).
+
+    Expected format is concatenated <bcB><bcA> (no '+').
+    """
     cb_value = cb_value.strip().upper()
     if not cb_value:
         return None
-    if "+" in cb_value:
-        parts = cb_value.split("+")
-        if len(parts) != 2:
-            return None
-        x_barcode, y_barcode = parts
-        if len(x_barcode) != barcode_len or len(y_barcode) != barcode_len:
-            return None
-        return x_barcode, y_barcode
     if len(cb_value) != barcode_len * 2:
         return None
-    return cb_value[:barcode_len], cb_value[barcode_len:]
+    y_barcode = cb_value[:barcode_len]
+    x_barcode = cb_value[barcode_len:]
+    return x_barcode, y_barcode
+
+
+def normalize_cb_value(cb_value: str, barcode_len: int) -> str | None:
+    """Return uppercase <bcB><bcA> when CB parses, else None."""
+    parsed = parse_cb_value(cb_value, barcode_len)
+    if parsed is None:
+        return None
+    x_barcode, y_barcode = parsed
+    return f"{y_barcode}{x_barcode}"
 
 
 def resolve_spot(
@@ -100,20 +107,26 @@ def resolve_spot(
     cb_tag: str,
     barcode_to_index: dict[str, int],
     barcode_len: int,
-) -> tuple[int, int] | None:
+) -> str | None:
     try:
         cb_value = record.get_tag(cb_tag)
     except KeyError:
         return None
+    if not isinstance(cb_value, str):
+        cb_value = str(cb_value)
     parsed = parse_cb_value(cb_value, barcode_len)
     if parsed is None:
         return None
     x_barcode, y_barcode = parsed
-    x_index = barcode_to_index.get(x_barcode)
-    y_index = barcode_to_index.get(y_barcode)
-    if x_index is None or y_index is None:
+    if x_barcode not in barcode_to_index or y_barcode not in barcode_to_index:
         return None
-    return x_index, y_index
+    return normalize_cb_value(cb_value, barcode_len)
+
+
+def spot_bam_path(out_dir: Path, cb: str) -> Path:
+    if len(cb) < 3:
+        raise ValueError(f"CB too short for prefix subdir: {cb}")
+    return out_dir / cb[:3] / f"{cb}.bam"
 
 
 def collect_spot_counts(
@@ -122,8 +135,8 @@ def collect_spot_counts(
     barcode_to_index: dict[str, int],
     barcode_len: int,
     threads_read: int,
-) -> tuple[dict[tuple[int, int], int], int, int, int]:
-    counts: dict[tuple[int, int], int] = defaultdict(int)
+) -> tuple[dict[str, int], int, int, int]:
+    counts: dict[str, int] = defaultdict(int)
     total_reads = 0
     assigned_reads = 0
     skipped_reads = 0
@@ -139,7 +152,7 @@ def collect_spot_counts(
     return counts, total_reads, assigned_reads, skipped_reads
 
 
-def choose_smoke_spots(counts: dict[tuple[int, int], int]) -> set[tuple[int, int]]:
+def choose_smoke_spots(counts: dict[str, int]) -> set[str]:
     observed_spots = sorted(counts)
     if len(observed_spots) <= SMOKE_SPOT_LIMIT:
         return set(observed_spots)
@@ -154,9 +167,9 @@ def emit_bams(
     barcode_len: int,
     threads_read: int,
     threads_write: int,
-    selected_spots: set[tuple[int, int]] | None,
-) -> dict[tuple[int, int], int]:
-    emitted_counts: dict[tuple[int, int], int] = defaultdict(int)
+    selected_spots: set[str] | None,
+) -> dict[str, int]:
+    emitted_counts: dict[str, int] = defaultdict(int)
     current_path: Path | None = None
     current_out: pysam.AlignmentFile | None = None
 
@@ -169,13 +182,11 @@ def emit_bams(
             if selected_spots is not None and spot not in selected_spots:
                 continue
 
-            x_index, y_index = spot
-            subdir = out_dir / f"{x_index:02d}"
-            out_path = subdir / f"{x_index:02d}_{y_index:02d}.bam"
+            out_path = spot_bam_path(out_dir, spot)
             if out_path != current_path:
                 if current_out is not None:
                     current_out.close()
-                subdir.mkdir(parents=True, exist_ok=True)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
                 current_out = pysam.AlignmentFile(
                     str(out_path),
                     "wb",
@@ -200,8 +211,8 @@ def split_all_bams(
     barcode_len: int,
     threads_read: int,
     threads_write: int,
-) -> tuple[dict[tuple[int, int], int], int, int, int]:
-    emitted_counts: dict[tuple[int, int], int] = defaultdict(int)
+) -> tuple[dict[str, int], int, int, int]:
+    emitted_counts: dict[str, int] = defaultdict(int)
     total_reads = 0
     assigned_reads = 0
     skipped_reads = 0
@@ -217,13 +228,11 @@ def split_all_bams(
                 skipped_reads += 1
                 continue
 
-            x_index, y_index = spot
-            subdir = out_dir / f"{x_index:02d}"
-            out_path = subdir / f"{x_index:02d}_{y_index:02d}.bam"
+            out_path = spot_bam_path(out_dir, spot)
             if out_path != current_path:
                 if current_out is not None:
                     current_out.close()
-                subdir.mkdir(parents=True, exist_ok=True)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
                 current_out = pysam.AlignmentFile(
                     str(out_path),
                     "wb",
@@ -241,12 +250,12 @@ def split_all_bams(
     return emitted_counts, total_reads, assigned_reads, skipped_reads
 
 
-def write_stats(out_dir: Path, counts: dict[tuple[int, int], int]) -> Path:
+def write_stats(out_dir: Path, counts: dict[str, int]) -> Path:
     stats_path = out_dir / "per_spot_read_counts.tsv"
     with stats_path.open("w", encoding="utf-8") as handle:
-        handle.write("X_index\tY_index\tspot\treads\n")
-        for (x_index, y_index), read_count in sorted(counts.items()):
-            handle.write(f"{x_index}\t{y_index}\t{x_index:02d}_{y_index:02d}\t{read_count}\n")
+        handle.write("barcode\treads\n")
+        for barcode, read_count in sorted(counts.items()):
+            handle.write(f"{barcode}\t{read_count}\n")
     return stats_path
 
 
@@ -264,7 +273,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     pysam.set_verbosity(0)
 
-    selected_spots: set[tuple[int, int]] | None = None
+    selected_spots: set[str] | None = None
     if args.smoke:
         all_counts, total_reads, assigned_reads, skipped_reads = collect_spot_counts(
             in_bam=args.in_bam,

@@ -118,7 +118,8 @@ def annotate_header(header: str, bc1: str, bc2: str) -> str:
         raise ValueError(f"invalid FASTQ header: {header}")
     parts = header.split(" ", 1)
     original = parts[0][1:]
-    parts[0] = f"@{bc1}+{bc2}:{original}"
+    # CB = <bcB><bcA> (barcode2 || barcode1); align copies this into the CB tag.
+    parts[0] = f"@{bc2}{bc1}:{original}"
     if len(parts) == 1:
         return parts[0]
     return f"{parts[0]} {parts[1]}"
