@@ -37,7 +37,3 @@ When behavior changes:
 - keep stage names, workflow names, and output paths exact
 - avoid duplicating normative facts across multiple documents
 - prefer linking to the canonical page instead of copying details
-
-## Legacy Docs
-
-The previous Chinese documentation remains under [`doc/`](../../doc/) during migration. New documentation work should target [`docs/`](../).

@@ -6,4 +6,3 @@ Current archive content includes:
 
 - internal progress tracking
 - design notes that are not active public contracts
-- migration-era legacy references

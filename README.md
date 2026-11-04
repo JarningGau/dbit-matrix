@@ -86,7 +86,3 @@ User-facing output checks: [Results guide](docs/users/results.md)
 - [TAPS regression](docs/maintenance/taps-regression.md)
 - [EMSeq regression](docs/maintenance/emseq-regression.md)
 - [RNA regression](docs/maintenance/rna-regression.md)
-
-### Legacy
-
-Legacy Chinese docs are still preserved in [`doc/`](doc/) during migration. New work should target [`docs/`](docs/).

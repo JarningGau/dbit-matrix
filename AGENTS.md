@@ -89,8 +89,7 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
 ## Documentation Rules
 
 - Write new documentation in English.
-- Use the new `docs/` tree as the source of truth for active docs.
-- Treat `doc/` as legacy reference unless a task explicitly targets it.
+- Use the `docs/` tree as the source of truth for active docs.
 - Update the right doc when behavior changes:
   - `README.md`: homepage, workflow status, top-level navigation
   - `docs/users/`: user-facing run guides
