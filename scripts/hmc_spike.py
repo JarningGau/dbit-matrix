@@ -201,16 +201,16 @@ def write_site_plot(
     fig, ax = plt.subplots(figsize=(7, 4.5))
     ax.bar(labels, values, color="#2c7fb8", edgecolor="white", linewidth=0.4)
     ax.set_xlabel(f"{name} C position (0-based)")
-    ax.set_ylabel("hmC→T conversion rate")
+    ax.set_ylabel("hmC→T conversion rate (%)")
     ax.set_title(f"{name} 5hmC site conversion")
-    ax.set_ylim(0, 1.05)
+    ax.set_ylim(0, 105)
     for label, rate in zip(labels, conversion_rates):
         if rate is None:
             continue
         ax.text(
             label,
-            rate + 0.02,
-            f"{rate:.3f}",
+            rate + 2.0,
+            f"{rate:.1f}",
             ha="center",
             va="bottom",
             fontsize=8,
@@ -356,7 +356,9 @@ def main() -> int:
         converted = site_converted[i]
         other = site_other[i]
         denom = retained + converted
-        conversion_rate = (converted / denom) if denom > 0 else None
+        conversion_rate = (
+            (converted / denom) * 100.0 if denom > 0 else None
+        )
         site_rows.append(
             {
                 "pos": cpos,
@@ -378,13 +380,15 @@ def main() -> int:
         score_converted += converted
         denom = retained + converted
         if denom > 0:
-            score_rates.append(converted / denom)
+            score_rates.append((converted / denom) * 100.0)
     mean_conversion_rate = (
         sum(score_rates) / len(score_rates) if score_rates else None
     )
     pooled_denom = score_retained + score_converted
     pooled_conversion_rate = (
-        score_converted / pooled_denom if pooled_denom > 0 else None
+        (score_converted / pooled_denom) * 100.0
+        if pooled_denom > 0
+        else None
     )
 
     site_tsv = out_dir / "site_conversion.tsv"

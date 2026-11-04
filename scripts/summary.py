@@ -479,7 +479,7 @@ def read_per_spot_reads(read_counts_path: Path) -> dict[str, str]:
 def format_float(value: float | None) -> str:
     if value is None:
         return "NA"
-    return f"{value:.6f}"
+    return f"{value:.2f}"
 
 
 def parse_optional_float(text: str | None) -> float | None:
