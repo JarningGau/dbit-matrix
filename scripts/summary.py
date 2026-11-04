@@ -492,6 +492,100 @@ def parse_optional_float(text: str | None) -> float | None:
         return None
 
 
+def format_is_hq_spot(
+    reads_raw: str | None, reads_threshold: float | None
+) -> str:
+    """HQ flag for per_spot_summary: 1/0, or NA if threshold or reads missing."""
+    if reads_threshold is None:
+        return "NA"
+    reads = parse_optional_float(reads_raw)
+    if reads is None:
+        return "NA"
+    return "1" if reads > reads_threshold else "0"
+
+
+PER_SPOT_FIELDS = [
+    "barcode",
+    "array_row",
+    "array_col",
+    "reads",
+    "is_HQ_spot",
+    "mean_5mCG",
+    "mean_5mCH",
+    "mean_5mCA",
+    "mean_5mCC",
+    "mean_5mCT",
+    "cpg_site_count",
+    "ch_site_count",
+    "ca_site_count",
+    "cc_site_count",
+    "ct_site_count",
+]
+
+
+def build_sample_summary_fieldnames(
+    spike_names: list[str],
+    sample_row: dict[str, str],
+) -> list[str]:
+    """Semantic column order for sample_summary.tsv (hmc columns trailing)."""
+    fields = [
+        "sample_id",
+        "saturation_rate",
+        "raw_reads",
+        "barcoded_reads",
+        "barcoded_reads_rate",
+        "host_mapped_reads",
+    ]
+    for spike_name in spike_names:
+        fields.append(f"{spike_name}_mapped_reads")
+    fields.extend(
+        [
+            "host_valid_reads",
+            "host_valid_reads_mito",
+            "host_valid_reads_nuclear",
+            "valid_reads_rate",
+            "host_spot_mean_5mCG",
+            "host_spot_mean_5mCH",
+            "host_spot_mean_5mCA",
+            "host_spot_mean_5mCC",
+            "host_spot_mean_5mCT",
+            "host_spot_median_cpg_sites",
+            "host_mito_mean_5mCG",
+            "host_mito_mean_5mCH",
+            "host_mito_mean_5mCA",
+            "host_mito_mean_5mCC",
+            "host_mito_mean_5mCT",
+        ]
+    )
+    for spike_name in spike_names:
+        fields.extend(
+            [
+                f"{spike_name}_mean_5mCG",
+                f"{spike_name}_mean_5mCH",
+                f"{spike_name}_mean_5mCA",
+                f"{spike_name}_mean_5mCC",
+                f"{spike_name}_mean_5mCT",
+            ]
+        )
+    hmc_prefixes = sorted(
+        {
+            key[: -len("_hmc_spike_reads")]
+            for key in sample_row
+            if key.endswith("_hmc_spike_reads")
+        }
+    )
+    for prefix in hmc_prefixes:
+        for suffix in (
+            "_hmc_spike_reads",
+            "_hmc_spike_reads_rate",
+            "_hmc_spike_mean_hmCtoT",
+        ):
+            key = f"{prefix}{suffix}"
+            if key in sample_row:
+                fields.append(key)
+    return fields
+
+
 def parse_optional_coord(text: str | None) -> int | None:
     """Parse 0-based array_row/array_col (inclusive; 0 is valid)."""
     value = (text or "").strip()
@@ -881,10 +975,7 @@ def write_summary_heatmaps(
     outputs: list[Path] = []
 
     def is_hq_spot(row: dict[str, str]) -> bool:
-        reads = parse_optional_float(row.get("reads"))
-        if reads is None or reads_threshold is None:
-            return False
-        return reads > reads_threshold
+        return format_is_hq_spot(row.get("reads"), reads_threshold) == "1"
 
     for spec in HEATMAP_SPECS:
         output_path = summary_dir / spec["output_name"]
@@ -990,23 +1081,9 @@ def main() -> int:
     positions = read_barcode_positions(args.barcode_positions)
     read_counts = read_per_spot_reads(read_counts_path)
     per_spot_rows = summarize_per_spot(host_cov_paths, read_counts, positions)
-    per_spot_fields = [
-        "barcode",
-        "array_row",
-        "array_col",
-        "mean_5mCG",
-        "mean_5mCH",
-        "mean_5mCA",
-        "mean_5mCC",
-        "mean_5mCT",
-        "cpg_site_count",
-        "ch_site_count",
-        "ca_site_count",
-        "cc_site_count",
-        "ct_site_count",
-        "reads",
-    ]
-    write_tsv(per_spot_out, per_spot_fields, per_spot_rows)
+    for row in per_spot_rows:
+        row["is_HQ_spot"] = format_is_hq_spot(row.get("reads"), reads_threshold)
+    write_tsv(per_spot_out, list(PER_SPOT_FIELDS), per_spot_rows)
 
     saturation_rate = read_saturation_rate(saturation_summary_path, sample_id)
 
@@ -1045,7 +1122,9 @@ def main() -> int:
         work_path / "qc" / "hmc_spike" / "summary.json"
     )
     apply_hmc_spike_columns(sample_row, hmc_summary, raw_reads)
-    sample_fields = list(sample_row.keys())
+    sample_fields = build_sample_summary_fieldnames(
+        sorted(spike_names), sample_row
+    )
     write_tsv(sample_out, sample_fields, [sample_row])
     write_summary_heatmaps(per_spot_out, summary_dir, reads_threshold=reads_threshold)
     print(f"[summary] per_spot_rows={len(per_spot_rows)}")
