@@ -356,8 +356,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--saturation-reads-threshold",
-        type=float,
-        help="HQ spot reads threshold for saturation stage. Default: 1e6.",
+        help=(
+            "HQ spot reads threshold for saturation stage: 'auto' (default) "
+            "or a positive number."
+        ),
     )
     parser.add_argument(
         "--summary-script",
@@ -1867,13 +1869,22 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         settings["call_caller_script"] or "scripts/methy_caller.py"
     )
     settings["saturation_script"] = settings["saturation_script"] or "scripts/saturation.py"
-    settings["saturation_reads_threshold"] = (
-        float(settings["saturation_reads_threshold"])
-        if settings["saturation_reads_threshold"] is not None
-        else 1_000_000.0
-    )
-    if settings["saturation_reads_threshold"] <= 0:
-        raise ValueError("saturation_reads_threshold must be > 0")
+    if settings["saturation_reads_threshold"] is None:
+        settings["saturation_reads_threshold"] = "auto"
+    else:
+        threshold_text = str(settings["saturation_reads_threshold"]).strip()
+        if threshold_text.lower() == "auto":
+            settings["saturation_reads_threshold"] = "auto"
+        else:
+            try:
+                threshold_value = float(threshold_text)
+            except ValueError as exc:
+                raise ValueError(
+                    "saturation_reads_threshold must be 'auto' or a positive number"
+                ) from exc
+            if threshold_value <= 0:
+                raise ValueError("saturation_reads_threshold must be > 0")
+            settings["saturation_reads_threshold"] = f"{threshold_value:g}"
     settings["summary_script"] = settings["summary_script"] or "scripts-v2/summary.py"
     settings["aggregate_script"] = (
         settings["aggregate_script"] or "scripts/aggregate.py"

@@ -60,7 +60,7 @@
     },
     "call_caller_script": "scripts/methy_caller.py",
     "saturation_script": "scripts/saturation.py",
-    "saturation_reads_threshold": 500,
+    "saturation_reads_threshold": "auto",
     "summary_script": "scripts-v2/summary.py",
     "methscan_tss_bed": "data/genome/mm10_encode_VM21_tss_4k.bed",
     "spike_in_index": {

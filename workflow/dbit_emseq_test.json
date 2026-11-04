@@ -43,7 +43,7 @@
         "lambda": "/mnt/e/LiLab_HL/resource/biscuit/lambda/genome.fa"
     },
     "saturation_script": "scripts/saturation.py",
-    "saturation_reads_threshold": 500,
+    "saturation_reads_threshold": "auto",
     "summary_script": "scripts/summary.py",
     "methscan_tss_bed": "configs/ENCODE-mm10-vM21-TSS.4k.bed",
     "slurm": {

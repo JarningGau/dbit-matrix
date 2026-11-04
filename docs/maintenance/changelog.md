@@ -4,6 +4,7 @@ This page is the active release history for the repository.
 
 ## Current
 
+- **BREAKING saturation reads threshold default:** `saturation_reads_threshold` / `--reads-threshold` default is `"auto"` (was `1e6`). Auto picks the HQ cutoff at the steepest drop on barcode rank vs `log10(reads+1)` after dropping `reads <= 10`. Numeric overrides remain valid. Saturation also writes `qc/saturation/reads_knee.png` and adds `reads_threshold` / `reads_threshold_mode` to `saturation_summary.tsv`. See [contracts](../developers/contracts.md#saturation) and [config reference](../developers/config-reference.md#taps-fields).
 - **BREAKING summary 5mCG / 5mCH:** `per_spot_summary.tsv` replaces `mean_methylation` with `mean_5mCG`, `mean_5mCH`, and `ch_site_count`. Heatmaps are `mean_5mCG_heatmap.png` (50–80%) and `mean_5mCH_heatmap.png` (0–10%); `mean_methylation_heatmap.png` is removed. Sample fields use `*_mean_5mCG` / `*_mean_5mCH` instead of `*_mean_methylation`. See [contracts](../developers/contracts.md#summary).
 - **Summary heatmap style:** summary heatmaps use Nature typography with fixed `figsize=(2.2, 2.0)` inches; outputs remain PNG. See [contracts](../developers/contracts.md#summary).
 - **BREAKING summary barcode:** `per_spot_summary.tsv` `barcode` is `<bcB><bcA>` with no literal `host` suffix. See [contracts](../developers/contracts.md#summary).

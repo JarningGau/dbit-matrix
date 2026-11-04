@@ -101,6 +101,11 @@ Notes:
 - host `call` requires `split_barcodes` as the CB whitelist (defaults to `barcode1_whitelist` when omitted)
 - `call_smoke` writes host `.cov` only for the 16 spots with highest `reads` (see [contracts](contracts.md#call))
 
+Saturation fields:
+
+- `saturation_script` (default: `scripts/saturation.py`)
+- `saturation_reads_threshold`: `"auto"` (default) or a positive number. `"auto"` resolves the HQ cutoff at runtime from `coverage/per_spot_read_counts.tsv` (steepest slope on barcode rank vs `log10(reads+1)` after dropping `reads <= 10`). See [contracts](contracts.md#saturation).
+
 ## EMSeq Fields
 
 Core fields:
@@ -142,6 +147,8 @@ QC fields:
 - `mbias_host_subsample_fraction`
 - `mbias_max_cycle`
 - `mbias_min_mapping_quality`
+- `saturation_script` (default: `scripts/saturation.py`; shared with TAPS)
+- `saturation_reads_threshold` (same `"auto"` / positive-number contract as TAPS)
 
 Notes:
 

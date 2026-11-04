@@ -15,6 +15,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import theme_nature as tn
+
+tn.apply_theme()
+
+_FIGSIZE = (2.5, 1.8)
 
 DEFAULT_FRACTIONS = [
     0.01,
@@ -32,6 +37,68 @@ DEFAULT_FRACTIONS = [
     1.00,
 ]
 DEFAULT_LINEAR_R2_THRESHOLD = 0.99
+KNEE_MIN_READS = 10.0
+KNEE_SMOOTH_WINDOW = 51
+
+
+def _rolling_mean(values: list[float], window: int) -> list[float]:
+    if window % 2 == 0:
+        raise ValueError("smooth window must be odd")
+    if window < 1:
+        raise ValueError("smooth window must be >= 1")
+    if not values:
+        return []
+    if len(values) == 1 or window == 1:
+        return list(values)
+    pad = window // 2
+    padded = [values[0]] * pad + list(values) + [values[-1]] * pad
+    inv = 1.0 / float(window)
+    out: list[float] = []
+    running = sum(padded[:window])
+    out.append(running * inv)
+    for index in range(window, len(padded)):
+        running += padded[index] - padded[index - window]
+        out.append(running * inv)
+    return out
+
+
+def auto_reads_threshold(
+    reads: list[float],
+    *,
+    min_reads: float = KNEE_MIN_READS,
+    smooth_window: int = KNEE_SMOOTH_WINDOW,
+) -> float:
+    """Return HQ reads cutoff at steepest drop on (rank, log10(reads+1)).
+
+    Spots are sorted descending; the long discrete tail with reads <= min_reads
+    is dropped before the slope search.
+    """
+    sorted_reads = sorted((float(value) for value in reads), reverse=True)
+    truncated = [value for value in sorted_reads if value > min_reads]
+    if len(truncated) < 2:
+        raise ValueError(
+            "auto reads threshold needs at least 2 spots with reads > "
+            f"{min_reads:g} (got {len(truncated)})"
+        )
+    log_reads = [math.log10(value + 1.0) for value in truncated]
+    window = smooth_window if smooth_window < len(truncated) else (
+        len(truncated) if len(truncated) % 2 == 1 else max(1, len(truncated) - 1)
+    )
+    if window % 2 == 0:
+        window = max(1, window - 1)
+    smoothed = _rolling_mean(log_reads, window)
+
+    # Ranks are unit-spaced, so dy/drank ~= dy via central differences.
+    slopes: list[float] = []
+    for index in range(len(smoothed)):
+        if index == 0:
+            slopes.append(smoothed[1] - smoothed[0])
+        elif index == len(smoothed) - 1:
+            slopes.append(smoothed[-1] - smoothed[-2])
+        else:
+            slopes.append(0.5 * (smoothed[index + 1] - smoothed[index - 1]))
+    steepest_index = min(range(len(slopes)), key=lambda index: slopes[index])
+    return float(truncated[steepest_index])
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,9 +115,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--reads-threshold",
-        type=float,
-        default=1_000_000.0,
-        help="HQ spot threshold for per_spot_read_counts.tsv reads. Default: 1e6.",
+        default="auto",
+        help=(
+            "HQ spot threshold for per_spot_read_counts.tsv reads. "
+            "Use 'auto' (default) to pick the steepest drop on the barcode "
+            "rank vs log10(reads+1) curve after dropping reads <= 10, or a "
+            "positive number for a manual cutoff."
+        ),
     )
     parser.add_argument(
         "--pred-fraction",
@@ -100,6 +171,36 @@ def format_optional_float(value: float | None) -> str:
     if value is None or not math.isfinite(value):
         return "NA"
     return f"{value:.6f}"
+
+
+def parse_reads_threshold_arg(raw: str | float | int) -> tuple[str, float | None]:
+    """Return (mode, manual_threshold). mode is 'auto' or 'manual'."""
+    text = str(raw).strip()
+    if not text:
+        raise ValueError("reads threshold must be 'auto' or a positive number")
+    if text.lower() == "auto":
+        return "auto", None
+    try:
+        value = float(text)
+    except ValueError as exc:
+        raise ValueError(
+            "reads threshold must be 'auto' or a positive number"
+        ) from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("reads threshold must be > 0")
+    return "manual", value
+
+
+def resolve_reads_threshold(
+    mode: str,
+    manual_threshold: float | None,
+    read_counts: dict[str, float],
+) -> float:
+    if mode == "auto":
+        return auto_reads_threshold(list(read_counts.values()))
+    if manual_threshold is None:
+        raise ValueError("manual reads threshold is missing")
+    return float(manual_threshold)
 
 
 def discover_fastp_json(work_path: Path) -> Path | None:
@@ -262,6 +363,8 @@ def write_summary_tsv(path: Path, row: dict[str, str]) -> None:
         "saturation_rate",
         "extrapolation_model",
         "hq_spot_count",
+        "reads_threshold",
+        "reads_threshold_mode",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
@@ -269,14 +372,64 @@ def write_summary_tsv(path: Path, row: dict[str, str]) -> None:
         writer.writerow(row)
 
 
+def write_reads_knee_plot(
+    path: Path,
+    sample_id: str,
+    read_counts: dict[str, float],
+    reads_threshold: float,
+    mode: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sorted_reads = sorted(read_counts.values(), reverse=True)
+    ranks = list(range(1, len(sorted_reads) + 1))
+    log_reads = [math.log10(value + 1.0) for value in sorted_reads]
+
+    fig, ax = plt.subplots(figsize=_FIGSIZE)
+    if ranks:
+        ax.plot(ranks, log_reads, color="#333333", linewidth=0.8)
+        ax.axhline(
+            math.log10(reads_threshold + 1.0),
+            color="#c0392b",
+            linestyle="--",
+            linewidth=0.7,
+            label=f"threshold={reads_threshold:g} ({mode})",
+        )
+        # Mark the leftmost rank whose reads equal the threshold when present.
+        mark_rank = None
+        for rank, value in zip(ranks, sorted_reads):
+            if value <= reads_threshold:
+                mark_rank = rank
+                break
+        if mark_rank is not None:
+            ax.scatter(
+                [mark_rank],
+                [math.log10(sorted_reads[mark_rank - 1] + 1.0)],
+                color="#c0392b",
+                s=12,
+                zorder=4,
+            )
+        ax.legend(loc="upper right", fontsize=5)
+    else:
+        ax.text(0.5, 0.5, "No per-spot reads", ha="center", va="center", fontsize=6)
+        ax.axis("off")
+    ax.set_title(f"Reads knee ({sample_id})", fontsize=6)
+    ax.set_xlabel("Barcode rank", fontsize=6)
+    ax.set_ylabel("log10(reads + 1)", fontsize=6)
+    tn.style_axes(ax)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def write_empty_plot(path: Path, sample_id: str, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    fig, ax = plt.subplots(figsize=_FIGSIZE)
     ax.axis("off")
-    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=12)
-    ax.set_title(f"Saturation analysis ({sample_id})\nSaturation rate: NA")
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=6)
+    ax.set_title(f"Saturation analysis ({sample_id})\nSaturation rate: NA", fontsize=6)
+    tn.style_axes(ax)
     fig.tight_layout()
-    fig.savefig(path, dpi=200)
+    fig.savefig(path)
     plt.close(fig)
 
 
@@ -297,7 +450,19 @@ def write_plot(
     sequencing_gbp: float | None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    scale = 1e4
+    y_ref_candidates = list(median_uniques)
+    if predicted is not None and math.isfinite(predicted):
+        y_ref_candidates.append(predicted)
+    if model != "linear" and a > 0:
+        y_ref_candidates.append(a)
+    y_ref = max(y_ref_candidates) if y_ref_candidates else 0.0
+    # Scale plotted y by 10^6 when values exceed 10^4, otherwise 10^3.
+    if y_ref > 10_000:
+        scale = 1e6
+        scale_exponent = 6
+    else:
+        scale = 1e3
+        scale_exponent = 3
 
     # When fastp depth is available the x-axis is sequencing depth in Gbp,
     # otherwise fall back to the raw coverage fraction.
@@ -322,24 +487,25 @@ def write_plot(
         [value / scale for value in err_high],
     ]
 
-    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    fig, ax = plt.subplots(figsize=_FIGSIZE)
     ax.errorbar(
         x_values,
         medians_scaled,
         yerr=yerr,
         fmt="o-",
         color="blue",
-        linewidth=2,
-        markersize=5,
-        capsize=4,
+        linewidth=0.8,
+        markersize=2.5,
+        capsize=1.5,
+        elinewidth=0.5,
         label="Observed median (IQR)",
     )
-    ax.plot(fit_x, fit_y, "r--", linewidth=2, label=fit_label)
+    ax.plot(fit_x, fit_y, "r--", linewidth=0.8, label=fit_label)
     ax.scatter(
         [pred_x],
         [pred_y],
         color="green",
-        s=55,
+        s=12,
         zorder=4,
         label=f"Prediction at {pred_fraction:g}x",
     )
@@ -348,7 +514,7 @@ def write_plot(
             a / scale,
             color="purple",
             linestyle="--",
-            linewidth=1.8,
+            linewidth=0.7,
             label="Max CpG Reads",
         )
     if saturation_rate is not None:
@@ -357,24 +523,32 @@ def write_plot(
         sat_text = "NA (linear, unsaturated)"
     else:
         sat_text = "NA"
-    ax.set_title(f"Saturation analysis ({sample_id})\nSaturation rate: {sat_text}")
-    ax.set_xlabel(x_label)
-    ax.set_ylabel("Median Unique CpGs per Spot (x10^4)")
-    ax.grid(True, alpha=0.35)
-    ax.legend(loc="lower right")
+    ax.set_title(
+        f"Saturation analysis ({sample_id})\nSaturation rate: {sat_text}",
+        fontsize=6,
+    )
+    ax.set_xlabel(x_label, fontsize=6)
+    ax.set_ylabel(
+        rf"Median Unique CpGs per Spot ($\times 10^{{{scale_exponent}}}$)",
+        fontsize=6,
+    )
+    ax.legend(loc="lower right", fontsize=5)
+    tn.style_axes(ax)
     fig.tight_layout()
-    fig.savefig(path, dpi=200)
+    fig.savefig(path)
     plt.close(fig)
 
 
 def main() -> int:
     args = parse_args()
+    threshold_mode, manual_threshold = parse_reads_threshold_arg(args.reads_threshold)
     work_path = Path(args.work_path)
     sample_id = work_path.name
     read_counts_path = work_path / "coverage" / "per_spot_read_counts.tsv"
     host_cov_paths = sorted((work_path / "coverage" / "host").rglob("*.CG.cov"))
     output_dir = Path(args.output_dir) if args.output_dir else work_path / "qc" / "saturation"
     plot_path = output_dir / "saturation_curve.png"
+    knee_plot_path = output_dir / "reads_knee.png"
     summary_path = output_dir / "saturation_summary.tsv"
 
     fastp_json_path = resolve_fastp_json(work_path, args.fastp_json)
@@ -384,10 +558,25 @@ def main() -> int:
     else:
         print("[saturation] warning=fastp_json_not_found")
 
+    read_counts_preview = (
+        parse_per_spot_reads(read_counts_path) if read_counts_path.exists() else {}
+    )
+    resolved_threshold: float | None = None
+    if threshold_mode == "manual":
+        resolved_threshold = manual_threshold
+    elif read_counts_preview:
+        resolved_threshold = resolve_reads_threshold(
+            threshold_mode, manual_threshold, read_counts_preview
+        )
+
     print(f"[saturation] work_path={work_path}")
     print(f"[saturation] reads_table={read_counts_path}")
     print(f"[saturation] host_cov_count={len(host_cov_paths)}")
-    print(f"[saturation] reads_threshold={args.reads_threshold}")
+    print(f"[saturation] reads_threshold_mode={threshold_mode}")
+    print(
+        "[saturation] reads_threshold="
+        + (f"{resolved_threshold:g}" if resolved_threshold is not None else "unresolved")
+    )
     print(f"[saturation] linear_r2_threshold={args.linear_r2_threshold}")
     print(f"[saturation] fastp_json={fastp_json_path}")
     print(
@@ -395,6 +584,7 @@ def main() -> int:
         + (f"{sequencing_gbp:.6f}" if sequencing_gbp is not None else "NA")
     )
     print(f"[saturation] output_plot={plot_path}")
+    print(f"[saturation] output_knee_plot={knee_plot_path}")
     print(f"[saturation] output_summary={summary_path}")
 
     if args.dry_run:
@@ -402,15 +592,31 @@ def main() -> int:
         return 0
 
     read_counts = parse_per_spot_reads(read_counts_path)
+    reads_threshold = resolve_reads_threshold(
+        threshold_mode, manual_threshold, read_counts
+    )
+    write_reads_knee_plot(
+        knee_plot_path,
+        sample_id,
+        read_counts,
+        reads_threshold,
+        threshold_mode,
+    )
     spot_cov_map: dict[str, Path] = {
         cov_path.name[: -len(".CG.cov")]: cov_path for cov_path in host_cov_paths
     }
     hq_spots = [
         spot
         for spot, reads in read_counts.items()
-        if reads > args.reads_threshold and spot in spot_cov_map
+        if reads > reads_threshold and spot in spot_cov_map
     ]
     hq_spots.sort()
+
+    def base_summary_fields() -> dict[str, str]:
+        return {
+            "reads_threshold": f"{reads_threshold:g}",
+            "reads_threshold_mode": threshold_mode,
+        }
 
     if not hq_spots:
         print("[saturation] warning=no_hq_spots_after_filter")
@@ -422,6 +628,7 @@ def main() -> int:
             "saturation_rate": "NA",
             "extrapolation_model": "NA",
             "hq_spot_count": "0",
+            **base_summary_fields(),
         }
         write_summary_tsv(summary_path, row)
         write_empty_plot(plot_path, sample_id, "No HQ spots after reads filter")
@@ -460,6 +667,7 @@ def main() -> int:
             "saturation_rate": "NA",
             "extrapolation_model": "NA",
             "hq_spot_count": str(len(hq_spots)),
+            **base_summary_fields(),
         }
         write_summary_tsv(summary_path, row)
         write_empty_plot(plot_path, sample_id, "No valid CG coverage rows")
@@ -518,6 +726,7 @@ def main() -> int:
         "saturation_rate": format_optional_float(saturation_rate),
         "extrapolation_model": model,
         "hq_spot_count": str(len(hq_spots)),
+        **base_summary_fields(),
     }
     write_summary_tsv(summary_path, row)
     print(f"[saturation] hq_spot_count={len(hq_spots)}")

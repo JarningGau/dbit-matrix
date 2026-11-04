@@ -182,10 +182,13 @@ Inputs:
 - `coverage/per_spot_read_counts.tsv`
 - `shard_fastq/fastp.json` (optional; supplies total sequencing depth for the Gbp x-axis. If absent, the plot falls back to a raw coverage-fraction x-axis.)
 
+HQ spot filter: `reads > reads_threshold` and a matching `*.CG.cov`. `reads_threshold` comes from `--reads-threshold` / config `saturation_reads_threshold`: `"auto"` (default) or a positive number. Auto sorts barcodes by reads descending, drops `reads <= 10`, then takes the reads value at the steepest slope on `(rank, log10(reads+1))` (smoothed window 51). See [config reference](config-reference.md#taps-fields).
+
 Outputs:
 
 - `qc/saturation/saturation_curve.png`
-- `qc/saturation/saturation_summary.tsv` (columns: `sample_id`, `observed_median_unique_cpgs`, `theoretical_max_median_unique_cpgs`, `predicted_median_unique_cpgs_at_2x`, `saturation_rate`, `extrapolation_model`, `hq_spot_count`)
+- `qc/saturation/reads_knee.png` (barcode rank vs `log10(reads+1)` with the resolved threshold marked)
+- `qc/saturation/saturation_summary.tsv` (columns: `sample_id`, `observed_median_unique_cpgs`, `theoretical_max_median_unique_cpgs`, `predicted_median_unique_cpgs_at_2x`, `saturation_rate`, `extrapolation_model`, `hq_spot_count`, `reads_threshold`, `reads_threshold_mode`)
 
 Extrapolation model: fits both a through-origin linear model and an exponential saturation curve. When the linear fit reaches `--linear-r2-threshold` (default `0.99`) the curve is treated as undersaturated, `extrapolation_model=linear` is reported, and `saturation_rate`/theoretical max are `NA`; otherwise the saturation curve is used.
 
