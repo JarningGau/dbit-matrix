@@ -164,8 +164,6 @@ Calling fields:
 - `call_min_mapping_quality`
 - `call_max_depth`
 - `call_smoke`
-- `call_host_subsample_fraction`
-- `call_host_subsample_seed`
 
 QC fields:
 

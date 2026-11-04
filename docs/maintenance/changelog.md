@@ -4,6 +4,9 @@ This page is the active release history for the repository.
 
 ## Current
 
+- **BREAKING host_mito BAM source:** `call` builds `coverage/host_mito.*.cov` from full indexed `pooled/pooled.host.sorted.bam` (mito contigs only), not from `qc/mbias/host.subsampled.sorted.bam`. Re-run `call` then `summary`. Removed EMSeq `call_host_subsample_fraction` / `call_host_subsample_seed` and call-stage subsample/samtools CLI. See [contracts](../developers/contracts.md#call).
+- **mbias host subsample unbiased:** [`scripts/host_subsample_bam.py`](../../scripts/host_subsample_bam.py) drops the coordinate-ordered `head -n` cap. Size is limited by lowering the `samtools view -s` fraction from `idxstats` mapped counts (`HOST_SUBSAMPLE_MAX_READS`). Re-run `mbias` to refresh `qc/mbias/host.subsampled.sorted.bam`. See [contracts](../developers/contracts.md#mbias).
+
 ## 4.0.0
 
 - **BREAKING CB / coverage / summary identity:** Intermediate CB is `<bcB><bcA>` (no `+`); host cov paths and summary columns use `barcode` / `array_row` / `array_col`. Re-run `call` then `summary`. See [contracts](../developers/contracts.md#call) and [contracts](../developers/contracts.md#summary).

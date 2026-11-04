@@ -14,11 +14,7 @@ import pysam
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from scripts.host_subsample_bam import (
-    HOST_SUBSAMPLE_SEED,
-    build_prepare_host_subsample_commands,
-    get_host_subsample_paths,
-)
+from scripts.methy_call_core import bam_index_exists
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--work-path",
         required=True,
-        help="Sample work directory containing pooled/ and qc/mbias/.",
+        help="Sample work directory containing pooled/.",
     )
     parser.add_argument(
         "--mode",
@@ -156,29 +152,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--barcodes",
         help="Barcode whitelist TSV (required for host calling).",
-    )
-    parser.add_argument(
-        "--samtools-bin",
-        default="samtools",
-        help="samtools executable path or command name. Default: samtools.",
-    )
-    parser.add_argument(
-        "--samtools-threads",
-        type=int,
-        default=4,
-        help="Threads for samtools view/sort while preparing mito BAM. Default: 4.",
-    )
-    parser.add_argument(
-        "--host-subsample-fraction",
-        type=float,
-        default=0.1,
-        help="Host subsampling fraction in (0, 1] for mito BAM fallback. Default: 0.1.",
-    )
-    parser.add_argument(
-        "--host-subsample-seed",
-        type=int,
-        default=HOST_SUBSAMPLE_SEED,
-        help=f"Host subsampling seed for mito BAM fallback. Default: {HOST_SUBSAMPLE_SEED}.",
     )
     parser.add_argument(
         "--smoke",
@@ -340,14 +313,6 @@ def run_command(command: list[str], dry_run: bool) -> None:
         subprocess.run(command, check=True)
 
 
-def run_or_skip(command: list[str], output_path: Path, dry_run: bool) -> bool:
-    if output_path.exists():
-        print(f"[call] skip_existing_output={output_path}")
-        return False
-    run_command(command, dry_run)
-    return True
-
-
 def run_or_skip_aggregate(
     command: list[str],
     stem: Path,
@@ -363,41 +328,18 @@ def run_or_skip_aggregate(
     return True
 
 
-def ensure_host_mito_bam(args: argparse.Namespace, work_path: Path) -> Path:
-    mbias_dir = work_path / "qc" / "mbias"
-    host_paths = get_host_subsample_paths(mbias_dir)
-    host_sorted = host_paths.sorted_bam
-    host_index = host_paths.sorted_bam_index
-    if host_sorted.exists():
-        print(f"[call] reuse_host_mito_bam={host_sorted}")
-        if not host_index.exists():
-            index_cmd = [args.samtools_bin, "index", str(host_sorted)]
-            run_or_skip(index_cmd, host_index, args.dry_run)
-        return host_sorted
-
+def ensure_host_mito_bam(work_path: Path) -> Path:
     pooled_host = work_path / "pooled" / "pooled.host.sorted.bam"
-    if not pooled_host.exists():
-        raise ValueError(
-            "missing host mito BAM fallback inputs. expected one of:\n"
-            f"  - existing: {host_sorted}\n"
-            f"  - fallback source: {pooled_host}"
-        )
-    print(f"[call] prepare_host_mito_bam_from={pooled_host}")
-    mbias_dir.mkdir(parents=True, exist_ok=True)
-    for command, output_path in build_prepare_host_subsample_commands(
-        pooled_host_bam=pooled_host,
-        paths=host_paths,
-        samtools_bin=args.samtools_bin,
-        samtools_threads=args.samtools_threads,
-        host_subsample_fraction=args.host_subsample_fraction,
-        host_subsample_seed=args.host_subsample_seed,
-    ):
-        run_or_skip(command, output_path, args.dry_run)
-    return host_sorted
+    if not pooled_host.is_file():
+        raise ValueError(f"missing pooled host BAM for host_mito: {pooled_host}")
+    if not bam_index_exists(pooled_host):
+        raise ValueError(f"missing BAM index for host_mito input: {pooled_host}")
+    print(f"[call] host_mito_bam={pooled_host}")
+    return pooled_host
 
 
 def run_host_mito_aggregate(args: argparse.Namespace, work_path: Path) -> list[Path]:
-    host_mito_bam = ensure_host_mito_bam(args, work_path)
+    host_mito_bam = ensure_host_mito_bam(work_path)
     stem = work_path / "coverage" / "host_mito"
     stem.parent.mkdir(parents=True, exist_ok=True)
     command = build_caller_command(
@@ -513,12 +455,6 @@ def main() -> int:
     args = parse_args()
     if args.jobs <= 0:
         raise ValueError("jobs must be > 0")
-    if args.samtools_threads <= 0:
-        raise ValueError("samtools-threads must be > 0")
-    if args.host_subsample_seed < 0:
-        raise ValueError("host-subsample-seed must be >= 0")
-    if args.host_subsample_fraction <= 0 or args.host_subsample_fraction > 1:
-        raise ValueError("host-subsample-fraction must be in (0, 1]")
     if args.min_base_quality < 0:
         raise ValueError("min-base-quality must be >= 0")
     if args.min_mapping_quality < 0:
@@ -547,10 +483,6 @@ def main() -> int:
     print(f"[call] chromosomes={args.chromosomes}")
     print(f"[call] mito_chromosomes={args.mito_chromosomes}")
     print(f"[call] context_mode={args.context_mode}")
-    print(f"[call] samtools_bin={args.samtools_bin}")
-    print(f"[call] samtools_threads={args.samtools_threads}")
-    print(f"[call] host_subsample_fraction={args.host_subsample_fraction}")
-    print(f"[call] host_subsample_seed={args.host_subsample_seed}")
     validate_chromosomes_in_reference(args.reference_file, args.chromosomes, "host")
     validate_chromosomes_in_reference(
         args.reference_file,

@@ -326,16 +326,6 @@ def parse_args() -> argparse.Namespace:
         help="Path to methy_caller script for call stage. Default: scripts-emseq/methy_caller.py.",
     )
     parser.add_argument(
-        "--call-host-subsample-fraction",
-        type=float,
-        help="Host subsample fraction for host_mito BAM fallback. Default: 0.1.",
-    )
-    parser.add_argument(
-        "--call-host-subsample-seed",
-        type=int,
-        help="Host subsample seed for host_mito BAM fallback. Default: scripts.host_subsample_bam.HOST_SUBSAMPLE_SEED.",
-    )
-    parser.add_argument(
         "--call-mito-chromosomes",
         help=(
             "Comma-separated host contigs treated as mitochondrial in EMSeq call. "
@@ -788,12 +778,6 @@ def build_call_command(
         str(trim["r2_right"]),
         "--caller-script",
         args.call_caller_script,
-        "--samtools-bin",
-        args.samtools_bin,
-        "--samtools-threads",
-        str(args.samtools_threads),
-        "--host-subsample-fraction",
-        str(args.mbias_host_subsample_fraction),
     ]
     if args.call_sample_size is not None:
         command.extend(["--sample-size", str(args.call_sample_size)])
@@ -1286,12 +1270,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.call_r2_right_trimming, cfg.get("call_r2_right_trimming")
         ),
         "call_caller_script": pick(args.call_caller_script, cfg.get("call_caller_script")),
-        "host_subsample_fraction": pick(
-            args.call_host_subsample_fraction, cfg.get("call_host_subsample_fraction")
-        ),
-        "host_subsample_seed": pick(
-            args.call_host_subsample_seed, cfg.get("call_host_subsample_seed")
-        ),
         "call_mito_chromosomes": pick(
             args.call_mito_chromosomes, cfg.get("call_mito_chromosomes")
         ),
@@ -1562,20 +1540,6 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         settings["call_caller_script"] or "scripts-emseq/methy_caller.py"
     )
 
-    settings["host_subsample_fraction"] = (
-        float(settings["host_subsample_fraction"])
-        if settings["host_subsample_fraction"] is not None
-        else 0.1
-    )
-    if settings["host_subsample_fraction"] <= 0 or settings["host_subsample_fraction"] > 1:
-        raise ValueError("host_subsample_fraction must be in (0, 1]")
-    settings["host_subsample_seed"] = (
-        int(settings["host_subsample_seed"])
-        if settings["host_subsample_seed"] is not None
-        else 11
-    )
-    if settings["host_subsample_seed"] < 0:
-        raise ValueError("host_subsample_seed must be >= 0")
     settings["call_mito_chromosomes"] = settings["call_mito_chromosomes"] or "chrM"
 
     settings["saturation_script"] = settings["saturation_script"] or "scripts/saturation.py"
@@ -2519,9 +2483,6 @@ def main() -> int:
             call_trim_host=settings["call_trim_host"],
             call_trim_spike=settings["call_trim_spike"],
             call_caller_script=settings["call_caller_script"],
-            samtools_bin=settings["samtools_bin"],
-            samtools_threads=settings["samtools_threads"],
-            mbias_host_subsample_fraction=settings["mbias_host_subsample_fraction"],
             spike_in_index=settings["spike_in_index"],
             split_barcodes=settings["split_barcodes"],
             call_smoke=settings["call_smoke"],

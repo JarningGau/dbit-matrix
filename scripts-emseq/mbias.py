@@ -35,6 +35,7 @@ from scripts.host_subsample_bam import (
     HOST_SUBSAMPLE_SEED,
     build_prepare_host_subsample_commands,
     get_host_subsample_paths,
+    resolve_host_subsample_fraction,
 )
 
 matplotlib.use("Agg")
@@ -419,6 +420,15 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
     host_tsv = output_dir / "host.mbias.tsv"
     host_png = output_dir / "host.mbias.png"
 
+    effective_fraction = resolve_host_subsample_fraction(
+        pooled_host,
+        args.host_subsample_fraction,
+        args.samtools_bin,
+    )
+    print(
+        f"[emseq.mbias] host_subsample_fraction_requested={args.host_subsample_fraction}"
+    )
+    print(f"[emseq.mbias] host_subsample_fraction_effective={effective_fraction}")
     for command, out_path in build_prepare_host_subsample_commands(
         pooled_host_bam=pooled_host,
         paths=host_paths,
@@ -426,6 +436,7 @@ def run_host_mode(args: argparse.Namespace, work_path: Path, output_dir: Path) -
         samtools_threads=args.samtools_threads,
         host_subsample_fraction=args.host_subsample_fraction,
         host_subsample_seed=HOST_SUBSAMPLE_SEED,
+        effective_fraction=effective_fraction,
     ):
         run_or_skip(command, out_path, args.dry_run)
 

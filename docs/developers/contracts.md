@@ -129,6 +129,7 @@ Host counting note:
 - Host M-bias CG counts use the nuclear chromosome whitelist from `call_chromosomes`
 - Mitochondrial contigs such as `chrM` are excluded from `host.mbias.tsv`
 - Only cycles with `coverage > 500` are included in TSV output and plots
+- Host subsample uses name-hash `samtools view -s`; expected size is capped by lowering the fraction from `samtools idxstats` mapped counts (`HOST_SUBSAMPLE_MAX_READS`), not by truncating a coordinate-ordered stream
 
 Workflow-specific note:
 
@@ -142,7 +143,7 @@ Purpose: generate host per-spot, host mitochondrial aggregate, and spike-in meth
 Inputs:
 
 - host: `pooled/pooled.host.sorted.bam` (indexed) plus `split_barcodes`
-- host mito fallback source: `qc/mbias/host.subsampled.sorted.bam`
+- host mito: same indexed `pooled/pooled.host.sorted.bam` (aggregate over `call_mito_chromosomes`)
 - spike-in: `pooled/pooled.<spike_name>.sorted.bam`
 
 Outputs:
@@ -163,6 +164,7 @@ Contract:
 - host cov paths use the first three bases of CB as the subdirectory (64 possible prefix dirs)
 - `call` writes `coverage/per_spot_read_counts.tsv` from a full BAM scan of whitelist-assigned reads
 - smoke is `call_smoke`: write `.cov` only for the 16 spots with highest `reads` (ties broken by CB ascending)
+- `host_mito` aggregate does not reuse the mbias subsampled BAM
 - `host_mito.CG.cov` is a single aggregate output
 - `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only
