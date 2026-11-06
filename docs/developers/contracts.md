@@ -190,7 +190,7 @@ Inputs:
 - `coverage/per_spot_read_counts.tsv`
 - `shard_fastq/fastp.json` (optional; supplies total sequencing depth for the Gbp x-axis. If absent, the plot falls back to a raw coverage-fraction x-axis.)
 
-HQ spot filter: `reads > reads_threshold` and a matching `*.CG.cov`. `reads_threshold` comes from `--reads-threshold` / config `saturation_reads_threshold`: `"auto"` (default) or a positive number. Auto sorts barcodes by reads descending, drops `reads <= 10`, excludes the top 5% of remaining ranks, then takes the reads value at the leftmost half-steep slope on `(rank, log10(reads+1))` (smoothed window 51; candidates are slopes at least half as steep as the minimum in the searchable range). See [config reference](config-reference.md#taps-fields).
+HQ spot filter: `reads > reads_threshold` and a matching `*.CG.cov`. `reads_threshold` comes from `--reads-threshold` / config `saturation_reads_threshold`: `"auto"` (default) or a positive number. Auto sorts barcodes by reads descending, drops `reads <= 10`, excludes the top 5% and bottom 10% of remaining ranks, then takes the reads value at the leftmost half-steep slope on `(rank, log10(reads+1))` (smoothed window 51; candidates are slopes at least half as steep as the minimum in the searchable range). See [config reference](config-reference.md#taps-fields).
 
 Outputs:
 

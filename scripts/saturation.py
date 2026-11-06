@@ -41,6 +41,7 @@ DEFAULT_LINEAR_R2_THRESHOLD = 0.99
 KNEE_MIN_READS = 10.0
 KNEE_SMOOTH_WINDOW = 51
 KNEE_EXCLUDE_TOP_FRACTION = 0.05
+KNEE_EXCLUDE_BOTTOM_FRACTION = 0.10
 KNEE_HALF_STEEP_FRACTION = 0.5
 
 
@@ -48,6 +49,7 @@ class AutoKneeResult(NamedTuple):
     threshold: float
     knee_rank: int  # 1-based barcode rank on the truncated curve
     exclude_start: int  # 0-based index where slope search begins
+    exclude_end: int  # 0-based exclusive end index of slope search
 
 
 def _rolling_mean(values: list[float], window: int) -> list[float]:
@@ -77,15 +79,17 @@ def auto_reads_threshold(
     min_reads: float = KNEE_MIN_READS,
     smooth_window: int = KNEE_SMOOTH_WINDOW,
     exclude_top_fraction: float = KNEE_EXCLUDE_TOP_FRACTION,
+    exclude_bottom_fraction: float = KNEE_EXCLUDE_BOTTOM_FRACTION,
     half_steep_fraction: float = KNEE_HALF_STEEP_FRACTION,
 ) -> AutoKneeResult:
     """Return HQ reads cutoff on (rank, log10(reads+1)).
 
     Spots are sorted descending; reads <= min_reads are dropped. The top
-    ``exclude_top_fraction`` of remaining ranks are excluded from the slope
-    search. Among searchable ranks, candidates with slope at least
-    ``half_steep_fraction`` as steep as the minimum slope are kept, and the
-    leftmost such rank is the knee (avoids a steeper right-hand tail cliff).
+    ``exclude_top_fraction`` and bottom ``exclude_bottom_fraction`` of
+    remaining ranks are excluded from the slope search. Among searchable
+    ranks, candidates with slope at least ``half_steep_fraction`` as steep
+    as the minimum slope are kept, and the leftmost such rank is the knee
+    (avoids a steeper right-hand tail cliff).
     """
     sorted_reads = sorted((float(value) for value in reads), reverse=True)
     truncated = [value for value in sorted_reads if value > min_reads]
@@ -94,16 +98,20 @@ def auto_reads_threshold(
             "auto reads threshold needs at least 2 spots with reads > "
             f"{min_reads:g} (got {len(truncated)})"
         )
-    exclude_start = int(math.floor(len(truncated) * exclude_top_fraction))
-    if len(truncated) - exclude_start < 2:
+    n_truncated = len(truncated)
+    exclude_start = int(math.floor(n_truncated * exclude_top_fraction))
+    exclude_end = n_truncated - int(math.floor(n_truncated * exclude_bottom_fraction))
+    if exclude_end - exclude_start < 2:
         raise ValueError(
             "auto reads threshold needs at least 2 searchable spots after "
-            f"excluding top {exclude_top_fraction:.0%} "
-            f"(n={len(truncated)}, exclude_start={exclude_start})"
+            f"excluding top {exclude_top_fraction:.0%} and bottom "
+            f"{exclude_bottom_fraction:.0%} "
+            f"(n={n_truncated}, exclude_start={exclude_start}, "
+            f"exclude_end={exclude_end})"
         )
     log_reads = [math.log10(value + 1.0) for value in truncated]
-    window = smooth_window if smooth_window < len(truncated) else (
-        len(truncated) if len(truncated) % 2 == 1 else max(1, len(truncated) - 1)
+    window = smooth_window if smooth_window < n_truncated else (
+        n_truncated if n_truncated % 2 == 1 else max(1, n_truncated - 1)
     )
     if window % 2 == 0:
         window = max(1, window - 1)
@@ -119,7 +127,7 @@ def auto_reads_threshold(
         else:
             slopes.append(0.5 * (smoothed[index + 1] - smoothed[index - 1]))
 
-    search = range(exclude_start, len(slopes))
+    search = range(exclude_start, exclude_end)
     min_slope = min(slopes[index] for index in search)
     slope_cutoff = half_steep_fraction * min_slope
     candidates = [index for index in search if slopes[index] <= slope_cutoff]
@@ -130,6 +138,7 @@ def auto_reads_threshold(
         threshold=float(truncated[knee_index]),
         knee_rank=knee_index + 1,
         exclude_start=exclude_start,
+        exclude_end=exclude_end,
     )
 
 
@@ -152,8 +161,8 @@ def parse_args() -> argparse.Namespace:
             "HQ spot threshold for per_spot_read_counts.tsv reads. "
             "Use 'auto' (default) to pick the leftmost half-steep drop on "
             "barcode rank vs log10(reads+1) after dropping reads <= 10 and "
-            "excluding the top 5%% of ranks, or a positive number for a "
-            "manual cutoff."
+            "excluding the top 5%% and bottom 10%% of ranks, or a positive "
+            "number for a manual cutoff."
         ),
     )
     parser.add_argument(
@@ -597,6 +606,7 @@ def main() -> int:
     resolved_threshold: float | None = None
     knee_rank: int | None = None
     exclude_start: int | None = None
+    exclude_end: int | None = None
     if threshold_mode == "manual":
         resolved_threshold = manual_threshold
     elif read_counts_preview:
@@ -605,6 +615,7 @@ def main() -> int:
             resolved_threshold = auto_knee.threshold
             knee_rank = auto_knee.knee_rank
             exclude_start = auto_knee.exclude_start
+            exclude_end = auto_knee.exclude_end
         else:
             resolved_threshold = resolve_reads_threshold(
                 threshold_mode, manual_threshold, read_counts_preview
@@ -622,6 +633,8 @@ def main() -> int:
         print(f"[saturation] knee_rank={knee_rank}")
     if exclude_start is not None:
         print(f"[saturation] exclude_start={exclude_start}")
+    if exclude_end is not None:
+        print(f"[saturation] exclude_end={exclude_end}")
     print(f"[saturation] linear_r2_threshold={args.linear_r2_threshold}")
     print(f"[saturation] fastp_json={fastp_json_path}")
     print(
