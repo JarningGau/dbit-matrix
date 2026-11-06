@@ -63,6 +63,14 @@ def parse_args(
     parser.add_argument("--force-recount", action="store_true")
     parser.add_argument("--out-dir", help="Host output directory (coverage/host).")
     parser.add_argument("--output", help="Aggregate CG/CH stem path without suffix.")
+    parser.add_argument(
+        "--mito-chromosomes",
+        default="chrM",
+        help=(
+            "Comma-separated mitochondrial contigs for host_bam_funnel.json "
+            "(host mode). Default: chrM."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

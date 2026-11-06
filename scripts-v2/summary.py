@@ -824,6 +824,104 @@ def summarize_per_spot(
     return rows
 
 
+METH_STATS_JOIN_FIELDS = (
+    "mean_5mCG",
+    "mean_5mCH",
+    "mean_5mCA",
+    "mean_5mCC",
+    "mean_5mCT",
+    "cpg_site_count",
+    "ch_site_count",
+    "ca_site_count",
+    "cc_site_count",
+    "ct_site_count",
+)
+
+
+def load_host_bam_funnel(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    required = (
+        "host_mapped_reads",
+        "host_valid_reads",
+        "host_valid_reads_mito",
+        "host_valid_reads_nuclear",
+    )
+    for key in required:
+        if key not in payload:
+            return None
+        try:
+            payload[key] = int(payload[key])
+        except (TypeError, ValueError):
+            return None
+    return payload
+
+
+def load_per_spot_meth_stats(path: Path) -> dict[str, dict[str, str]] | None:
+    if not path.is_file():
+        return None
+    rows: dict[str, dict[str, str]] = {}
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if reader.fieldnames is None:
+            return None
+        required = {"barcode", *METH_STATS_JOIN_FIELDS}
+        if required - {name.strip() for name in reader.fieldnames}:
+            return None
+        for row in reader:
+            barcode = (row.get("barcode") or "").strip().upper()
+            if not barcode:
+                continue
+            rows[barcode] = {
+                field: (row.get(field) or "").strip() or "NA"
+                for field in ("barcode", *METH_STATS_JOIN_FIELDS)
+            }
+            rows[barcode]["barcode"] = barcode
+    if not rows:
+        return None
+    return rows
+
+
+def load_summary_sidecars(
+    funnel_path: Path,
+    meth_stats_path: Path,
+) -> tuple[dict[str, object], dict[str, dict[str, str]]] | None:
+    funnel = load_host_bam_funnel(funnel_path)
+    meth_rows = load_per_spot_meth_stats(meth_stats_path)
+    if funnel is None or meth_rows is None:
+        return None
+    return funnel, meth_rows
+
+
+def per_spot_rows_from_meth_stats(
+    meth_rows: dict[str, dict[str, str]],
+    read_counts: dict[str, str],
+    positions: dict[str, tuple[str, str]],
+) -> list[dict[str, str]]:
+    all_cbs = sorted(set(meth_rows.keys()) | set(read_counts.keys()))
+    rows: list[dict[str, str]] = []
+    for cb in all_cbs:
+        stats = meth_rows.get(cb, {})
+        array_row, array_col = positions.get(cb, ("NA", "NA"))
+        reads = read_counts.get(cb, "NA") or "NA"
+        row = {
+            "barcode": summary_barcode_from_cb(cb),
+            "array_row": array_row if array_row else "NA",
+            "array_col": array_col if array_col else "NA",
+            "reads": reads,
+        }
+        for field in METH_STATS_JOIN_FIELDS:
+            row[field] = stats.get(field, "NA") or "NA"
+        rows.append(row)
+    return rows
+
+
 def build_sample_summary_row(
     sample_id: str,
     per_spot_rows: list[dict[str, str]],
@@ -1138,6 +1236,8 @@ def main() -> int:
     coverage_dir = work_path / "coverage"
     host_cov_paths = sorted((coverage_dir / "host").rglob("*.CG.cov"))
     read_counts_path = work_path / "coverage" / "per_spot_read_counts.tsv"
+    host_bam_funnel_path = coverage_dir / "host_bam_funnel.json"
+    per_spot_meth_stats_path = coverage_dir / "per_spot_meth_stats.tsv"
     fastp_json_path = work_path / "shard_fastq" / "fastp.json"
     fastp_json_legacy_path = work_path / "fastp.json"
     demux_dir = work_path / "demux"
@@ -1174,6 +1274,8 @@ def main() -> int:
     print(f"[summary] work_path={work_path}")
     print(f"[summary] host_spot_cov_count={len(host_cov_paths)}")
     print(f"[summary] reads_table={read_counts_path}")
+    print(f"[summary] host_bam_funnel={host_bam_funnel_path}")
+    print(f"[summary] per_spot_meth_stats={per_spot_meth_stats_path}")
     print(f"[summary] barcode_positions={args.barcode_positions}")
     print(f"[summary] fastp_json={fastp_json_path}")
     print(f"[summary] fastp_json_legacy={fastp_json_legacy_path}")
@@ -1214,7 +1316,29 @@ def main() -> int:
 
     positions = read_barcode_positions(args.barcode_positions)
     read_counts = read_per_spot_reads(read_counts_path)
-    per_spot_rows = summarize_per_spot(host_cov_paths, read_counts, positions)
+    sidecars = load_summary_sidecars(host_bam_funnel_path, per_spot_meth_stats_path)
+    if sidecars is not None:
+        funnel, meth_rows = sidecars
+        print("[summary] sidecar_path=fast")
+        per_spot_rows = per_spot_rows_from_meth_stats(
+            meth_rows, read_counts, positions
+        )
+        host_mapped_reads = to_optional_int(funnel.get("host_mapped_reads"))
+        host_valid_reads = to_optional_int(funnel.get("host_valid_reads"))
+        host_valid_reads_mito = to_optional_int(funnel.get("host_valid_reads_mito"))
+        host_valid_reads_nuclear = to_optional_int(
+            funnel.get("host_valid_reads_nuclear")
+        )
+    else:
+        print("[summary] warning=missing_sidecars; using_slow_path")
+        print("[summary] sidecar_path=slow")
+        per_spot_rows = summarize_per_spot(host_cov_paths, read_counts, positions)
+        (
+            host_mapped_reads,
+            host_valid_reads,
+            host_valid_reads_mito,
+            host_valid_reads_nuclear,
+        ) = count_host_bam_metrics(host_bam_path, mito_chromosomes)
     for row in per_spot_rows:
         row["is_HQ_spot"] = format_is_hq_spot(row.get("reads"), reads_threshold)
     write_tsv(per_spot_out, list(PER_SPOT_FIELDS), per_spot_rows)
@@ -1226,12 +1350,6 @@ def main() -> int:
         raw_reads = parse_fastp_raw_reads(fastp_json_legacy_path)
     barcoded_reads = collect_barcoded_reads(demux_dir)
     methylated_linker_qc = collect_methylated_linker_qc(demux_dir)
-    (
-        host_mapped_reads,
-        host_valid_reads,
-        host_valid_reads_mito,
-        host_valid_reads_nuclear,
-    ) = count_host_bam_metrics(host_bam_path, mito_chromosomes)
     spike_mapped_reads = {
         spike_name: count_mapped_reads(spike_bam_paths[spike_name])
         for spike_name in spike_names

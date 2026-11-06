@@ -269,6 +269,7 @@ def build_caller_command(
             command.append("--force-recount")
         if args.spot_roster:
             command.extend(["--spot-roster", str(args.spot_roster)])
+        command.extend(["--mito-chromosomes", str(args.mito_chromosomes)])
     else:
         assert output is not None
         command.extend(["--output", str(output)])

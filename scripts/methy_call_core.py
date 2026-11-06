@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import multiprocessing
 import os
 import shutil
@@ -23,16 +24,34 @@ from scripts.split_bams import normalize_cb_value, parse_cb_value, read_barcodes
 BarcodeMap = Dict[str, int]
 CgCounts = Dict[str, Dict[int, List[int]]]
 ChCounts = Dict[str, Dict[int, List[object]]]
+HostBamFunnel = Dict[str, object]
 SMOKE_SPOT_LIMIT = 16
 
 TOP_FLAGS: Set[int] = {99, 147}
 BOT_FLAGS: Set[int] = {83, 163}
 PAIRED_FLAGS: Set[int] = TOP_FLAGS | BOT_FLAGS
+# Same proper-pair flags as scripts/summary.py host_valid_reads.
+SUMMARY_VALID_FLAGS: Set[int] = PAIRED_FLAGS
 CH_FORWARD_CONTEXTS: Set[str] = {"CA", "CC", "CT"}
 CH_REVERSE_MAP: Dict[str, str] = {"T": "CA", "G": "CC", "A": "CT"}
 CH_REVERSE_NEIGHBOR: Dict[str, str] = {"CA": "T", "CC": "G", "CT": "A"}
 HOST_CG_FIELDS = 7
 HOST_CH_FIELDS = 9
+# Summary-compatible MAPQ gate: mapping_quality <= 10 excluded.
+SUMMARY_MIN_MAPPING_QUALITY = 10
+METH_STATS_FIELDS = [
+    "barcode",
+    "mean_5mCG",
+    "mean_5mCH",
+    "mean_5mCA",
+    "mean_5mCC",
+    "mean_5mCT",
+    "cpg_site_count",
+    "ch_site_count",
+    "ca_site_count",
+    "cc_site_count",
+    "ct_site_count",
+]
 
 WORKER_CHROMOSOME_SEQUENCE: Optional[str] = None
 
@@ -117,6 +136,117 @@ def count_records_by_spot(
             continue
         counts[spot] = counts.get(spot, 0) + 1
     return counts
+
+
+def empty_host_bam_funnel(mito_chromosomes: frozenset[str]) -> HostBamFunnel:
+    return {
+        "host_mapped_reads": 0,
+        "host_valid_reads": 0,
+        "host_valid_reads_mito": 0,
+        "host_valid_reads_nuclear": 0,
+        "mito_chromosomes": sorted(mito_chromosomes),
+    }
+
+
+def is_summary_confident_mapped(record: object) -> bool:
+    """Match scripts/summary.py mapped filter (MAPQ>10, NH absent or ==1)."""
+    if bool(getattr(record, "is_unmapped", False)):
+        return False
+    mapping_quality = int(getattr(record, "mapping_quality", 0) or 0)
+    if mapping_quality <= SUMMARY_MIN_MAPPING_QUALITY:
+        return False
+    try:
+        nh = record.get_tag("NH")  # type: ignore[attr-defined]
+        if isinstance(nh, int) and nh > 1:
+            return False
+    except (KeyError, AttributeError):
+        pass
+    return True
+
+
+def accumulate_host_bam_funnel(
+    record: object,
+    mito_chromosomes: frozenset[str],
+    funnel: HostBamFunnel,
+) -> None:
+    if not is_summary_confident_mapped(record):
+        return
+    funnel["host_mapped_reads"] = int(funnel["host_mapped_reads"]) + 1
+    flag = int(getattr(record, "flag", 0) or 0)
+    if flag not in SUMMARY_VALID_FLAGS:
+        return
+    funnel["host_valid_reads"] = int(funnel["host_valid_reads"]) + 1
+    reference_name = getattr(record, "reference_name", None)
+    if isinstance(reference_name, str) and reference_name in mito_chromosomes:
+        funnel["host_valid_reads_mito"] = int(funnel["host_valid_reads_mito"]) + 1
+    else:
+        funnel["host_valid_reads_nuclear"] = int(funnel["host_valid_reads_nuclear"]) + 1
+
+
+def scan_host_bam_for_counts_and_funnel(
+    records: Iterable[object],
+    cb_tag: str,
+    barcode_to_index: BarcodeMap,
+    barcode_len: int,
+    mito_chromosomes: frozenset[str],
+) -> Tuple[Dict[str, int], HostBamFunnel]:
+    """Single BAM pass: per-spot CB counts plus summary host funnel metrics."""
+    counts: Dict[str, int] = {}
+    funnel = empty_host_bam_funnel(mito_chromosomes)
+    for record in records:
+        accumulate_host_bam_funnel(record, mito_chromosomes, funnel)
+        try:
+            if hasattr(record, "has_tag") and not record.has_tag(cb_tag):
+                continue
+            cb = record.get_tag(cb_tag)
+        except KeyError:
+            continue
+        if not isinstance(cb, str):
+            cb = str(cb)
+        spot = spot_id_from_cb(cb, barcode_to_index, barcode_len)
+        if spot is None:
+            continue
+        counts[spot] = counts.get(spot, 0) + 1
+    return counts, funnel
+
+
+def write_host_bam_funnel_json(path: Path, funnel: HostBamFunnel) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(funnel, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_host_bam_funnel_json(path: Path) -> HostBamFunnel | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    required = (
+        "host_mapped_reads",
+        "host_valid_reads",
+        "host_valid_reads_mito",
+        "host_valid_reads_nuclear",
+    )
+    for key in required:
+        if key not in payload:
+            return None
+        try:
+            payload[key] = int(payload[key])
+        except (TypeError, ValueError):
+            return None
+    mito = payload.get("mito_chromosomes")
+    if mito is None:
+        payload["mito_chromosomes"] = []
+    elif isinstance(mito, list):
+        payload["mito_chromosomes"] = [str(item) for item in mito]
+    else:
+        return None
+    return payload
 
 
 def write_counts_tsv(path: Path, counts: Dict[str, int]) -> None:
@@ -316,11 +446,220 @@ def resolved_counts_path(args: argparse.Namespace) -> Optional[Path]:
     return None
 
 
+def resolved_funnel_path(args: argparse.Namespace) -> Optional[Path]:
+    counts_path = resolved_counts_path(args)
+    if counts_path is None:
+        return None
+    return counts_path.parent / "host_bam_funnel.json"
+
+
+def resolved_meth_stats_path(args: argparse.Namespace) -> Optional[Path]:
+    counts_path = resolved_counts_path(args)
+    if counts_path is None:
+        return None
+    return counts_path.parent / "per_spot_meth_stats.tsv"
+
+
+def parse_mito_chromosomes(chromosome_csv: str) -> frozenset[str]:
+    chromosomes = [item.strip() for item in chromosome_csv.split(",") if item.strip()]
+    if not chromosomes:
+        raise ValueError("mito chromosome list is empty")
+    return frozenset(chromosomes)
+
+
 def host_cov_path(out_dir: Path, spot_id: str, suffix: str) -> Path:
     """Host cov path: coverage/host/<first3>/<CB>.{CG,CH}.cov."""
     if len(spot_id) < 3:
         raise ValueError(f"CB spot id too short for prefix subdir: {spot_id}")
     return out_dir / spot_id[:3] / f"{spot_id}.{suffix}.cov"
+
+
+def new_meth_stats_accumulator() -> Dict[str, Dict[str, float | int]]:
+    """Per-spot running sums/counts for summary-compatible meth means."""
+    return {}
+
+
+def _spot_meth_bucket(acc: Dict[str, Dict[str, float | int]], spot_id: str) -> Dict[str, float | int]:
+    bucket = acc.get(spot_id)
+    if bucket is None:
+        bucket = {
+            "cg_sum": 0.0,
+            "cg_count": 0,
+            "ch_sum": 0.0,
+            "ch_count": 0,
+            "ca_sum": 0.0,
+            "ca_count": 0,
+            "cc_sum": 0.0,
+            "cc_count": 0,
+            "ct_sum": 0.0,
+            "ct_count": 0,
+        }
+        acc[spot_id] = bucket
+    return bucket
+
+
+def accumulate_cov_line_for_meth_stats(
+    acc: Dict[str, Dict[str, float | int]],
+    suffix: str,
+    fields: List[str],
+    spot_id: Optional[str] = None,
+) -> None:
+    """Accumulate one part/cov line. Part lines include trailing spot id."""
+    if suffix == "CG":
+        min_fields = 6
+        spot_idx = 6
+        context_idx: Optional[int] = None
+    elif suffix == "CH":
+        min_fields = 6
+        spot_idx = 8
+        context_idx = 6
+    else:
+        return
+    if spot_id is None:
+        if len(fields) <= spot_idx:
+            return
+        spot_id = fields[spot_idx]
+    if len(fields) < min_fields:
+        return
+    try:
+        methylation = float(fields[3])
+        methylated_count = int(fields[4])
+        unmethylated_count = int(fields[5])
+    except ValueError:
+        return
+    if methylated_count + unmethylated_count <= 0:
+        return
+    bucket = _spot_meth_bucket(acc, spot_id)
+    if suffix == "CG":
+        bucket["cg_sum"] = float(bucket["cg_sum"]) + methylation
+        bucket["cg_count"] = int(bucket["cg_count"]) + 1
+        return
+    bucket["ch_sum"] = float(bucket["ch_sum"]) + methylation
+    bucket["ch_count"] = int(bucket["ch_count"]) + 1
+    if context_idx is None or len(fields) <= context_idx:
+        return
+    context = fields[context_idx].strip().upper()
+    if context == "CA":
+        bucket["ca_sum"] = float(bucket["ca_sum"]) + methylation
+        bucket["ca_count"] = int(bucket["ca_count"]) + 1
+    elif context == "CC":
+        bucket["cc_sum"] = float(bucket["cc_sum"]) + methylation
+        bucket["cc_count"] = int(bucket["cc_count"]) + 1
+    elif context == "CT":
+        bucket["ct_sum"] = float(bucket["ct_sum"]) + methylation
+        bucket["ct_count"] = int(bucket["ct_count"]) + 1
+
+
+def _format_mean_count(total: float, count: int) -> Tuple[str, str]:
+    if count <= 0:
+        return "NA", "NA"
+    return f"{total / count:.2f}", str(count)
+
+
+def finalize_meth_stats_rows(
+    acc: Dict[str, Dict[str, float | int]],
+    roster: List[str],
+) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for spot_id in roster:
+        bucket = acc.get(spot_id)
+        if bucket is None:
+            rows.append(
+                {
+                    "barcode": spot_id,
+                    "mean_5mCG": "NA",
+                    "mean_5mCH": "NA",
+                    "mean_5mCA": "NA",
+                    "mean_5mCC": "NA",
+                    "mean_5mCT": "NA",
+                    "cpg_site_count": "NA",
+                    "ch_site_count": "NA",
+                    "ca_site_count": "NA",
+                    "cc_site_count": "NA",
+                    "ct_site_count": "NA",
+                }
+            )
+            continue
+        mean_cg, cpg_count = _format_mean_count(
+            float(bucket["cg_sum"]), int(bucket["cg_count"])
+        )
+        mean_ch, ch_count = _format_mean_count(
+            float(bucket["ch_sum"]), int(bucket["ch_count"])
+        )
+        mean_ca, ca_count = _format_mean_count(
+            float(bucket["ca_sum"]), int(bucket["ca_count"])
+        )
+        mean_cc, cc_count = _format_mean_count(
+            float(bucket["cc_sum"]), int(bucket["cc_count"])
+        )
+        mean_ct, ct_count = _format_mean_count(
+            float(bucket["ct_sum"]), int(bucket["ct_count"])
+        )
+        rows.append(
+            {
+                "barcode": spot_id,
+                "mean_5mCG": mean_cg,
+                "mean_5mCH": mean_ch,
+                "mean_5mCA": mean_ca,
+                "mean_5mCC": mean_cc,
+                "mean_5mCT": mean_ct,
+                "cpg_site_count": cpg_count,
+                "ch_site_count": ch_count,
+                "ca_site_count": ca_count,
+                "cc_site_count": cc_count,
+                "ct_site_count": ct_count,
+            }
+        )
+    return rows
+
+
+def write_per_spot_meth_stats_tsv(path: Path, rows: List[Dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as handle:
+        handle.write("\t".join(METH_STATS_FIELDS) + "\n")
+        for row in rows:
+            handle.write("\t".join(row.get(field, "NA") for field in METH_STATS_FIELDS) + "\n")
+    tmp.replace(path)
+
+
+def load_per_spot_meth_stats_tsv(path: Path) -> Dict[str, Dict[str, str]]:
+    if not path.is_file():
+        return {}
+    rows: Dict[str, Dict[str, str]] = {}
+    with path.open(encoding="utf-8") as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        if not header or header[0] != "barcode":
+            return {}
+        for line in handle:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < len(METH_STATS_FIELDS):
+                continue
+            row = {
+                field: fields[idx] if idx < len(fields) else "NA"
+                for idx, field in enumerate(METH_STATS_FIELDS)
+            }
+            barcode = row["barcode"].strip().upper()
+            if barcode:
+                rows[barcode] = row
+    return rows
+
+
+def parse_existing_cov_into_meth_stats(
+    acc: Dict[str, Dict[str, float | int]],
+    cov_path: Path,
+    suffix: str,
+    spot_id: str,
+) -> None:
+    if not cov_path.is_file():
+        return
+    with cov_path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            fields = line.split("\t")
+            accumulate_cov_line_for_meth_stats(acc, suffix, fields, spot_id=spot_id)
 
 
 def format_cg_line(chrom: str, pos: int, meth: int, unmeth: int) -> str:
@@ -662,6 +1001,7 @@ def stream_sorted_parts(
     out_dir: Path,
     allowed_spots: Set[str],
     skip_spots: Set[str],
+    meth_acc: Optional[Dict[str, Dict[str, float | int]]] = None,
 ) -> None:
     if not part_path.is_file() or part_path.stat().st_size == 0:
         return
@@ -701,6 +1041,8 @@ def stream_sorted_parts(
                     current_handle = current_temp.open("w", encoding="utf-8")
                 assert current_handle is not None
                 current_handle.write("\t".join(fields[:-1]) + "\n")
+                if meth_acc is not None:
+                    accumulate_cov_line_for_meth_stats(meth_acc, suffix, fields)
         close_current()
     finally:
         if current_handle is not None:
@@ -716,6 +1058,62 @@ def stream_sorted_parts(
             pass
 
 
+def merge_skip_spot_meth_stats(
+    acc: Dict[str, Dict[str, float | int]],
+    out_dir: Path,
+    skip_spots: Set[str],
+    context_mode: str,
+    prior_rows: Dict[str, Dict[str, str]],
+) -> None:
+    """Fill accumulator for skipped spots from prior TSV or existing cov only."""
+    for spot_id in sorted(skip_spots):
+        if spot_id in acc:
+            continue
+        prior = prior_rows.get(spot_id.upper()) or prior_rows.get(spot_id)
+        if prior is not None:
+            # Rehydrate prior finalized means into accumulator via synthetic counts.
+            # Prefer re-parse only when prior row is absent (below).
+            _rehydrate_meth_stats_from_row(acc, prior)
+            continue
+        if context_mode in {"cg", "both"}:
+            parse_existing_cov_into_meth_stats(
+                acc, host_cov_path(out_dir, spot_id, "CG"), "CG", spot_id
+            )
+        if context_mode in {"ch", "both"}:
+            parse_existing_cov_into_meth_stats(
+                acc, host_cov_path(out_dir, spot_id, "CH"), "CH", spot_id
+            )
+
+
+def _rehydrate_meth_stats_from_row(
+    acc: Dict[str, Dict[str, float | int]],
+    row: Dict[str, str],
+) -> None:
+    spot_id = row["barcode"]
+    bucket = _spot_meth_bucket(acc, spot_id)
+
+    def apply(mean_key: str, count_key: str, sum_name: str, count_name: str) -> None:
+        mean_text = row.get(mean_key, "NA")
+        count_text = row.get(count_key, "NA")
+        if mean_text == "NA" or count_text == "NA":
+            return
+        try:
+            mean_val = float(mean_text)
+            count_val = int(count_text)
+        except ValueError:
+            return
+        if count_val <= 0:
+            return
+        bucket[sum_name] = mean_val * count_val
+        bucket[count_name] = count_val
+
+    apply("mean_5mCG", "cpg_site_count", "cg_sum", "cg_count")
+    apply("mean_5mCH", "ch_site_count", "ch_sum", "ch_count")
+    apply("mean_5mCA", "ca_site_count", "ca_sum", "ca_count")
+    apply("mean_5mCC", "cc_site_count", "cc_sum", "cc_count")
+    apply("mean_5mCT", "ct_site_count", "ct_sum", "ct_count")
+
+
 def shuffle_host_parts(
     combined_cg: Path,
     combined_ch: Optional[Path],
@@ -723,15 +1121,29 @@ def shuffle_host_parts(
     roster: List[str],
     skip_spots: Set[str],
     context_mode: str,
+    meth_stats_path: Optional[Path] = None,
 ) -> None:
     allowed_spots = set(roster)
+    meth_acc = new_meth_stats_accumulator()
     if context_mode in {"cg", "both"}:
         stream_sorted_parts(
-            combined_cg, "CG", HOST_CG_FIELDS, out_dir, allowed_spots, skip_spots
+            combined_cg,
+            "CG",
+            HOST_CG_FIELDS,
+            out_dir,
+            allowed_spots,
+            skip_spots,
+            meth_acc=meth_acc,
         )
     if context_mode in {"ch", "both"} and combined_ch is not None:
         stream_sorted_parts(
-            combined_ch, "CH", HOST_CH_FIELDS, out_dir, allowed_spots, skip_spots
+            combined_ch,
+            "CH",
+            HOST_CH_FIELDS,
+            out_dir,
+            allowed_spots,
+            skip_spots,
+            meth_acc=meth_acc,
         )
     suffixes = []
     if context_mode in {"cg", "both"}:
@@ -745,6 +1157,13 @@ def shuffle_host_parts(
             path = host_cov_path(out_dir, spot_id, suffix)
             if not path.exists():
                 write_empty_cov(path)
+    if meth_stats_path is not None:
+        prior_rows = load_per_spot_meth_stats_tsv(meth_stats_path)
+        merge_skip_spot_meth_stats(
+            meth_acc, out_dir, skip_spots, context_mode, prior_rows
+        )
+        rows = finalize_meth_stats_rows(meth_acc, roster)
+        write_per_spot_meth_stats_tsv(meth_stats_path, rows)
 
 
 def process_chromosome(
@@ -879,6 +1298,12 @@ def print_resolved_parameters(args: argparse.Namespace, log_prefix: str) -> None
         print(f"[{log_prefix}] out_dir={args.out_dir}")
         print(f"[{log_prefix}] smoke={int(bool(args.smoke))}")
         print(f"[{log_prefix}] counts_tsv={resolved_counts_path(args)}")
+        print(f"[{log_prefix}] host_bam_funnel={resolved_funnel_path(args)}")
+        print(f"[{log_prefix}] per_spot_meth_stats={resolved_meth_stats_path(args)}")
+        print(
+            f"[{log_prefix}] mito_chromosomes="
+            f"{getattr(args, 'mito_chromosomes', 'chrM')}"
+        )
     else:
         print(f"[{log_prefix}] output={args.output}")
 
@@ -924,18 +1349,30 @@ def run_caller(
         try:
             _, barcode_to_index, barcode_len = load_barcode_whitelist(args.barcodes)
             counts_path = resolved_counts_path(args)
+            funnel_path = resolved_funnel_path(args)
             assert counts_path is not None
-            if counts_path.is_file() and not args.force_recount:
+            assert funnel_path is not None
+            mito_csv = getattr(args, "mito_chromosomes", None) or "chrM"
+            mito_chromosomes = parse_mito_chromosomes(str(mito_csv))
+            counts_ready = counts_path.is_file() and not args.force_recount
+            funnel_ready = (
+                load_host_bam_funnel_json(funnel_path) is not None
+                and not args.force_recount
+            )
+            if counts_ready and funnel_ready:
                 counts = counts_dict_from_rows(load_counts_tsv(counts_path))
             else:
+                # One BAM pass refreshes counts and/or funnel together.
                 with pysam.AlignmentFile(args.bam, "rb") as bam_in:
-                    counts = count_records_by_spot(
+                    counts, funnel = scan_host_bam_for_counts_and_funnel(
                         bam_in.fetch(until_eof=True),
                         args.cb_tag,
                         barcode_to_index,
                         barcode_len,
+                        mito_chromosomes,
                     )
                 write_counts_tsv(counts_path, counts)
+                write_host_bam_funnel_json(funnel_path, funnel)
             roster_ids = (
                 load_roster_ids(Path(args.spot_roster)) if args.spot_roster else None
             )
@@ -997,6 +1434,7 @@ def run_caller(
                 roster,
                 skip_spots,
                 args.context_mode,
+                meth_stats_path=resolved_meth_stats_path(args),
             )
         else:
             for suffix, temp_path in combined_temps.items():

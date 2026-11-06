@@ -84,7 +84,7 @@ Summary only; [`docs/developers/contracts.md`](docs/developers/contracts.md) is 
   - host: `pooled/pooled.host.sorted.bam` (coordinate-sorted, indexed; no `-t CB`)
   - spike-in: `pooled/pooled.<spike_name>.sorted.bam` (mapped reads only)
 - Intermediate CB is concatenated `<bcB><bcA>` (no `+`); host cov is `coverage/host/<cb[0:3]>/<cb>.CG.cov`.
-- `call` writes `coverage/per_spot_read_counts.tsv` (`barcode`, `reads`). Smoke is `call_smoke` (top 16 CBs by reads).
+- `call` writes `coverage/per_spot_read_counts.tsv` (`barcode`, `reads`), plus summary sidecars `coverage/host_bam_funnel.json` and `coverage/per_spot_meth_stats.tsv`. Smoke is `call_smoke` (top 16 CBs by reads).
 - `split_barcodes` is the CB whitelist for `call`, not a split-stage input.
 - Summary uses `barcode_positions` for `array_row`/`array_col`; summary `barcode` is `<bcB><bcA>`.
 

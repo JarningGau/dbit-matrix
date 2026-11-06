@@ -149,6 +149,8 @@ Inputs:
 Outputs:
 
 - `coverage/per_spot_read_counts.tsv` (`barcode`, `reads`; `barcode` = CB `<bcB><bcA>`)
+- `coverage/host_bam_funnel.json` (host mapped/valid/mito/nuclear counts for summary)
+- `coverage/per_spot_meth_stats.tsv` (per-spot CG/CH/CA/CC/CT means and site counts for summary)
 - `coverage/host/<cb[0:3]>/<cb>.CG.cov`
 - `coverage/host/<cb[0:3]>/<cb>.CH.cov` (optional)
 - `coverage/host_mito.CG.cov`
@@ -162,7 +164,9 @@ Contract:
 - host calling does not read per-spot BAMs
 - host outputs are per-spot; spot identity is the BAM `CB` tag (`<bcB><bcA>`)
 - host cov paths use the first three bases of CB as the subdirectory (64 possible prefix dirs)
-- `call` writes `coverage/per_spot_read_counts.tsv` from a full BAM scan of whitelist-assigned reads
+- `call` writes `coverage/per_spot_read_counts.tsv` and `coverage/host_bam_funnel.json` from the **same** full BAM pass of whitelist-assigned reads (funnel uses summary filters: MAPQ>10, `NH` absent or `==1`, proper-pair flags `{99,147,83,163}`, mito contigs from `--mito-chromosomes` / `call_mito_chromosomes`)
+- if counts TSV is reused without `--force-recount` but funnel JSON is missing/invalid, host `call` rescans once and refreshes both artifacts together
+- `call` writes `coverage/per_spot_meth_stats.tsv` while shuffling host per-spot cov lines (same unweighted site-`%` semantics as summary); skipped existing spots merge prior stats rows or parse only those skipped cov files
 - smoke is `call_smoke`: write `.cov` only for the 16 spots with highest `reads` (ties broken by CB ascending)
 - `host_mito` aggregate does not reuse the mbias subsampled BAM
 - `host_mito.CG.cov` is a single aggregate output
@@ -226,14 +230,15 @@ Purpose: generate per-spot and per-sample reports.
 
 Inputs include:
 
-- host coverage
+- host coverage (slow-path fallback only when sidecars are missing)
+- preferred host sidecars from `call`: `coverage/host_bam_funnel.json`, `coverage/per_spot_meth_stats.tsv`
 - host mitochondrial coverage
 - spike-in coverage
 - per-spot read counts (`coverage/per_spot_read_counts.tsv`, written by `call`)
 - `barcode_positions` TSV (`barcode`, `array_row`, `array_col`) where `barcode` = `<bcB><bcA>`
 - fastp statistics
 - demux statistics
-- pooled BAMs
+- pooled BAMs (host BAM scan is slow-path fallback; spike BAMs still scanned for `{spike}_mapped_reads`)
 - saturation summary
 - optional `qc/hmc_spike/summary.json` (when `hmc_spike` ran)
 
@@ -257,8 +262,9 @@ Contract:
 - Non-integer numeric fields in both TSV outputs use two decimal places (`.2f`); integer counts stay unpadded integers; rate columns with a `%` suffix keep `NN.NN%`
 - `per_spot_summary.tsv` fixed columns (left to right): `barcode`, `array_row`, `array_col`, `reads`, `is_HQ_spot`, `mean_5mCG`, `mean_5mCH`, `mean_5mCA`, `mean_5mCC`, `mean_5mCT`, `cpg_site_count`, `ch_site_count`, `ca_site_count`, `cc_site_count`, `ct_site_count`
 - `is_HQ_spot` is `1` when `reads > reads_threshold` from `qc/saturation/saturation_summary.tsv`, else `0`; writes `NA` when `reads_threshold` is missing or `reads` is unparsable
-- `mean_5mCG` / `mean_5mCH` are unweighted means of site `%` from per-spot `*.CG.cov` / `*.CH.cov`; missing or empty cov writes `NA` for the matching rate and site count
+- `mean_5mCG` / `mean_5mCH` are unweighted means of site `%` from per-spot `*.CG.cov` / `*.CH.cov` (or equivalent values from `coverage/per_spot_meth_stats.tsv` on the fast path); missing or empty cov writes `NA` for the matching rate and site count
 - `mean_5mCA` / `mean_5mCC` / `mean_5mCT` are unweighted means of site `%` from per-spot `*.CH.cov` rows whose `context` column is `CA`, `CC`, or `CT`; a context with no covered sites writes `NA` for that rate and site count. Rows without a recognized context still count toward `mean_5mCH` only
+- when both `coverage/host_bam_funnel.json` and `coverage/per_spot_meth_stats.tsv` exist and parse cleanly, summary uses them for host funnel metrics and per-spot methylation columns (no host BAM scan; no host `*.CG.cov`/`*.CH.cov` walk). If either sidecar is missing/invalid, summary logs `warning=missing_sidecars; using_slow_path` and falls back to the previous full host BAM + host cov scan
 - summary `barcode` is `<bcB><bcA>` (same CB as cov stem / counts; no `host` suffix)
 - `array_row` / `array_col` are copied from `barcode_positions` by joining on CB; missing positions write `NA`
 - heatmaps plot metrics on `array_col` (x) and `array_row` (y), 0-based inclusive
