@@ -810,6 +810,7 @@ def build_saturation_command(args: argparse.Namespace, sample_work: Path) -> str
 def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
     """Build scripts/summary.py invocation (spike names from spike_in_index)."""
     script_path = Path(args.summary_script)
+    jobs = max(1, int(getattr(args, "slurm_cpus_per_task", 1) or 1))
     command = [
         sys.executable,
         str(script_path),
@@ -819,6 +820,8 @@ def build_summary_command(args: argparse.Namespace, sample_work: Path) -> str:
         args.call_mito_chromosomes,
         "--barcode-positions",
         args.barcode_positions,
+        "--jobs",
+        str(jobs),
     ]
     for spike_name in parse_spike_names(args.spike_in_index):
         command.extend(["--spike-in-name", spike_name])
@@ -2661,6 +2664,7 @@ def main() -> int:
             spike_in_index=settings["spike_in_index"],
             call_mito_chromosomes=settings["call_mito_chromosomes"],
             barcode_positions=settings["barcode_positions"],
+            slurm_cpus_per_task=settings["slurm_cpus_per_task"],
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":

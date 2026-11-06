@@ -253,7 +253,7 @@ Slurm resources should remain stage-specific. Examples:
 - `slurm.call.spike`
 - `slurm.saturation`
 - `slurm.hmc_spike` (TAPS / TAPS v2 when enabled); `cpus_per_task` is passed to `hmc_spike.py --workers` for per-file parallelism
-- `slurm.summary`
+- `slurm.summary`; `cpus_per_task` is passed to `summary.py --jobs` for slow-path host cov / host BAM parallelism when sidecars are missing
 - `slurm.methscan_prepare`, `slurm.methscan_filter`, `slurm.methscan_profile`, `slurm.methscan_smooth`, `slurm.methscan_scan`, `slurm.methscan_matrix`, `slurm.methscan_all` (methscan optional stages)
 
 Do not collapse unrelated stages into one shared resource block.

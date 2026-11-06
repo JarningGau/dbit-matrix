@@ -7,7 +7,8 @@ import argparse
 import csv
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -140,11 +141,29 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help=(
+            "Worker processes for slow-path host cov parsing and host BAM "
+            "metrics when sidecars are missing. Default: 1 (sequential)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print resolved inputs/outputs and exit without writing files.",
     )
     return parser.parse_args()
+
+
+def _chunk_list(items: Sequence, jobs: int) -> list[list]:
+    """Split items into up to jobs contiguous non-empty chunks."""
+    if not items:
+        return []
+    worker_count = max(1, min(int(jobs), len(items)))
+    chunk_size = (len(items) + worker_count - 1) // worker_count
+    return [list(items[i : i + chunk_size]) for i in range(0, len(items), chunk_size)]
 
 
 def read_barcode_positions(path: str | Path) -> dict[str, tuple[str, str]]:
@@ -396,43 +415,146 @@ def collect_barcoded_reads(demux_dir: Path) -> int | None:
     return total
 
 
+def _accumulate_host_bam_read(
+    read: object,
+    mito_chromosomes: frozenset[str],
+    counters: list[int],
+) -> None:
+    """Update [mapped, valid, mito, nuclear] for one alignment."""
+    if bool(getattr(read, "is_unmapped", False)):
+        return
+    mapping_quality = int(getattr(read, "mapping_quality", 0) or 0)
+    if mapping_quality <= 10:
+        return
+    try:
+        nh = read.get_tag("NH")  # type: ignore[attr-defined]
+        if isinstance(nh, int) and nh > 1:
+            return
+    except (KeyError, AttributeError):
+        pass
+    counters[0] += 1
+    flag = int(getattr(read, "flag", 0) or 0)
+    if flag not in VALID_FLAGS:
+        return
+    counters[1] += 1
+    reference_name = getattr(read, "reference_name", None)
+    if isinstance(reference_name, str) and reference_name in mito_chromosomes:
+        counters[2] += 1
+    else:
+        counters[3] += 1
+
+
+def _scan_host_bam_until_eof(
+    host_bam_path: Path,
+    mito_chromosomes: frozenset[str],
+) -> tuple[int, int, int, int]:
+    counters = [0, 0, 0, 0]
+    with pysam.AlignmentFile(str(host_bam_path), "rb") as bam_handle:
+        for read in bam_handle.fetch(until_eof=True):
+            _accumulate_host_bam_read(read, mito_chromosomes, counters)
+    return counters[0], counters[1], counters[2], counters[3]
+
+
+def _scan_host_bam_contigs(
+    host_bam_path: str,
+    contig_names: list[str],
+    mito_chromosomes: frozenset[str],
+) -> tuple[int, int, int, int]:
+    counters = [0, 0, 0, 0]
+    with pysam.AlignmentFile(host_bam_path, "rb") as bam_handle:
+        for contig in contig_names:
+            for read in bam_handle.fetch(contig):
+                _accumulate_host_bam_read(read, mito_chromosomes, counters)
+    return counters[0], counters[1], counters[2], counters[3]
+
+
+def _pack_contigs_by_weight(
+    contig_weights: list[tuple[str, int]],
+    jobs: int,
+) -> list[list[str]]:
+    """Greedy-bin contigs into up to jobs chunks by descending weight."""
+    if not contig_weights:
+        return []
+    worker_count = max(1, min(int(jobs), len(contig_weights)))
+    ordered = sorted(contig_weights, key=lambda item: item[1], reverse=True)
+    bins: list[list[str]] = [[] for _ in range(worker_count)]
+    bin_weights = [0] * worker_count
+    for contig, weight in ordered:
+        index = min(range(worker_count), key=lambda i: bin_weights[i])
+        bins[index].append(contig)
+        bin_weights[index] += max(1, weight)
+    return [chunk for chunk in bins if chunk]
+
+
+def _host_bam_contig_weights(bam_handle: pysam.AlignmentFile) -> list[tuple[str, int]]:
+    try:
+        stats = bam_handle.get_index_statistics()
+    except (ValueError, OSError):
+        references = list(bam_handle.references)
+        lengths = list(bam_handle.lengths)
+        return [
+            (name, int(length) if length is not None else 1)
+            for name, length in zip(references, lengths)
+        ]
+    weights: list[tuple[str, int]] = []
+    for entry in stats:
+        name = getattr(entry, "contig", None)
+        if not isinstance(name, str) or not name:
+            continue
+        mapped = int(getattr(entry, "mapped", 0) or 0)
+        weights.append((name, mapped if mapped > 0 else 1))
+    return weights
+
+
 def count_host_bam_metrics(
     host_bam_path: Path,
     mito_chromosomes: frozenset[str],
+    jobs: int = 1,
 ) -> tuple[int | None, int | None, int | None, int | None]:
     if not host_bam_path.exists():
         return None, None, None, None
-    mapped_reads = 0
-    valid_reads = 0
-    valid_reads_mito = 0
-    valid_reads_nuclear = 0
+    worker_count = max(1, int(jobs))
     try:
+        if worker_count <= 1:
+            return _scan_host_bam_until_eof(host_bam_path, mito_chromosomes)
+
         with pysam.AlignmentFile(str(host_bam_path), "rb") as bam_handle:
-            for read in bam_handle.fetch(until_eof=True):
-                if read.is_unmapped:
-                    continue
-                # Only count reasonably confident unique alignments.
-                if read.mapping_quality <= 10:
-                    continue
-                try:
-                    nh = read.get_tag("NH")
-                    if isinstance(nh, int) and nh > 1:
-                        # Multiple alignments (NH>1) are excluded.
-                        continue
-                except KeyError:
-                    # NH tag may be absent; treat as unique in that case.
-                    pass
-                mapped_reads += 1
-                if read.flag not in VALID_FLAGS:
-                    continue
-                valid_reads += 1
-                if read.reference_name in mito_chromosomes:
-                    valid_reads_mito += 1
-                else:
-                    valid_reads_nuclear += 1
+            has_index = bool(bam_handle.has_index())
+            contig_weights = (
+                _host_bam_contig_weights(bam_handle) if has_index else []
+            )
+        if not has_index or not contig_weights:
+            print(
+                "[summary] warning=missing_bam_index_for_parallel; "
+                "falling_back_to_sequential_host_bam_scan"
+            )
+            return _scan_host_bam_until_eof(host_bam_path, mito_chromosomes)
+
+        chunks = _pack_contigs_by_weight(contig_weights, worker_count)
+        mapped_reads = 0
+        valid_reads = 0
+        valid_reads_mito = 0
+        valid_reads_nuclear = 0
+        bam_path_str = str(host_bam_path)
+        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+            futures = [
+                executor.submit(
+                    _scan_host_bam_contigs,
+                    bam_path_str,
+                    chunk,
+                    mito_chromosomes,
+                )
+                for chunk in chunks
+            ]
+            for future in futures:
+                mapped, valid, mito, nuclear = future.result()
+                mapped_reads += mapped
+                valid_reads += valid
+                valid_reads_mito += mito
+                valid_reads_nuclear += nuclear
+        return mapped_reads, valid_reads, valid_reads_mito, valid_reads_nuclear
     except OSError:
         return None, None, None, None
-    return mapped_reads, valid_reads, valid_reads_mito, valid_reads_nuclear
 
 
 def count_mapped_reads(bam_path: Path) -> int | None:
@@ -656,10 +778,38 @@ def _mean_from_stats(stats: tuple[float, int] | None) -> float | None:
     return stats[0]
 
 
+def _parse_spot_cov_pair(
+    cg_cov_path: Path,
+) -> tuple[
+    str,
+    tuple[float, int] | None,
+    tuple[float, int] | None,
+    dict[str, tuple[float, int] | None],
+]:
+    cb = cg_cov_path.name[: -len(".CG.cov")].upper()
+    cg_stats = parse_cov_stats(cg_cov_path)
+    ch_stats, context_stats = parse_ch_cov_stats(ch_cov_path_from_cg(cg_cov_path))
+    return cb, cg_stats, ch_stats, context_stats
+
+
+def _parse_spot_cov_chunk(
+    cg_cov_paths: list[Path],
+) -> list[
+    tuple[
+        str,
+        tuple[float, int] | None,
+        tuple[float, int] | None,
+        dict[str, tuple[float, int] | None],
+    ]
+]:
+    return [_parse_spot_cov_pair(path) for path in cg_cov_paths]
+
+
 def summarize_per_spot(
     host_cov_paths: list[Path],
     read_counts: dict[str, str],
     positions: dict[str, tuple[str, str]],
+    jobs: int = 1,
 ) -> list[dict[str, str]]:
     # cb -> (cg_stats, ch_stats, context_stats)
     by_cov: dict[
@@ -673,11 +823,17 @@ def summarize_per_spot(
     empty_contexts: dict[str, tuple[float, int] | None] = {
         context: None for context in CH_CONTEXTS
     }
-    for cg_cov_path in host_cov_paths:
-        cb = cg_cov_path.name[: -len(".CG.cov")].upper()
-        cg_stats = parse_cov_stats(cg_cov_path)
-        ch_stats, context_stats = parse_ch_cov_stats(ch_cov_path_from_cg(cg_cov_path))
-        by_cov[cb] = (cg_stats, ch_stats, context_stats)
+    worker_count = max(1, int(jobs))
+    if worker_count <= 1 or len(host_cov_paths) <= 1:
+        for cg_cov_path in host_cov_paths:
+            cb, cg_stats, ch_stats, context_stats = _parse_spot_cov_pair(cg_cov_path)
+            by_cov[cb] = (cg_stats, ch_stats, context_stats)
+    else:
+        chunks = _chunk_list(host_cov_paths, worker_count)
+        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+            for chunk_rows in executor.map(_parse_spot_cov_chunk, chunks):
+                for cb, cg_stats, ch_stats, context_stats in chunk_rows:
+                    by_cov[cb] = (cg_stats, ch_stats, context_stats)
 
     all_cbs = sorted(set(by_cov.keys()) | set(read_counts.keys()))
     rows: list[dict[str, str]] = []
@@ -1137,7 +1293,9 @@ def main() -> int:
         for spike_name in spike_names
     }
 
+    jobs = max(1, int(args.jobs))
     print(f"[summary] work_path={work_path}")
+    print(f"[summary] jobs={jobs}")
     print(f"[summary] host_spot_cov_count={len(host_cov_paths)}")
     print(f"[summary] reads_table={read_counts_path}")
     print(f"[summary] host_bam_funnel={host_bam_funnel_path}")
@@ -1198,13 +1356,15 @@ def main() -> int:
     else:
         print("[summary] warning=missing_sidecars; using_slow_path")
         print("[summary] sidecar_path=slow")
-        per_spot_rows = summarize_per_spot(host_cov_paths, read_counts, positions)
+        per_spot_rows = summarize_per_spot(
+            host_cov_paths, read_counts, positions, jobs=jobs
+        )
         (
             host_mapped_reads,
             host_valid_reads,
             host_valid_reads_mito,
             host_valid_reads_nuclear,
-        ) = count_host_bam_metrics(host_bam_path, mito_chromosomes)
+        ) = count_host_bam_metrics(host_bam_path, mito_chromosomes, jobs=jobs)
     for row in per_spot_rows:
         row["is_HQ_spot"] = format_is_hq_spot(row.get("reads"), reads_threshold)
     write_tsv(per_spot_out, list(PER_SPOT_FIELDS), per_spot_rows)
