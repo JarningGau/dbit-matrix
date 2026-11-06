@@ -72,8 +72,7 @@
         "name": "ClaI",
         "sequence": "AAGGTGCAATCAGGTGTCAGTCTTAAAGGATCGATAAGGAAGCGGAA",
         "hmc_positions": [6, 10, 17, 21, 31, 42],
-        "score_positions": [10, 17, 21],
-        "edit_distance": 1
+        "score_positions": [10, 17, 21]
     },
     "slurm": {
         "fastp_split": {
@@ -173,7 +172,7 @@
         "hmc_spike": {
             "partition": "amd-ep2,intel-sc3",
             "mem": "8G",
-            "cpus_per_task": 1
+            "cpus_per_task": 8
         }
     },
     "call_smoke": false

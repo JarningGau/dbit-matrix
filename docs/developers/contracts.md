@@ -198,12 +198,12 @@ Extrapolation model: fits both a through-origin linear model and an exponential 
 
 ### `hmc_spike`
 
-Purpose (TAPS / TAPS v2): score a named synthetic 5hmC oligo on demux reject R1 (`*.R1.spike-in.fq.gz`) via C→N-masked motif match, then report hmC→T conversion. Distinct from genome `spike_in_index` (lambda/pUC) and from the methylated-linker QC motif.
+Purpose (TAPS / TAPS v2): score a named synthetic 5hmC oligo on demux reject R1 (`*.R1.spike-in.fq.gz`) via exact-backbone motif match with `[CT]` at every `C` in `sequence`, then report hmC→T conversion. Distinct from genome `spike_in_index` (lambda/pUC) and from the methylated-linker QC motif.
 
 Inputs:
 
 - `demux/*.R1.spike-in.fq.gz`
-- workflow `hmc_spike` block (`enabled`, `name`, `sequence`, `hmc_positions`, `score_positions`, `edit_distance`)
+- workflow `hmc_spike` block (`enabled`, `name`, `sequence`, `hmc_positions`, `score_positions`)
 
 Outputs:
 
@@ -213,7 +213,7 @@ Outputs:
 
 Contract:
 
-- Match uses C→N masking of `sequence` with unique hit ≤ `edit_distance` on non-N bases
+- Match requires a unique hit where every non-`C` base in `sequence` matches exactly and every `C` in `sequence` is `C` or `T` in the read (no backbone edit distance)
 - Score bases at `hmc_positions` (must be `C` in `sequence`): C = retained/protected, T = converted (hmC→T); other bases ignored in rate denominators
 - Site conversion = `100 * converted_T / (retained_C + converted_T)` (percent scale 0–100, same numeric style as `mean_5mCG`)
 - `summary.json` `mean_conversion_rate` / `pooled_conversion_rate` and per-site `conversion_rate` are percent-scale; `mean_conversion_rate` is the mean of per-site rates over `score_positions` only

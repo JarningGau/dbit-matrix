@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Score 5hmC oligo conversion (hmC→T) on demux spike-in R1 FASTQ.
 
-Locate a workflow-configured oligo via C→N masking, then score configured
-hmC positions (C=retained/protected, T=converted). TAPSbeta should protect
-5hmC (low conversion); classical TAPS converts both 5mC and 5hmC.
+Locate a workflow-configured oligo with exact backbone match and [CT] at every
+C in the oligo sequence, then score configured hmC positions (C=retained/
+protected, T=converted). TAPSbeta should protect 5hmC (low conversion);
+classical TAPS converts both 5mC and 5hmC.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import gzip
 import json
 import re
 import time
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
 from typing import Iterator, TextIO
@@ -38,8 +41,8 @@ def parse_int_list(text: str) -> list[int]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Locate a 5hmC oligo on demux spike-in R1 (C→N mask) and compute "
-            "site-level hmC→T conversion rates."
+            "Locate a 5hmC oligo on demux spike-in R1 (exact non-C bases; "
+            "[CT] at every C) and compute site-level hmC→T conversion rates."
         )
     )
     parser.add_argument(
@@ -63,7 +66,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sequence",
         required=True,
-        help="Oligo sequence to match (Cs are treated as candidate 5hmC sites).",
+        help=(
+            "Oligo sequence to match (every C must be C or T in the read; "
+            "all other bases must match exactly)."
+        ),
     )
     parser.add_argument(
         "--hmc-positions",
@@ -81,19 +87,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--edit-distance",
-        type=int,
-        default=1,
-        help=(
-            "Max mismatches on non-N positions of the C→N-masked sequence. "
-            "Default: 1."
-        ),
-    )
-    parser.add_argument(
         "--max-reads",
         type=int,
         default=0,
         help="Stop after N reads across all files (0 = all).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel workers over input FASTQ files. Default: 1.",
     )
     parser.add_argument(
         "--progress-interval-seconds",
@@ -128,66 +131,45 @@ def fastq_iter(handle: TextIO) -> Iterator[tuple[str, str]]:
         yield head.rstrip("\n"), seq.rstrip("\n").upper()
 
 
-def mask_c_to_n(seq: str) -> str:
-    return seq.upper().replace("C", "N")
+def compile_hmc_motif_regex(sequence: str) -> re.Pattern[str]:
+    """Exact non-C bases; every C in sequence must be C or T."""
+    parts: list[str] = []
+    for base in sequence.upper():
+        if base == "C":
+            parts.append("[CT]")
+        else:
+            parts.append(re.escape(base))
+    return re.compile("".join(parts))
 
 
-def masked_mismatch_count(obs: str, mask: str) -> int:
-    if len(obs) != len(mask):
-        raise ValueError("obs and mask length mismatch")
-    dist = 0
-    for ob, mb in zip(obs, mask):
-        if mb == "N":
-            continue
-        if ob != mb:
-            dist += 1
-    return dist
-
-
-def find_masked_spike(
+def find_hmc_motif(
     text: str,
-    spike_mask: str,
+    sequence: str,
     start_pos: int,
     end_pos: int,
-    max_mismatch: int,
+    regex: re.Pattern[str] | None = None,
 ) -> tuple[int | None, str]:
-    """Find unique best C→N-masked hit in [start_pos, end_pos).
+    """Find unique motif hit in [start_pos, end_pos).
 
     Returns (position, status) where status is 'hit', 'none', or 'ambiguous'.
     """
     start_pos = max(0, start_pos)
     end_pos = min(end_pos, len(text))
-    pattern_len = len(spike_mask)
+    pattern_len = len(sequence)
     if pattern_len == 0 or start_pos + pattern_len > end_pos:
         return None, "none"
 
-    regex = re.compile("".join("." if b == "N" else re.escape(b) for b in spike_mask))
+    if regex is None:
+        regex = compile_hmc_motif_regex(sequence)
+
     window = text[start_pos:end_pos]
-    exact_hits = [start_pos + m.start() for m in regex.finditer(window)]
-    exact_hits = [p for p in exact_hits if p + pattern_len <= end_pos]
-    if len(exact_hits) == 1:
-        return exact_hits[0], "hit"
-    if len(exact_hits) > 1:
+    hits = [start_pos + m.start() for m in regex.finditer(window)]
+    hits = [p for p in hits if p + pattern_len <= end_pos]
+    if len(hits) == 1:
+        return hits[0], "hit"
+    if len(hits) > 1:
         return None, "ambiguous"
-
-    if max_mismatch <= 0:
-        return None, "none"
-
-    best_pos: list[int] = []
-    best_dist = max_mismatch + 1
-    max_start = end_pos - pattern_len
-    for pos in range(start_pos, max_start + 1):
-        dist = masked_mismatch_count(text[pos : pos + pattern_len], spike_mask)
-        if dist < best_dist:
-            best_dist = dist
-            best_pos = [pos]
-        elif dist == best_dist:
-            best_pos.append(pos)
-    if best_dist > max_mismatch:
-        return None, "none"
-    if len(best_pos) != 1:
-        return None, "ambiguous"
-    return best_pos[0], "hit"
+    return None, "none"
 
 
 def write_site_plot(
@@ -249,21 +231,102 @@ def validate_positions(
             )
 
 
+@dataclass
+class ScanCounters:
+    site_retained: list[int]
+    site_converted: list[int]
+    site_other: list[int]
+    n_scanned: int = 0
+    n_hit: int = 0
+    n_none: int = 0
+    n_ambiguous: int = 0
+    n_too_short: int = 0
+
+    @classmethod
+    def zeros(cls, n_sites: int) -> ScanCounters:
+        return cls(
+            site_retained=[0] * n_sites,
+            site_converted=[0] * n_sites,
+            site_other=[0] * n_sites,
+        )
+
+    def add(self, other: ScanCounters) -> None:
+        for index in range(len(self.site_retained)):
+            self.site_retained[index] += other.site_retained[index]
+            self.site_converted[index] += other.site_converted[index]
+            self.site_other[index] += other.site_other[index]
+        self.n_scanned += other.n_scanned
+        self.n_hit += other.n_hit
+        self.n_none += other.n_none
+        self.n_ambiguous += other.n_ambiguous
+        self.n_too_short += other.n_too_short
+
+
+def scan_fastq_file(
+    path: str,
+    sequence: str,
+    hmc_positions: list[int],
+    max_reads: int,
+) -> ScanCounters:
+    regex = compile_hmc_motif_regex(sequence)
+    counters = ScanCounters.zeros(len(hmc_positions))
+    pattern_len = len(sequence)
+    with open_text(path, "r") as handle:
+        for _head, seq in fastq_iter(handle):
+            if max_reads and counters.n_scanned >= max_reads:
+                break
+            counters.n_scanned += 1
+            if len(seq) < pattern_len:
+                counters.n_too_short += 1
+                continue
+            hit_pos, status = find_hmc_motif(
+                seq,
+                sequence,
+                start_pos=0,
+                end_pos=len(seq),
+                regex=regex,
+            )
+            if status == "none":
+                counters.n_none += 1
+                continue
+            if status == "ambiguous":
+                counters.n_ambiguous += 1
+                continue
+            assert hit_pos is not None
+            counters.n_hit += 1
+            obs = seq[hit_pos : hit_pos + pattern_len]
+            for index, cpos in enumerate(hmc_positions):
+                base = obs[cpos]
+                if base == "C":
+                    counters.site_retained[index] += 1
+                elif base == "T":
+                    counters.site_converted[index] += 1
+                else:
+                    counters.site_other[index] += 1
+    return counters
+
+
+def _scan_fastq_file_task(
+    args: tuple[str, str, list[int], int],
+) -> ScanCounters:
+    path, sequence, hmc_positions, max_reads = args
+    return scan_fastq_file(path, sequence, hmc_positions, max_reads)
+
+
 def main() -> int:
     args = parse_args()
     if not args.name.strip():
         raise ValueError("--name must be non-empty")
-    if args.edit_distance < 0:
-        raise ValueError("--edit-distance must be >= 0")
     if args.max_reads < 0:
         raise ValueError("--max-reads must be >= 0")
+    if args.workers < 1:
+        raise ValueError("--workers must be >= 1")
 
     sequence = args.sequence.upper()
     hmc_positions = list(args.hmc_positions)
     score_positions = list(args.score_positions)
     validate_positions(sequence, hmc_positions, score_positions)
 
-    sequence_mask = mask_c_to_n(sequence)
     r1_paths = sorted(glob(args.r1_glob))
     out_dir = Path(args.out_dir)
 
@@ -271,7 +334,7 @@ def main() -> int:
         print(
             f"[hmc_spike] dry-run name={args.name} sequence_len={len(sequence)} "
             f"hmc_positions={hmc_positions} score_positions={score_positions} "
-            f"edit_distance={args.edit_distance} r1_glob={args.r1_glob} "
+            f"workers={args.workers} r1_glob={args.r1_glob} "
             f"r1_matches={len(r1_paths)} out_dir={out_dir}",
             flush=True,
         )
@@ -282,79 +345,75 @@ def main() -> int:
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    site_retained = [0] * len(hmc_positions)
-    site_converted = [0] * len(hmc_positions)
-    site_other = [0] * len(hmc_positions)
-
-    n_scanned = 0
-    n_hit = 0
-    n_none = 0
-    n_ambiguous = 0
-    n_too_short = 0
-
     t0 = time.time()
-    last_report = t0
-    stop = False
+    totals = ScanCounters.zeros(len(hmc_positions))
+    workers = min(args.workers, len(r1_paths))
 
-    for path in r1_paths:
-        if stop:
-            break
-        with open_text(path, "r") as handle:
-            for _head, seq in fastq_iter(handle):
-                if args.max_reads and n_scanned >= args.max_reads:
-                    stop = True
-                    break
-                n_scanned += 1
-
-                if len(seq) < len(sequence):
-                    n_too_short += 1
-                    continue
-
-                hit_pos, status = find_masked_spike(
-                    seq,
-                    sequence_mask,
-                    start_pos=0,
-                    end_pos=len(seq),
-                    max_mismatch=args.edit_distance,
-                )
-                if status == "none":
-                    n_none += 1
-                    continue
-                if status == "ambiguous":
-                    n_ambiguous += 1
-                    continue
-                assert hit_pos is not None
-                n_hit += 1
-
-                obs = seq[hit_pos : hit_pos + len(sequence)]
-                for i, cpos in enumerate(hmc_positions):
-                    base = obs[cpos]
-                    if base == "C":
-                        site_retained[i] += 1
-                    elif base == "T":
-                        site_converted[i] += 1
-                    else:
-                        site_other[i] += 1
-
+    if args.max_reads and workers > 1:
+        # Preserve global --max-reads semantics by scanning files in order.
+        remaining = args.max_reads
+        for path in r1_paths:
+            if remaining <= 0:
+                break
+            part = scan_fastq_file(
+                path,
+                sequence,
+                hmc_positions,
+                remaining,
+            )
+            totals.add(part)
+            remaining = args.max_reads - totals.n_scanned
+    elif workers == 1:
+        remaining = args.max_reads
+        last_report = t0
+        for path in r1_paths:
+            if args.max_reads and totals.n_scanned >= args.max_reads:
+                break
+            part = scan_fastq_file(
+                path,
+                sequence,
+                hmc_positions,
+                remaining if args.max_reads else 0,
+            )
+            totals.add(part)
+            if args.max_reads:
+                remaining = args.max_reads - totals.n_scanned
+            if args.progress_interval_seconds > 0:
+                now = time.time()
+                if now - last_report >= args.progress_interval_seconds:
+                    elapsed = now - t0
+                    rate = totals.n_scanned / elapsed if elapsed > 0 else 0.0
+                    print(
+                        f"[hmc_spike] scanned={totals.n_scanned} hit={totals.n_hit} "
+                        f"none={totals.n_none} ambiguous={totals.n_ambiguous} "
+                        f"rate={rate:.0f} reads/s file={Path(path).name}",
+                        flush=True,
+                    )
+                    last_report = now
+    else:
+        task_args = [
+            (path, sequence, hmc_positions, 0)
+            for path in r1_paths
+        ]
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            for part in pool.map(_scan_fastq_file_task, task_args):
+                totals.add(part)
                 if args.progress_interval_seconds > 0:
-                    now = time.time()
-                    if now - last_report >= args.progress_interval_seconds:
-                        elapsed = now - t0
-                        rate = n_scanned / elapsed if elapsed > 0 else 0.0
-                        print(
-                            f"[hmc_spike] scanned={n_scanned} hit={n_hit} "
-                            f"none={n_none} ambiguous={n_ambiguous} "
-                            f"rate={rate:.0f} reads/s file={Path(path).name}",
-                            flush=True,
-                        )
-                        last_report = now
+                    elapsed = time.time() - t0
+                    rate = totals.n_scanned / elapsed if elapsed > 0 else 0.0
+                    print(
+                        f"[hmc_spike] scanned={totals.n_scanned} hit={totals.n_hit} "
+                        f"none={totals.n_none} ambiguous={totals.n_ambiguous} "
+                        f"rate={rate:.0f} reads/s",
+                        flush=True,
+                    )
 
     site_rows: list[dict[str, int | float | None]] = []
     pos_to_index = {pos: i for i, pos in enumerate(hmc_positions)}
     for i, cpos in enumerate(hmc_positions):
-        retained = site_retained[i]
-        converted = site_converted[i]
-        other = site_other[i]
+        retained = totals.site_retained[i]
+        converted = totals.site_converted[i]
+        other = totals.site_other[i]
         denom = retained + converted
         conversion_rate = (
             (converted / denom) * 100.0 if denom > 0 else None
@@ -374,8 +433,8 @@ def main() -> int:
     score_converted = 0
     for pos in score_positions:
         idx = pos_to_index[pos]
-        retained = site_retained[idx]
-        converted = site_converted[idx]
+        retained = totals.site_retained[idx]
+        converted = totals.site_converted[idx]
         score_retained += retained
         score_converted += converted
         denom = retained + converted
@@ -415,17 +474,16 @@ def main() -> int:
         "r1_glob": args.r1_glob,
         "r1_files": r1_paths,
         "sequence": sequence,
-        "sequence_mask": sequence_mask,
         "hmc_positions": hmc_positions,
         "score_positions": score_positions,
-        "edit_distance": args.edit_distance,
         "max_reads": args.max_reads,
-        "reads_scanned": n_scanned,
-        "reads_matched": n_hit,
-        "reads_no_hit": n_none,
-        "reads_ambiguous": n_ambiguous,
-        "reads_too_short": n_too_short,
-        "matched_fraction": (n_hit / n_scanned) if n_scanned else None,
+        "workers": workers,
+        "reads_scanned": totals.n_scanned,
+        "reads_matched": totals.n_hit,
+        "reads_no_hit": totals.n_none,
+        "reads_ambiguous": totals.n_ambiguous,
+        "reads_too_short": totals.n_too_short,
+        "matched_fraction": (totals.n_hit / totals.n_scanned) if totals.n_scanned else None,
         "site_counts": {
             str(row["pos"]): {
                 "retained_C": row["retained_C"],
@@ -447,7 +505,7 @@ def main() -> int:
         handle.write("\n")
 
     print(
-        f"[hmc_spike] done name={args.name} scanned={n_scanned} matched={n_hit} "
+        f"[hmc_spike] done name={args.name} scanned={totals.n_scanned} matched={totals.n_hit} "
         f"mean_hmCtoT={mean_conversion_rate} pooled_hmCtoT={pooled_conversion_rate} "
         f"out={out_dir}",
         flush=True,

@@ -4,6 +4,7 @@ This page is the active release history for the repository.
 
 ## Current
 
+- **BREAKING hmc_spike motif match:** locate requires exact non-`C` bases and `[CT]` at every `C` in `sequence` (no backbone `edit_distance`). Re-run `hmc_spike` then `summary`. See [contracts](../developers/contracts.md#hmc_spike).
 - **BREAKING summary `is_HQ_spot` and column order:** `per_spot_summary.tsv` gains `is_HQ_spot` (`1`/`0`/`NA` from saturation `reads_threshold`) and reorders columns to identity → `reads`/`is_HQ_spot` → methylation → site counts. `sample_summary.tsv` reorders to `sample_id`/`saturation_rate` → read funnel → (v2 linker QC) → host/mito/spike methylation → optional `*_hmc_spike_*`. Re-run `summary`. See [contracts](../developers/contracts.md#summary).
 - **BREAKING host_mito BAM source:** `call` builds `coverage/host_mito.*.cov` from full indexed `pooled/pooled.host.sorted.bam` (mito contigs only), not from `qc/mbias/host.subsampled.sorted.bam`. Re-run `call` then `summary`. Removed EMSeq `call_host_subsample_fraction` / `call_host_subsample_seed` and call-stage subsample/samtools CLI. See [contracts](../developers/contracts.md#call).
 - **mbias host subsample unbiased:** [`scripts/host_subsample_bam.py`](../../scripts/host_subsample_bam.py) drops the coordinate-ordered `head -n` cap. Size is limited by lowering the `samtools view -s` fraction from `idxstats` mapped counts (`HOST_SUBSAMPLE_MAX_READS`). Re-run `mbias` to refresh `qc/mbias/host.subsampled.bam`. See [contracts](../developers/contracts.md#mbias).

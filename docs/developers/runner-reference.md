@@ -32,7 +32,8 @@ pixi run python <entry-script> \
 - writes per-stage or per-chunk `.sbatch` files under `work/<sample>/commands/`
 - writes `run.sbatch` for `--stage all`
 - `--submit` submits the dependency graph from the client side
-- stage dependencies use `afterok`
+- stage dependencies use `afterok` edges that follow data deps (not only adjacent `STAGE_SEQUENCE` order)
+- when `hmc_spike` is enabled, its jobs depend on `demux_extract_bc`; `summary` depends on both `saturation` and `hmc_spike`
 - nested `sbatch` on compute nodes is not part of the model
 
 In Slurm mode, `mbias` and `call` remain separate host and spike jobs. See [config reference](config-reference.md#slurm-structure).

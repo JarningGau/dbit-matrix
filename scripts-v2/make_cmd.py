@@ -39,6 +39,19 @@ STAGE_SEQUENCE = [
     "hmc_spike",
     "summary",
 ]
+# Slurm afterok edges follow data deps (not STAGE_SEQUENCE adjacency).
+# summary waits on saturation and hmc_spike when both ran; missing deps are dropped.
+STAGE_SLURM_DEPENDENCIES: dict[str, list[str]] = {
+    "fastp_split": [],
+    "demux_extract_bc": ["fastp_split"],
+    "align": ["demux_extract_bc"],
+    "pool": ["align"],
+    "mbias": ["pool"],
+    "call": ["mbias"],
+    "saturation": ["call"],
+    "hmc_spike": ["demux_extract_bc"],
+    "summary": ["saturation", "hmc_spike"],
+}
 METHSCAN_STAGES = (
     "methscan_prepare",
     "methscan_filter",
@@ -1012,6 +1025,7 @@ def build_hmc_spike_command(args: argparse.Namespace, sample_work: Path) -> str:
     hmc = args.hmc_spike
     r1_glob = str(sample_work / "demux" / "*.R1.spike-in.fq.gz")
     out_dir = sample_work / "qc" / "hmc_spike"
+    workers = max(1, int(getattr(args, "slurm_cpus_per_task", 1) or 1))
     command = [
         sys.executable,
         str(script_path),
@@ -1027,8 +1041,8 @@ def build_hmc_spike_command(args: argparse.Namespace, sample_work: Path) -> str:
         ",".join(str(p) for p in hmc["hmc_positions"]),
         "--score-positions",
         ",".join(str(p) for p in hmc["score_positions"]),
-        "--edit-distance",
-        str(hmc["edit_distance"]),
+        "--workers",
+        str(workers),
     ]
     return quoted(command)
 
@@ -1091,20 +1105,13 @@ def validate_hmc_spike_config(cfg: dict) -> dict:
             raise ValueError(
                 f"hmc_spike.score_positions value {pos} is not in hmc_positions"
             )
-    edit_distance = cfg.get("edit_distance", 1)
-    try:
-        edit_distance_int = int(edit_distance)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("hmc_spike.edit_distance must be an integer") from exc
-    if edit_distance_int < 0:
-        raise ValueError("hmc_spike.edit_distance must be >= 0")
+    # edit_distance is ignored if present (removed from matching contract).
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "name": name.strip(),
         "sequence": sequence,
         "hmc_positions": hmc_positions_int,
         "score_positions": score_positions_int,
-        "edit_distance": edit_distance_int,
     }
 
 
@@ -2281,6 +2288,16 @@ def generate_local_driver_script(stage_scripts: list[tuple[str, list[Path]]], ou
     output_path.chmod(0o755)
 
 
+def resolve_stage_slurm_dependencies(
+    stage_name: str, present_stages: set[str]
+) -> list[str]:
+    """Return afterok parents for stage_name among stages that actually ran."""
+    declared = STAGE_SLURM_DEPENDENCIES.get(stage_name)
+    if declared is None:
+        return []
+    return [dep for dep in declared if dep in present_stages]
+
+
 def generate_slurm_driver_script(
     stage_scripts: list[tuple[str, list[Path]]],
     output_path: Path,
@@ -2317,24 +2334,41 @@ def generate_slurm_driver_script(
         "}",
         "",
         'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-        'prev_stage_deps=""',
+        'final_deps=""',
         "",
     ]
+    present_stages = {name for name, scripts in stage_scripts if scripts}
+    stage_job_vars: dict[str, list[str]] = {}
     for stage_name, scripts in stage_scripts:
         if not scripts:
             continue
         lines.append(f'echo "[run.sbatch] stage={stage_name}"')
+        dep_stages = resolve_stage_slurm_dependencies(stage_name, present_stages)
+        dep_job_refs: list[str] = []
+        for dep_stage in dep_stages:
+            dep_job_refs.extend(
+                f"${var_name}" for var_name in stage_job_vars.get(dep_stage, [])
+            )
+        stage_dep_var = f"stage_deps_{stage_name}".replace("-", "_")
+        if dep_job_refs:
+            lines.append(
+                f'{stage_dep_var}="$(join_deps {" ".join(dep_job_refs)})"'
+            )
+        else:
+            lines.append(f'{stage_dep_var}=""')
         job_vars: list[str] = []
         for index, script_path in enumerate(scripts):
             var_name = f"jid_{stage_name}_{index}".replace("-", "_")
             lines.append(
-                f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" "$prev_stage_deps")"'
+                f'{var_name}="$(submit_with_dep "$SCRIPT_DIR/{script_path.name}" '
+                f'"${stage_dep_var}")"'
             )
             job_vars.append(var_name)
+        stage_job_vars[stage_name] = job_vars
         deps_join = " ".join(f"${var_name}" for var_name in job_vars)
-        lines.append(f'prev_stage_deps="$(join_deps {deps_join})"')
+        lines.append(f'final_deps="$(join_deps {deps_join})"')
         lines.append("")
-    lines.append('echo "[run.sbatch] done final_dep=${prev_stage_deps}"')
+    lines.append('echo "[run.sbatch] done final_dep=${final_deps}"')
     driver_command = "\n".join(lines)
     slurm_args = argparse.Namespace(
         job_name=f"dbit_all_driver_{settings['sample_id']}",
@@ -2914,6 +2948,7 @@ def main() -> int:
         command_args = argparse.Namespace(
             hmc_spike_script=settings["hmc_spike_script"],
             hmc_spike=settings["hmc_spike"],
+            slurm_cpus_per_task=settings["slurm_cpus_per_task"],
         )
         command = build_hmc_spike_command(command_args, sample_work)
         if settings["runner"] == "local":
