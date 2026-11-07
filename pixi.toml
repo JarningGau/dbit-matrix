@@ -1,10 +1,13 @@
 [workspace]
 name = "dbit-matrix"
 channels = [
-  "https://mirrors.westlake.edu.cn/ANACONDA/cloud/conda-forge",
-  "https://mirrors.westlake.edu.cn/ANACONDA/cloud/bioconda"
+  "https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge",
+  "https://mirrors2.westlake.edu.cn/ANACONDA/cloud/bioconda"
 ]
 platforms = ["linux-64"]
+
+[pypi-options]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 [dependencies]
 python = "3.11.*"
