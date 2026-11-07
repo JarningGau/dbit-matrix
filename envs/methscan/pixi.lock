@@ -1,4 +1,11 @@
-version: 6
+version: 7
+platforms:
+- name: linux-64
+  virtual-packages:
+  - __unix=0=0
+  - __linux=4.18
+  - __glibc=2.28
+  - __archspec=0=x86_64
 environments:
   default:
     channels:
@@ -6,13 +13,10 @@ environments:
     - url: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/bioconda/
     indexes:
     - https://mirrors2.westlake.edu.cn/pypi/simple
-    options:
-      pypi-prerelease-mode: if-necessary-or-explicit
     packages:
       linux-64:
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/bzip2-1.0.8-hda65f42_9.conda
-      - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/ca-certificates-2026.2.25-hbd8a1cb_0.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/icu-78.2-h33c6efd_0.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/ld_impl_linux-64-2.45.1-default_hbd61a6d_101.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libexpat-2.7.4-hecca717_0.conda
@@ -32,23 +36,24 @@ environments:
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/python-3.10.20-h3c07f61_0_cpython.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
-      - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
       - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4a/a8/0b2ced25639fb20cc1c9784de90a8c25f9504a7f18cd8b5397bd61696d7d/click-8.0.4-py3-none-any.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/99/f8/8768f803151714640cb6f06fd9de490ce7db632d351da05f42f77330d2fd/click_help_colors-0.9.4-py3-none-any.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/c2/a5/a4d916f1015106e1da876028606a8e87fd5d5c840f98c87bc2d5153b6a2f/llvmlite-0.46.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/eb/dc/988b78020a8cde7a863e6f1110efc9c9eb89a9c69d9d756e14fc1f01d4c1/methscan-1.1.0-py3-none-any.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4f/9f/9275a723d050b5f1a9b1c7fb7dbfce324fef301a8e50c5f88338569db06c/numba-0.64.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4b/d7/ecf66c1cd12dc28b4040b15ab4d17b773b87fa9d29ca16125de01adb36cd/numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/49/e2/79e46612dc25ebc7603dc11c560baa7266c90f9e48537ecf1a02a0dd6bff/pandas-1.5.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/f1/70/ba4b949bdc0490ab78d545459acd7702b211dfccf7eb89bbc1060f52818d/patsy-1.0.2-py2.py3-none-any.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
+      - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/ca-certificates-2026.2.25-hbd8a1cb_0.conda
+      - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
       - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/10/99/781fe0c827be2742bcc775efefccb3b048a3a9c6ce9aec0cbf4a101677e5/pytz-2026.1.post1-py2.py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/49/e2/79e46612dc25ebc7603dc11c560baa7266c90f9e48537ecf1a02a0dd6bff/pandas-1.5.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4a/a8/0b2ced25639fb20cc1c9784de90a8c25f9504a7f18cd8b5397bd61696d7d/click-8.0.4-py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4b/d7/ecf66c1cd12dc28b4040b15ab4d17b773b87fa9d29ca16125de01adb36cd/numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4f/9f/9275a723d050b5f1a9b1c7fb7dbfce324fef301a8e50c5f88338569db06c/numba-0.64.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/8e/6d/41991e503e51fc1134502694c5fa7a1671501a17ffa12716a4a9151af3df/scipy-1.15.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl
       - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/94/55/b86c861c32186403fe121d9ab27bc16d05839b170d92a978beb33abb995e/statsmodels-0.14.6-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/99/f8/8768f803151714640cb6f06fd9de490ce7db632d351da05f42f77330d2fd/click_help_colors-0.9.4-py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/c2/a5/a4d916f1015106e1da876028606a8e87fd5d5c840f98c87bc2d5153b6a2f/llvmlite-0.46.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/eb/dc/988b78020a8cde7a863e6f1110efc9c9eb89a9c69d9d756e14fc1f01d4c1/methscan-1.1.0-py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
+      - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/f1/70/ba4b949bdc0490ab78d545459acd7702b211dfccf7eb89bbc1060f52818d/patsy-1.0.2-py2.py3-none-any.whl
 packages:
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -61,6 +66,7 @@ packages:
   - openmp_impl <0.0a0
   license: BSD-3-Clause
   license_family: BSD
+  purls: []
   size: 28948
   timestamp: 1770939786096
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/bzip2-1.0.8-hda65f42_9.conda
@@ -71,37 +77,9 @@ packages:
   - libgcc >=14
   license: bzip2-1.0.6
   license_family: BSD
+  purls: []
   size: 260182
   timestamp: 1771350215188
-- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/ca-certificates-2026.2.25-hbd8a1cb_0.conda
-  sha256: 67cc7101b36421c5913a1687ef1b99f85b5d6868da3abbf6ec1a4181e79782fc
-  md5: 4492fd26db29495f0ba23f146cd5638d
-  depends:
-  - __unix
-  license: ISC
-  size: 147413
-  timestamp: 1772006283803
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4a/a8/0b2ced25639fb20cc1c9784de90a8c25f9504a7f18cd8b5397bd61696d7d/click-8.0.4-py3-none-any.whl
-  name: click
-  version: 8.0.4
-  sha256: 6a7a62563bbfabfda3a38f3023a1db4a35978c0abd76f6c9605ecd6554d6d9b1
-  requires_dist:
-  - colorama ; sys_platform == 'win32'
-  - importlib-metadata ; python_full_version < '3.8'
-  requires_python: '>=3.6'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/99/f8/8768f803151714640cb6f06fd9de490ce7db632d351da05f42f77330d2fd/click_help_colors-0.9.4-py3-none-any.whl
-  name: click-help-colors
-  version: 0.9.4
-  sha256: b33c5803eeaeb084393b1ab5899dc5476c7196b87a18713045afe76f840b42db
-  requires_dist:
-  - click>=7.0,<9
-  - mypy ; extra == 'dev'
-  - pytest ; extra == 'dev'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl
-  name: colorama
-  version: 0.4.6
-  sha256: 4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
-  requires_python: '>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*'
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/icu-78.2-h33c6efd_0.conda
   sha256: 142a722072fa96cf16ff98eaaf641f54ab84744af81754c292cb81e0881c0329
   md5: 186a18e3ba246eccfc7cff00cd19a870
@@ -111,6 +89,7 @@ packages:
   - libstdcxx >=14
   license: MIT
   license_family: MIT
+  purls: []
   size: 12728445
   timestamp: 1767969922681
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/ld_impl_linux-64-2.45.1-default_hbd61a6d_101.conda
@@ -123,6 +102,7 @@ packages:
   - binutils_impl_linux-64 2.45.1
   license: GPL-3.0-only
   license_family: GPL
+  purls: []
   size: 725507
   timestamp: 1770267139900
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libexpat-2.7.4-hecca717_0.conda
@@ -160,6 +140,7 @@ packages:
   - libgomp 15.2.0 he0feb66_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
+  purls: []
   size: 1041788
   timestamp: 1771378212382
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libgcc-ng-15.2.0-h69a702a_18.conda
@@ -169,6 +150,7 @@ packages:
   - libgcc 15.2.0 he0feb66_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
+  purls: []
   size: 27526
   timestamp: 1771378224552
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libgomp-15.2.0-he0feb66_18.conda
@@ -178,6 +160,7 @@ packages:
   - __glibc >=2.17,<3.0.a0
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
+  purls: []
   size: 603262
   timestamp: 1771378117851
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/liblzma-5.8.2-hb03c661_0.conda
@@ -189,6 +172,7 @@ packages:
   constrains:
   - xz 5.8.2.*
   license: 0BSD
+  purls: []
   size: 113207
   timestamp: 1768752626120
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda
@@ -211,6 +195,7 @@ packages:
   - libgcc >=14
   - libzlib >=1.3.1,<2.0a0
   license: blessing
+  purls: []
   size: 951405
   timestamp: 1772818874251
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libstdcxx-15.2.0-h934c35e_18.conda
@@ -223,6 +208,7 @@ packages:
   - libstdcxx-ng ==15.2.0=*_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
+  purls: []
   size: 5852330
   timestamp: 1771378262446
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libuuid-2.41.3-h5347b49_0.conda
@@ -233,6 +219,7 @@ packages:
   - libgcc >=14
   license: BSD-3-Clause
   license_family: BSD
+  purls: []
   size: 40311
   timestamp: 1766271528534
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/libxcrypt-4.4.36-hd590300_1.conda
@@ -257,25 +244,6 @@ packages:
   purls: []
   size: 60963
   timestamp: 1727963148474
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/c2/a5/a4d916f1015106e1da876028606a8e87fd5d5c840f98c87bc2d5153b6a2f/llvmlite-0.46.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-  name: llvmlite
-  version: 0.46.0
-  sha256: 0a2d461cb89537b7c20feb04c46c32e12d5ad4f0896c9dfc0f60336219ff248e
-  requires_python: '>=3.10'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/eb/dc/988b78020a8cde7a863e6f1110efc9c9eb89a9c69d9d756e14fc1f01d4c1/methscan-1.1.0-py3-none-any.whl
-  name: methscan
-  version: 1.1.0
-  sha256: efd7f88199bb9723c240c766b1e9f873ffb29a4697aa8108006e8046b708816b
-  requires_dist:
-  - click>=7.1.2,<8.1
-  - click-help-colors>=0.9,<1
-  - colorama>=0.3.9,<1
-  - numba>=0.53.0,<1
-  - numpy>=1.20.1,<2
-  - pandas>=1.2.3,<2
-  - scipy>=1.6.1,<2
-  - statsmodels>=0.12.2,<1
-  requires_python: '>=3.8'
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
   sha256: 3fde293232fa3fca98635e1167de6b7c7fda83caf24b9d6c91ec9eefb4f4d586
   md5: 47e340acb35de30501a76c7c799c41d7
@@ -286,19 +254,6 @@ packages:
   purls: []
   size: 891641
   timestamp: 1738195959188
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4f/9f/9275a723d050b5f1a9b1c7fb7dbfce324fef301a8e50c5f88338569db06c/numba-0.64.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-  name: numba
-  version: 0.64.0
-  sha256: 1afe3a80b8c2f376b211fb7a49e536ef9eafc92436afc95a2f41ea5392f8cc65
-  requires_dist:
-  - llvmlite>=0.46.0.dev0,<0.47
-  - numpy>=1.22,<2.5
-  requires_python: '>=3.10'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4b/d7/ecf66c1cd12dc28b4040b15ab4d17b773b87fa9d29ca16125de01adb36cd/numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  name: numpy
-  version: 1.26.4
-  sha256: ffa75af20b44f8dba823498024771d5ac50620e6915abac414251bd971b4529f
-  requires_python: '>=3.9'
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/openssl-3.6.1-h35e630c_1.conda
   sha256: 44c877f8af015332a5d12f5ff0fb20ca32f896526a7d0cdb30c769df1144fb5c
   md5: f61eb8cd60ff9057122a3d338b99c00f
@@ -308,37 +263,9 @@ packages:
   - libgcc >=14
   license: Apache-2.0
   license_family: Apache
+  purls: []
   size: 3164551
   timestamp: 1769555830639
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl
-  name: packaging
-  version: '26.0'
-  sha256: b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529
-  requires_python: '>=3.8'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/49/e2/79e46612dc25ebc7603dc11c560baa7266c90f9e48537ecf1a02a0dd6bff/pandas-1.5.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  name: pandas
-  version: 1.5.3
-  sha256: 7a0a56cef15fd1586726dace5616db75ebcfec9179a3a55e78f72c5639fa2a23
-  requires_dist:
-  - python-dateutil>=2.8.1
-  - pytz>=2020.1
-  - numpy>=1.20.3 ; python_full_version < '3.10'
-  - numpy>=1.21.0 ; python_full_version >= '3.10'
-  - numpy>=1.23.2 ; python_full_version >= '3.11'
-  - hypothesis>=5.5.3 ; extra == 'test'
-  - pytest>=6.0 ; extra == 'test'
-  - pytest-xdist>=1.31 ; extra == 'test'
-  requires_python: '>=3.8'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/f1/70/ba4b949bdc0490ab78d545459acd7702b211dfccf7eb89bbc1060f52818d/patsy-1.0.2-py2.py3-none-any.whl
-  name: patsy
-  version: 1.0.2
-  sha256: 37bfddbc58fcf0362febb5f54f10743f8b21dd2aa73dec7e7ef59d1b02ae668a
-  requires_dist:
-  - numpy>=1.4
-  - pytest ; extra == 'test'
-  - pytest-cov ; extra == 'test'
-  - scipy ; extra == 'test'
-  requires_python: '>=3.6'
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/python-3.10.20-h3c07f61_0_cpython.conda
   sha256: 8ff2ce308faf2588b69c65b120293f59a8f2577b772b34df4e817d220b09e081
   md5: 5d4e2b00d99feacd026859b7fa239dc0
@@ -366,17 +293,6 @@ packages:
   purls: []
   size: 25455342
   timestamp: 1772729810280
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
-  name: python-dateutil
-  version: 2.9.0.post0
-  sha256: a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
-  requires_dist:
-  - six>=1.5
-  requires_python: '>=2.7,!=3.0.*,!=3.1.*,!=3.2.*'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/10/99/781fe0c827be2742bcc775efefccb3b048a3a9c6ce9aec0cbf4a101677e5/pytz-2026.1.post1-py2.py3-none-any.whl
-  name: pytz
-  version: 2026.1.post1
-  sha256: f2fd16142fda348286a75e1a524be810bb05d444e5a081f37f7affc635035f7a
 - conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
   sha256: 12ffde5a6f958e285aa22c191ca01bbd3d6e710aa852e00618fa6ddc59149002
   md5: d7d95fc8287ea7bf33e0e7116d2b95ec
@@ -389,10 +305,96 @@ packages:
   purls: []
   size: 345073
   timestamp: 1765813471974
+- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
+  sha256: cafeec44494f842ffeca27e9c8b0c27ed714f93ac77ddadc6aaf726b5554ebac
+  md5: cffd3bdd58090148f4cfcd831f4b26ab
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libgcc >=14
+  - libzlib >=1.3.1,<2.0a0
+  constrains:
+  - xorg-libx11 >=1.8.12,<2.0a0
+  license: TCL
+  license_family: BSD
+  purls: []
+  size: 3301196
+  timestamp: 1769460227866
+- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
+  sha256: 68f0206ca6e98fea941e5717cec780ed2873ffabc0e1ed34428c061e2c6268c7
+  md5: 4a13eeac0b5c8e5b8ab496e6c4ddd829
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libzlib >=1.3.1,<2.0a0
+  license: BSD-3-Clause
+  license_family: BSD
+  purls: []
+  size: 601375
+  timestamp: 1764777111296
+- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/ca-certificates-2026.2.25-hbd8a1cb_0.conda
+  sha256: 67cc7101b36421c5913a1687ef1b99f85b5d6868da3abbf6ec1a4181e79782fc
+  md5: 4492fd26db29495f0ba23f146cd5638d
+  depends:
+  - __unix
+  license: ISC
+  purls: []
+  size: 147413
+  timestamp: 1772006283803
+- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
+  sha256: 1d30098909076af33a35017eed6f2953af1c769e273a0626a04722ac4acaba3c
+  md5: ad659d0a2b3e47e38d829aa8cad2d610
+  license: LicenseRef-Public-Domain
+  purls: []
+  size: 119135
+  timestamp: 1767016325805
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/10/99/781fe0c827be2742bcc775efefccb3b048a3a9c6ce9aec0cbf4a101677e5/pytz-2026.1.post1-py2.py3-none-any.whl
+  name: pytz
+  version: 2026.1.post1
+  sha256: f2fd16142fda348286a75e1a524be810bb05d444e5a081f37f7affc635035f7a
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/49/e2/79e46612dc25ebc7603dc11c560baa7266c90f9e48537ecf1a02a0dd6bff/pandas-1.5.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: pandas
+  version: 1.5.3
+  sha256: 7a0a56cef15fd1586726dace5616db75ebcfec9179a3a55e78f72c5639fa2a23
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - python-dateutil>=2.8.1
+  - pytz>=2020.1
+  - numpy>=1.20.3 ; python_full_version < '3.10'
+  - numpy>=1.21.0 ; python_full_version >= '3.10'
+  - numpy>=1.23.2 ; python_full_version >= '3.11'
+  - hypothesis>=5.5.3 ; extra == 'test'
+  - pytest>=6.0 ; extra == 'test'
+  - pytest-xdist>=1.31 ; extra == 'test'
+  requires_python: '>=3.8'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4a/a8/0b2ced25639fb20cc1c9784de90a8c25f9504a7f18cd8b5397bd61696d7d/click-8.0.4-py3-none-any.whl
+  name: click
+  version: 8.0.4
+  sha256: 6a7a62563bbfabfda3a38f3023a1db4a35978c0abd76f6c9605ecd6554d6d9b1
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - colorama ; sys_platform == 'win32'
+  - importlib-metadata ; python_full_version < '3.8'
+  requires_python: '>=3.6'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4b/d7/ecf66c1cd12dc28b4040b15ab4d17b773b87fa9d29ca16125de01adb36cd/numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: numpy
+  version: 1.26.4
+  sha256: ffa75af20b44f8dba823498024771d5ac50620e6915abac414251bd971b4529f
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_python: '>=3.9'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/4f/9f/9275a723d050b5f1a9b1c7fb7dbfce324fef301a8e50c5f88338569db06c/numba-0.64.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+  name: numba
+  version: 0.64.0
+  sha256: 1afe3a80b8c2f376b211fb7a49e536ef9eafc92436afc95a2f41ea5392f8cc65
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - llvmlite>=0.46.0.dev0,<0.47
+  - numpy>=1.22,<2.5
+  requires_python: '>=3.10'
 - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/8e/6d/41991e503e51fc1134502694c5fa7a1671501a17ffa12716a4a9151af3df/scipy-1.15.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
   name: scipy
   version: 1.15.3
   sha256: 9e2abc762b0811e09a0d3258abee2d98e0c703eee49464ce0069590846f31d40
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
   requires_dist:
   - numpy>=1.23.5,<2.5
   - pytest ; extra == 'test'
@@ -432,15 +434,11 @@ packages:
   - doit>=0.36.0 ; extra == 'dev'
   - pydevtool ; extra == 'dev'
   requires_python: '>=3.10'
-- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl
-  name: six
-  version: 1.17.0
-  sha256: 4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
-  requires_python: '>=2.7,!=3.0.*,!=3.1.*,!=3.2.*'
 - pypi: https://mirrors2.westlake.edu.cn/pypi/packages/94/55/b86c861c32186403fe121d9ab27bc16d05839b170d92a978beb33abb995e/statsmodels-0.14.6-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
   name: statsmodels
   version: 0.14.6
   sha256: 06eec42d682fdb09fe5d70a05930857efb141754ec5a5056a03304c1b5e32fd9
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
   requires_dist:
   - numpy>=1.22.3,<3
   - scipy>=1.8,!=1.9.2
@@ -471,33 +469,70 @@ packages:
   - numpydoc ; extra == 'docs'
   - pandas-datareader ; extra == 'docs'
   requires_python: '>=3.9'
-- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
-  sha256: cafeec44494f842ffeca27e9c8b0c27ed714f93ac77ddadc6aaf726b5554ebac
-  md5: cffd3bdd58090148f4cfcd831f4b26ab
-  depends:
-  - __glibc >=2.17,<3.0.a0
-  - libgcc >=14
-  - libzlib >=1.3.1,<2.0a0
-  constrains:
-  - xorg-libx11 >=1.8.12,<2.0a0
-  license: TCL
-  license_family: BSD
-  size: 3301196
-  timestamp: 1769460227866
-- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
-  sha256: 1d30098909076af33a35017eed6f2953af1c769e273a0626a04722ac4acaba3c
-  md5: ad659d0a2b3e47e38d829aa8cad2d610
-  license: LicenseRef-Public-Domain
-  size: 119135
-  timestamp: 1767016325805
-- conda: https://mirrors2.westlake.edu.cn/ANACONDA/cloud/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
-  sha256: 68f0206ca6e98fea941e5717cec780ed2873ffabc0e1ed34428c061e2c6268c7
-  md5: 4a13eeac0b5c8e5b8ab496e6c4ddd829
-  depends:
-  - __glibc >=2.17,<3.0.a0
-  - libzlib >=1.3.1,<2.0a0
-  license: BSD-3-Clause
-  license_family: BSD
-  purls: []
-  size: 601375
-  timestamp: 1764777111296
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/99/f8/8768f803151714640cb6f06fd9de490ce7db632d351da05f42f77330d2fd/click_help_colors-0.9.4-py3-none-any.whl
+  name: click-help-colors
+  version: 0.9.4
+  sha256: b33c5803eeaeb084393b1ab5899dc5476c7196b87a18713045afe76f840b42db
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - click>=7.0,<9
+  - mypy ; extra == 'dev'
+  - pytest ; extra == 'dev'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl
+  name: packaging
+  version: '26.0'
+  sha256: b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_python: '>=3.8'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl
+  name: six
+  version: 1.17.0
+  sha256: 4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_python: '>=2.7,!=3.0.*,!=3.1.*,!=3.2.*'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/c2/a5/a4d916f1015106e1da876028606a8e87fd5d5c840f98c87bc2d5153b6a2f/llvmlite-0.46.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+  name: llvmlite
+  version: 0.46.0
+  sha256: 0a2d461cb89537b7c20feb04c46c32e12d5ad4f0896c9dfc0f60336219ff248e
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_python: '>=3.10'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl
+  name: colorama
+  version: 0.4.6
+  sha256: 4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_python: '>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/eb/dc/988b78020a8cde7a863e6f1110efc9c9eb89a9c69d9d756e14fc1f01d4c1/methscan-1.1.0-py3-none-any.whl
+  name: methscan
+  version: 1.1.0
+  sha256: efd7f88199bb9723c240c766b1e9f873ffb29a4697aa8108006e8046b708816b
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - click>=7.1.2,<8.1
+  - click-help-colors>=0.9,<1
+  - colorama>=0.3.9,<1
+  - numba>=0.53.0,<1
+  - numpy>=1.20.1,<2
+  - pandas>=1.2.3,<2
+  - scipy>=1.6.1,<2
+  - statsmodels>=0.12.2,<1
+  requires_python: '>=3.8'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
+  name: python-dateutil
+  version: 2.9.0.post0
+  sha256: a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - six>=1.5
+  requires_python: '>=2.7,!=3.0.*,!=3.1.*,!=3.2.*'
+- pypi: https://mirrors2.westlake.edu.cn/pypi/packages/f1/70/ba4b949bdc0490ab78d545459acd7702b211dfccf7eb89bbc1060f52818d/patsy-1.0.2-py2.py3-none-any.whl
+  name: patsy
+  version: 1.0.2
+  sha256: 37bfddbc58fcf0362febb5f54f10743f8b21dd2aa73dec7e7ef59d1b02ae668a
+  index: https://mirrors2.westlake.edu.cn/pypi/simple
+  requires_dist:
+  - numpy>=1.4
+  - pytest ; extra == 'test'
+  - pytest-cov ; extra == 'test'
+  - scipy ; extra == 'test'
+  requires_python: '>=3.6'
