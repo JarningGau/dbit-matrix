@@ -133,7 +133,7 @@ class BinMatrixIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(rc, 0)
 
-            cg_dir = work / "matrix" / "bins_100" / "CG"
+            cg_dir = work / "matrix" / "100bp" / "CG"
             self.assertTrue((cg_dir / "matrix.mtx.gz").is_file())
             barcodes = (cg_dir / "barcodes.tsv").read_text(encoding="utf-8").splitlines()
             self.assertEqual(barcodes, ["AAAABBBB", "CCCCDDDD"])
@@ -153,7 +153,7 @@ class BinMatrixIntegrationTests(unittest.TestCase):
             self.assertNotIn((2, 2), by_rc)  # uncovered omitted
             self.assertNotIn((3, 1), by_rc)
 
-            ca_dir = work / "matrix" / "bins_100" / "CA"
+            ca_dir = work / "matrix" / "100bp" / "CA"
             _, _, ca_nnz, ca_entries = _read_mtx(ca_dir / "matrix.mtx.gz")
             # AAAABBBB: CA at bin0 (2+2) and bin1 (1+1); CCCCDDDD: no CA
             self.assertEqual(ca_nnz, 2)
@@ -161,7 +161,7 @@ class BinMatrixIntegrationTests(unittest.TestCase):
             self.assertEqual(ca_by[(1, 1)], (2, 4, 0.5))
             self.assertEqual(ca_by[(2, 1)], (1, 2, 0.5))
 
-            ch_dir = work / "matrix" / "bins_100" / "CH"
+            ch_dir = work / "matrix" / "100bp" / "CH"
             _, _, ch_nnz, ch_entries = _read_mtx(ch_dir / "matrix.mtx.gz")
             # AAAABBBB bin0 CA; bin1 CC+CA; CCCCDDDD bin0 CT
             self.assertEqual(ch_nnz, 3)
@@ -193,6 +193,38 @@ class BinMatrixIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(rc, 0)
             self.assertFalse((work / "matrix").exists())
+
+
+class FormatBinSizeLabelTests(unittest.TestCase):
+    def test_compact_units(self) -> None:
+        self.assertEqual(bm.format_bin_size_label(500), "500bp")
+        self.assertEqual(bm.format_bin_size_label(100), "100bp")
+        self.assertEqual(bm.format_bin_size_label(999), "999bp")
+        self.assertEqual(bm.format_bin_size_label(1_000), "1k")
+        self.assertEqual(bm.format_bin_size_label(10_000), "10k")
+        self.assertEqual(bm.format_bin_size_label(100_000), "100k")
+        self.assertEqual(bm.format_bin_size_label(1_500), "1.5k")
+        self.assertEqual(bm.format_bin_size_label(1_000_000), "1M")
+        self.assertEqual(bm.format_bin_size_label(2_500_000), "2.5M")
+
+    def test_rejects_non_positive(self) -> None:
+        with self.assertRaises(ValueError):
+            bm.format_bin_size_label(0)
+
+
+class AdaptWhitelistTests(unittest.TestCase):
+    def test_expand_short_barcodes_to_concat_cb(self) -> None:
+        wl = {"AAAA", "TTTT"}
+        barcodes = {"AAAATTTT", "TTTTAAAA", "GGGGCCCC"}
+        adapted = bm.adapt_whitelist_to_barcodes(wl, barcodes)
+        self.assertEqual(adapted, {"AAAAAAAA", "AAAATTTT", "TTTTAAAA", "TTTTTTTT"})
+        self.assertEqual(barcodes & adapted, {"AAAATTTT", "TTTTAAAA"})
+
+    def test_keep_direct_match_whitelist(self) -> None:
+        wl = {"AAAATTTT", "OTHER"}
+        barcodes = {"AAAATTTT", "TTTTAAAA"}
+        adapted = bm.adapt_whitelist_to_barcodes(wl, barcodes)
+        self.assertIs(adapted, wl)
 
 
 class BinMatrixDriverConfigTests(unittest.TestCase):

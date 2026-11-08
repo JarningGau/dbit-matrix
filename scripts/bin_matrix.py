@@ -2,9 +2,9 @@
 """Build fixed-bin sparse methylation matrices from host per-spot cov files.
 
 For each requested 5mC context, write a 10x-like directory under
-`matrix/bins_<bin_size>/<CONTEXT>/` with:
-- features.tsv (genomic bins)
-- barcodes.tsv (spots)
+`matrix/<bin_label>/<CONTEXT>/` with:
+- features.tsv.gz (genomic bins)
+- barcodes.tsv.gz (spots)
 - matrix.mtx.gz (multi-value sparse: row col meth cov frac)
 """
 
@@ -21,6 +21,31 @@ VALID_CONTEXTS = ("CG", "CA", "CC", "CT", "CH")
 CG_SUFFIX = ".CG.cov"
 CH_SUFFIX = ".CH.cov"
 CH_DINUCLEOTIDES = frozenset({"CA", "CC", "CT"})
+
+
+def format_bin_size_label(bin_size: int) -> str:
+    """Compact directory name for a bin width in bp.
+
+    Widths below 1000 stay in bp (`500` -> `500bp`).
+    Widths from 1000 bp up to 1 Mb use `k` (`10000` -> `10k`, `100000` -> `100k`).
+    Widths of 1 Mb and above use `M` (`1000000` -> `1M`).
+    Scales that are not whole units keep a trimmed decimal (`1500` -> `1.5k`).
+    """
+    if bin_size < 1:
+        raise ValueError("bin_size must be >= 1")
+    if bin_size < 1000:
+        return f"{bin_size}bp"
+    if bin_size < 1_000_000:
+        return _scaled_size_label(bin_size, 1_000, "k")
+    return _scaled_size_label(bin_size, 1_000_000, "M")
+
+
+def _scaled_size_label(bin_size: int, unit: int, suffix: str) -> str:
+    scaled = bin_size / unit
+    if scaled.is_integer():
+        return f"{int(scaled)}{suffix}"
+    text = f"{scaled:.6f}".rstrip("0").rstrip(".")
+    return f"{text}{suffix}"
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -191,6 +216,32 @@ def load_barcode_whitelist(path: Path) -> set[str]:
     return out
 
 
+def adapt_whitelist_to_barcodes(
+    whitelist: set[str], barcodes: set[str]
+) -> set[str]:
+    """Adapt a demux-style short-barcode whitelist to concatenated CB IDs.
+
+    Host cov barcodes are ``<bcB><bcA>``. Workflow ``split_barcodes`` is often
+    the shared 8-mer (or other short) demux whitelist. When direct intersection
+    is empty and every whitelist entry has the same length ``L`` while observed
+    barcodes have length ``2L``, expand to the cartesian product ``bcB+bcA``.
+    """
+    if not whitelist or not barcodes:
+        return whitelist
+    direct = barcodes & whitelist
+    if direct:
+        return whitelist
+    wl_lens = {len(x) for x in whitelist if x}
+    bc_lens = {len(x) for x in barcodes if x}
+    if len(wl_lens) != 1 or len(bc_lens) != 1:
+        return whitelist
+    wl_len = next(iter(wl_lens))
+    bc_len = next(iter(bc_lens))
+    if wl_len <= 0 or bc_len != 2 * wl_len:
+        return whitelist
+    return {left + right for left in whitelist for right in whitelist}
+
+
 def discover_barcodes(
     host_cov_root: Path,
     contexts: list[str],
@@ -206,7 +257,8 @@ def discover_barcodes(
         for path in host_cov_root.rglob(f"*{CH_SUFFIX}"):
             barcodes.add(spot_id_from_cov_path(path))
     if whitelist is not None:
-        barcodes &= whitelist
+        adapted = adapt_whitelist_to_barcodes(whitelist, barcodes)
+        barcodes &= adapted
     return sorted(barcodes)
 
 
@@ -285,14 +337,14 @@ def accumulate_spot_bins(
 
 
 def write_features(path: Path, bins: list[tuple[str, str, int, int]]) -> None:
-    with path.open("w", encoding="utf-8") as handle:
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
         handle.write("bin_id\tchrom\tstart\tend\n")
         for bin_id, chrom, start, end in bins:
             handle.write(f"{bin_id}\t{chrom}\t{start}\t{end}\n")
 
 
 def write_barcodes(path: Path, barcodes: list[str]) -> None:
-    with path.open("w", encoding="utf-8") as handle:
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
         for barcode in barcodes:
             handle.write(f"{barcode}\n")
 
@@ -347,8 +399,8 @@ def build_context_matrix(
         return 0
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_features(out_dir / "features.tsv", bins)
-    write_barcodes(out_dir / "barcodes.tsv", barcodes)
+    write_features(out_dir / "features.tsv.gz", bins)
+    write_barcodes(out_dir / "barcodes.tsv.gz", barcodes)
 
     nnz = 0
     with tempfile.NamedTemporaryFile(
@@ -421,7 +473,7 @@ def run_bin_matrix(
     if not barcode_list:
         raise ValueError(f"no barcodes found under {host_cov_root}")
 
-    out_base = work_path / out_root / f"bins_{bin_size}"
+    out_base = work_path / out_root / format_bin_size_label(bin_size)
     print(f"[bin_matrix] work_path={work_path}")
     print(f"[bin_matrix] reference={reference}")
     print(f"[bin_matrix] fai={fai_path}")

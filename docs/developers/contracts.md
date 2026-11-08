@@ -312,10 +312,10 @@ Input:
 - optional contig allowlist: `call_chromosomes`
 - optional barcode whitelist: `split_barcodes` (intersect discovered cov barcodes)
 
-Outputs (per context under `matrix/bins_<bin_size>/<CONTEXT>/`):
+Outputs (per context under `matrix/<bin_label>/<CONTEXT>/`):
 
-- `features.tsv` — header `bin_id`, `chrom`, `start`, `end` (0-based half-open bins)
-- `barcodes.tsv` — one barcode per line (matrix columns)
+- `features.tsv.gz` — header `bin_id`, `chrom`, `start`, `end` (0-based half-open bins)
+- `barcodes.tsv.gz` — one barcode per line (matrix columns)
 - `matrix.mtx.gz` — multi-value coordinate sparse matrix (features × barcodes, 1-indexed)
 
 Contract:
@@ -323,6 +323,7 @@ Contract:
 - Wired for TAPS / TAPS v2 / EMSeq via `scripts/bin_matrix.py`
 - Included in `--stage all` only when `bin_matrix.enabled` is true; missing/invalid config then fails validation. Explicit `--stage bin_matrix` always requires a valid `bin_matrix` block
 - Nested `bin_matrix.bin_size` sets bin width in bp (default `100000`); last short bin per contig is kept: `[0,W)`, `[W,2W)`, …, `[kW, chrom_len)`
+- `<bin_label>` is that width with trailing zeros folded into a unit: `<1000` stays in bp (`500` -> `500bp`); `1000`–`<1_000_000` uses `k` (`10000` -> `10k`, `100000` -> `100k`); `>=1_000_000` uses `M` (`1000000` -> `1M`). A non-integer scale keeps a trimmed decimal (`1500` -> `1.5k`)
 - Nested `bin_matrix.contexts` selects contexts in `{CG, CA, CC, CT, CH}` (default `CG,CA`); one output directory per context
 - Slurm data dep is `call` only (`summary` / `saturation` do not depend on `bin_matrix`)
 - cov site coordinates are pysam 0-based; bin index within a contig is `pos // bin_size`
