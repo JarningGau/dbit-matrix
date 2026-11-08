@@ -8,6 +8,8 @@ Main stage order:
 
 `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
 
+TAPS / TAPS v2 / EMSeq: when `bin_matrix.enabled` is true, `--stage all` inserts `bin_matrix` after `call` and before `saturation`. Data dependency is host cov from `call` only; `summary` does not wait on `bin_matrix`, and `saturation` does not wait on `bin_matrix` in the Slurm DAG.
+
 TAPS / TAPS v2: when `hmc_spike.enabled` is true, `--stage all` inserts `hmc_spike` after `saturation` and before `summary`. Data dependency is demux `*.R1.spike-in.fq.gz` only; `align` does not wait on `hmc_spike`. EMSeq does not implement this stage.
 
 ### `fastp_split`
@@ -318,9 +320,11 @@ Outputs (per context under `matrix/bins_<bin_size>/<CONTEXT>/`):
 
 Contract:
 
-- TAPS optional stage only (not part of `--stage all`); v1 wiring is `scripts/make_cmd.py`
-- `bin_matrix_bin_size` sets bin width in bp (default `100000`); last short bin per contig is kept: `[0,W)`, `[W,2W)`, …, `[kW, chrom_len)`
-- `bin_matrix_contexts` selects contexts in `{CG, CA, CC, CT, CH}` (default `CG,CA`); one output directory per context
+- Wired for TAPS / TAPS v2 / EMSeq via `scripts/bin_matrix.py`
+- Included in `--stage all` only when `bin_matrix.enabled` is true; missing/invalid config then fails validation. Explicit `--stage bin_matrix` always requires a valid `bin_matrix` block
+- Nested `bin_matrix.bin_size` sets bin width in bp (default `100000`); last short bin per contig is kept: `[0,W)`, `[W,2W)`, …, `[kW, chrom_len)`
+- Nested `bin_matrix.contexts` selects contexts in `{CG, CA, CC, CT, CH}` (default `CG,CA`); one output directory per context
+- Slurm data dep is `call` only (`summary` / `saturation` do not depend on `bin_matrix`)
 - cov site coordinates are pysam 0-based; bin index within a contig is `pos // bin_size`
 - per covered spot×bin: `meth = sum(meth)`, `cov = sum(meth+unmeth)`, `frac = meth/cov`
 - uncovered spot×bin entries are omitted (true sparse)
@@ -410,8 +414,8 @@ Purpose: run `prepare`, `filter`, `profile`, `smooth`, `scan`, and `matrix` **in
 
 ## EMSeq-Specific Additions
 
-- `--stage all` covers only the fixed mainline
-- `aggregate`, `bin_matrix` (TAPS), and the methscan optional stages are not part of `all`
+- `--stage all` covers the mainline plus conditional `bin_matrix` when enabled
+- `aggregate` and the methscan optional stages are not part of `all`
 - `mbias` has EMSeq-specific chemistry (`scripts-emseq/mbias.py`)
 - `call` polarity is inverted relative to TAPS (retained base = methylated); `.cov` paths still follow the contract above
 - EMSeq uses `call_trimming` like TAPS; biscuit remains an align-stage tool, not a call-stage tool

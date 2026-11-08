@@ -13,10 +13,11 @@ Use these rules when working in this repository.
 
 - TAPS, TAPS v2, and EMSeq share this mainline:
   `fastp_split -> demux_extract_bc -> align -> pool -> mbias -> call -> saturation -> summary`
+- TAPS / TAPS v2 / EMSeq may insert `bin_matrix` after `call` and before `saturation` when `bin_matrix.enabled` is true. It depends on methylation `call` host cov only (not `summary`).
 - TAPS / TAPS v2 may insert `hmc_spike` after `saturation` and before `summary` when `hmc_spike.enabled` is true. It depends only on demux `*.spike-in.fq.gz` (not a prerequisite for `align`). EMSeq does not implement `hmc_spike`.
 - `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
 - `split` is not in `--stage all` or `STAGE_CHOICES`. `scripts/split_bams.py` exists but is not a workflow stage.
-- `aggregate`, `bin_matrix` (TAPS only), and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
+- `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
 - `scripts-emseq/mbias.py` is the EMSeq `mbias` implementation and is different from TAPS `scripts/mbias.py`.
 - EMSeq `call` is pooled pysam (`scripts-emseq/methy_caller.py` / `scripts-emseq/call.py`), not biscuit pileup.
 
@@ -63,6 +64,7 @@ Do **not** treat `envs/methscan/pixi.toml` `version` as the repository release; 
   - `pool`: separate host and spike-in jobs
   - `mbias`: split host and spike jobs; use `slurm.mbias.host` and `slurm.mbias.spike`
   - `call`: split host and spike jobs; use `slurm.call.host` and `slurm.call.spike`
+  - `bin_matrix` (when enabled): one sbatch; use `slurm.bin_matrix`; depends on `call` only
   - `saturation`: one sbatch; use `slurm.saturation`
   - `hmc_spike` (TAPS / TAPS v2, when enabled): one sbatch; use `slurm.hmc_spike`
   - `summary`: one sbatch; use `slurm.summary`

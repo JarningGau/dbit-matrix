@@ -46,6 +46,11 @@
     "saturation_reads_threshold": "auto",
     "summary_script": "scripts/summary.py",
     "methscan_tss_bed": "configs/ENCODE-mm10-vM21-TSS.4k.bed",
+    "bin_matrix": {
+        "enabled": true,
+        "bin_size": 100000,
+        "contexts": ["CG", "CA"]
+    },
     "slurm": {
         "fastp_split": {
             "partition": "amd-ep2,intel-sc3",
@@ -90,6 +95,11 @@
                 "mem": "16G",
                 "cpus_per_task": 4
             }
+        },
+        "bin_matrix": {
+            "partition": "amd-ep2,intel-sc3",
+            "mem": "16G",
+            "cpus_per_task": 4
         },
         "saturation": {
             "partition": "amd-ep2,intel-sc3",

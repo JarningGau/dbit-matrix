@@ -224,12 +224,22 @@ TAPS and EMSeq may also use:
 - `aggregate_script`
 - `aggregate_sort_mem`
 
-TAPS may also use `bin_matrix` (not wired for EMSeq / TAPS v2 yet):
+TAPS / TAPS v2 / EMSeq `bin_matrix` (conditional mainline stage):
 
 - `bin_matrix_script` (default: `scripts/bin_matrix.py`)
-- `bin_matrix_bin_size` (default: `100000`)
-- `bin_matrix_contexts` (default: `CG,CA`; list or comma-separated `CG`/`CA`/`CC`/`CT`/`CH`)
+- `bin_matrix` object:
+  - `enabled` (boolean): when true, include `bin_matrix` in `--stage all` after `call` and before `saturation`; when false or omitted, skip. Explicit `--stage bin_matrix` requires a valid block regardless
+  - `bin_size` (integer, default `100000`): fixed genomic bin width in bp
+  - `contexts` (default `CG,CA`): list or comma-separated `CG`/`CA`/`CC`/`CT`/`CH`
 - reuses `call_reference_file` (`.fai` required), optional `call_chromosomes`, optional `split_barcodes`
+
+```json
+"bin_matrix": {
+  "enabled": true,
+  "bin_size": 100000,
+  "contexts": ["CG", "CA"]
+}
+```
 
 TAPS and EMSeq methscan fields:
 
@@ -251,7 +261,7 @@ TAPS and EMSeq methscan fields:
 
 For `methscan_smooth_use_weights` and `methscan_matrix_sparse`, omit the matching CLI flags so values from workflow JSON apply; passing `--methscan-smooth-use-weights` or `--methscan-matrix-sparse` on the command line still forces those options on.
 
-These stages are optional and are not part of `--stage all`.
+`aggregate` and methscan stages are optional and are not part of `--stage all`. `bin_matrix` is part of `--stage all` only when `bin_matrix.enabled` is true.
 
 ## Slurm Structure
 
@@ -261,10 +271,10 @@ Slurm resources should remain stage-specific. Examples:
 - `slurm.mbias.spike`
 - `slurm.call.host`
 - `slurm.call.spike`
+- `slurm.bin_matrix` (when `bin_matrix.enabled`)
 - `slurm.saturation`
 - `slurm.hmc_spike` (TAPS / TAPS v2 when enabled); `cpus_per_task` is passed to `hmc_spike.py --workers` for per-file parallelism
 - `slurm.summary`; `cpus_per_task` is passed to `summary.py --jobs` for slow-path host cov / host BAM parallelism when sidecars are missing
-- `slurm.bin_matrix` (TAPS optional `bin_matrix` stage)
 - `slurm.methscan_prepare`, `slurm.methscan_filter`, `slurm.methscan_profile`, `slurm.methscan_smooth`, `slurm.methscan_scan`, `slurm.methscan_matrix`, `slurm.methscan_all` (methscan optional stages)
 
 Do not collapse unrelated stages into one shared resource block.

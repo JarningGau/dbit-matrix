@@ -8,10 +8,14 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 from scripts import bin_matrix as bm
+import make_cmd as taps_make_cmd
 
 
 def _write_fai(path: Path, contigs: list[tuple[str, int]]) -> None:
@@ -189,6 +193,55 @@ class BinMatrixIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(rc, 0)
             self.assertFalse((work / "matrix").exists())
+
+
+class BinMatrixDriverConfigTests(unittest.TestCase):
+    def test_validate_defaults(self) -> None:
+        cfg = taps_make_cmd.validate_bin_matrix_config({})
+        self.assertFalse(cfg["enabled"])
+        self.assertEqual(cfg["bin_size"], 100_000)
+        self.assertEqual(cfg["contexts"], "CG,CA")
+
+    def test_validate_rejects_bad_bin_size(self) -> None:
+        with self.assertRaises(ValueError):
+            taps_make_cmd.validate_bin_matrix_config({"bin_size": 0})
+
+    def test_validate_rejects_bad_contexts(self) -> None:
+        with self.assertRaises(ValueError):
+            taps_make_cmd.validate_bin_matrix_config({"contexts": ["CG", "XX"]})
+
+    def test_stages_for_all_include_when_enabled(self) -> None:
+        stages = taps_make_cmd.stages_for_all(
+            {"bin_matrix": {"enabled": True}, "hmc_spike": {"enabled": False}}
+        )
+        self.assertIn("bin_matrix", stages)
+        call_i = stages.index("call")
+        bin_i = stages.index("bin_matrix")
+        sat_i = stages.index("saturation")
+        self.assertEqual(call_i + 1, bin_i)
+        self.assertEqual(bin_i + 1, sat_i)
+        self.assertNotIn("hmc_spike", stages)
+
+    def test_stages_for_all_skip_when_disabled(self) -> None:
+        stages = taps_make_cmd.stages_for_all(
+            {"bin_matrix": {"enabled": False}, "hmc_spike": {"enabled": False}}
+        )
+        self.assertNotIn("bin_matrix", stages)
+        self.assertEqual(
+            stages.index("saturation"),
+            stages.index("call") + 1,
+        )
+
+    def test_slurm_deps_call_only(self) -> None:
+        self.assertEqual(
+            taps_make_cmd.STAGE_SLURM_DEPENDENCIES["bin_matrix"], ["call"]
+        )
+        self.assertEqual(
+            taps_make_cmd.STAGE_SLURM_DEPENDENCIES["saturation"], ["call"]
+        )
+        self.assertNotIn(
+            "bin_matrix", taps_make_cmd.STAGE_SLURM_DEPENDENCIES["summary"]
+        )
 
 
 if __name__ == "__main__":

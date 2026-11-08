@@ -16,10 +16,10 @@ pixi run python <entry-script> \
 
 ## `all`
 
-- `TAPS`, `TAPS v2`, and `EMSeq` expand `all` in stage order from [contracts](contracts.md); `hmc_spike` is included only when `hmc_spike.enabled` is true (TAPS / TAPS v2)
+- `TAPS`, `TAPS v2`, and `EMSeq` expand `all` in stage order from [contracts](contracts.md); `bin_matrix` is included only when `bin_matrix.enabled` is true; `hmc_spike` is included only when `hmc_spike.enabled` is true (TAPS / TAPS v2)
 - `RNA` expands `all` to:
   `demux_extract_bc -> align`
-- `aggregate`, `bin_matrix` (TAPS), and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are explicit and are not part of `all`
+- `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are explicit and are not part of `all`
 
 ## `local`
 
@@ -33,6 +33,7 @@ pixi run python <entry-script> \
 - writes `run.sbatch` for `--stage all`
 - `--submit` submits the dependency graph from the client side
 - stage dependencies use `afterok` edges that follow data deps (not only adjacent `STAGE_SEQUENCE` order)
+- when `bin_matrix` is enabled (TAPS / TAPS v2), its jobs depend on `call` only; `saturation` also depends on `call` (not on `bin_matrix`)
 - when `hmc_spike` is enabled, its jobs depend on `demux_extract_bc`; `summary` depends on both `saturation` and `hmc_spike`
 - nested `sbatch` on compute nodes is not part of the model
 
@@ -48,7 +49,8 @@ In Slurm mode, `mbias` and `call` remain separate host and spike jobs. See [conf
 
 ### `bin_matrix`
 
-- available for TAPS only (`scripts/make_cmd.py`)
+- available for TAPS / TAPS v2 / EMSeq (`scripts/bin_matrix.py`)
+- conditional mainline stage when `bin_matrix.enabled` is true
 - reads host `*.CG.cov` / `*.CH.cov` plus host FASTA `.fai`
 - writes `matrix/bins_<bin_size>/<CONTEXT>/{features.tsv,barcodes.tsv,matrix.mtx.gz}`
 - see [contracts](contracts.md#bin_matrix)

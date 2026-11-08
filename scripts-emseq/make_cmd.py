@@ -9,6 +9,7 @@ This is an EMSeq-only entrypoint that supports:
 - `pool`
 - `mbias`
 - `call`
+- `bin_matrix` (conditional in `--stage all` when `bin_matrix.enabled`; reuses `scripts/bin_matrix.py`)
 - `saturation`
 - `summary`
 - `aggregate` (experimental; optional, not part of `--stage all`; reuses `scripts/aggregate.py`)
@@ -42,6 +43,7 @@ STAGE_SEQUENCE = [
     "pool",
     "mbias",
     "call",
+    "bin_matrix",
     "saturation",
     "summary",
 ]
@@ -71,6 +73,7 @@ STAGE_REQUIRED_FIELDS = {
     "pool": [],
     "mbias": [],
     "call": ["call_reference_file", "call_chromosomes"],
+    "bin_matrix": ["call_reference_file"],
     "saturation": [],
     "summary": ["barcode_positions"],
     "aggregate": [],
@@ -403,6 +406,10 @@ def parse_args() -> argparse.Namespace:
             "(passed to scripts/aggregate.py via `--sort-mem`). "
             "Default comes from workflow config `aggregate_sort_mem` or 8G."
         ),
+    )
+    parser.add_argument(
+        "--bin-matrix-script",
+        help="Path to bin_matrix script. Default: scripts/bin_matrix.py.",
     )
     parser.add_argument(
         "--methscan-pixi-manifest",
@@ -842,6 +849,99 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
     return quoted(command)
 
 
+BIN_MATRIX_VALID_CONTEXTS = frozenset({"CG", "CA", "CC", "CT", "CH"})
+
+
+def normalize_bin_matrix_contexts(value) -> str:
+    if value is None:
+        return "CG,CA"
+    if isinstance(value, (list, tuple)):
+        parts = [str(v).strip().upper() for v in value if str(v).strip()]
+        return ",".join(parts) if parts else "CG,CA"
+    text = str(value).strip()
+    if not text:
+        return "CG,CA"
+    parts = [p.strip().upper() for p in text.split(",") if p.strip()]
+    return ",".join(parts) if parts else "CG,CA"
+
+
+def normalize_bin_matrix_config(raw) -> dict | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("bin_matrix must be a JSON object")
+    return raw
+
+
+def bin_matrix_enabled(settings: dict) -> bool:
+    cfg = settings.get("bin_matrix")
+    if not isinstance(cfg, dict):
+        return False
+    return bool(cfg.get("enabled"))
+
+
+def validate_bin_matrix_config(cfg: dict) -> dict:
+    """Normalize and validate a required bin_matrix workflow block."""
+    if not isinstance(cfg, dict):
+        raise ValueError("bin_matrix must be a JSON object")
+    bin_size_raw = cfg.get("bin_size", 100_000)
+    try:
+        bin_size = int(bin_size_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("bin_matrix.bin_size must be an integer") from exc
+    if bin_size < 1:
+        raise ValueError("bin_matrix.bin_size must be >= 1")
+    contexts = normalize_bin_matrix_contexts(cfg.get("contexts"))
+    unknown = [
+        part
+        for part in contexts.split(",")
+        if part and part not in BIN_MATRIX_VALID_CONTEXTS
+    ]
+    if unknown:
+        raise ValueError(
+            "bin_matrix.contexts unsupported values "
+            f"{unknown}; allowed: {', '.join(sorted(BIN_MATRIX_VALID_CONTEXTS))}"
+        )
+    return {
+        "enabled": bool(cfg.get("enabled", False)),
+        "bin_size": bin_size,
+        "contexts": contexts,
+    }
+
+
+def build_bin_matrix_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.bin_matrix_script)
+    bin_cfg = args.bin_matrix
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--reference",
+        str(args.call_reference_file),
+        "--bin-size",
+        str(bin_cfg["bin_size"]),
+        "--contexts",
+        str(bin_cfg["contexts"]),
+    ]
+    chromosomes = getattr(args, "call_chromosomes", None)
+    if chromosomes:
+        command.extend(["--chromosomes", str(chromosomes)])
+    barcodes = getattr(args, "split_barcodes", None)
+    if barcodes:
+        command.extend(["--barcodes", str(barcodes)])
+    return quoted(command)
+
+
+def stages_for_all(settings: dict) -> list[str]:
+    stages: list[str] = []
+    for stage_name in STAGE_SEQUENCE:
+        if stage_name == "bin_matrix" and not bin_matrix_enabled(settings):
+            continue
+        stages.append(stage_name)
+    return stages
+
+
 def build_methscan_run_command(
     step: str,
     args: argparse.Namespace,
@@ -1098,6 +1198,21 @@ def validate_inputs_for_stage(
             )
     elif stage == "aggregate":
         wic.require_script_path("aggregate_script", settings["aggregate_script"])
+    elif stage == "bin_matrix":
+        wic.require_script_path("bin_matrix_script", settings["bin_matrix_script"])
+        wic.require_file(
+            "call_reference_file",
+            wic.resolve_config_path(settings["call_reference_file"]),
+        )
+        fai_path = Path(
+            str(wic.resolve_config_path(settings["call_reference_file"])) + ".fai"
+        )
+        wic.require_file("call_reference_file.fai", fai_path)
+        if settings.get("split_barcodes"):
+            wic.require_file(
+                "split_barcodes",
+                wic.resolve_config_path(settings["split_barcodes"]),
+            )
     elif stage in METHSCAN_STAGES:
         wic.require_script_path("methscan_run_script", settings["methscan_run_script"])
         wic.validate_optional_path_dir(
@@ -1301,6 +1416,8 @@ def resolve_settings(args: argparse.Namespace) -> dict:
             args.aggregate_sort_mem,
             cfg.get("aggregate_sort_mem", "8G"),
         ),
+        "bin_matrix_script": pick(args.bin_matrix_script, cfg.get("bin_matrix_script")),
+        "bin_matrix": normalize_bin_matrix_config(cfg.get("bin_matrix")),
         "methscan_run_script": pick(args.methscan_run_script, cfg.get("methscan_run_script")),
         "methscan_prepare_chunksize": pick(
             args.methscan_prepare_chunksize,
@@ -1565,6 +1682,27 @@ def resolve_settings(args: argparse.Namespace) -> dict:
 
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
     settings["aggregate_script"] = settings["aggregate_script"] or "scripts/aggregate.py"
+    settings["bin_matrix_script"] = (
+        settings.get("bin_matrix_script") or "scripts/bin_matrix.py"
+    )
+    need_bin_matrix = stage == "bin_matrix" or (
+        stage == "all" and bin_matrix_enabled(settings)
+    )
+    if need_bin_matrix:
+        if settings.get("bin_matrix") is None:
+            raise ValueError(
+                "bin_matrix config block is required when the stage is enabled "
+                "or --stage bin_matrix is requested"
+            )
+        settings["bin_matrix"] = validate_bin_matrix_config(settings["bin_matrix"])
+        if stage == "all" and not settings["bin_matrix"]["enabled"]:
+            raise ValueError(
+                "bin_matrix.enabled must be true when included in --stage all"
+            )
+    elif settings.get("bin_matrix") is not None and settings["bin_matrix"].get(
+        "enabled"
+    ):
+        settings["bin_matrix"] = validate_bin_matrix_config(settings["bin_matrix"])
     settings["methscan_run_script"] = settings.get("methscan_run_script") or "scripts/methscan_run.py"
     settings["methscan_prepare_chunksize"] = (
         int(settings["methscan_prepare_chunksize"])
@@ -1708,7 +1846,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     )
 
     if stage == "all":
-        for stage_name in STAGE_SEQUENCE:
+        for stage_name in stages_for_all(settings):
             validate_required_for_stage(stage_name, settings)
     else:
         validate_required_for_stage(stage, settings)
@@ -1968,7 +2106,8 @@ def main() -> int:
         )
 
     if stage == "all":
-        for stage_name in STAGE_SEQUENCE:
+        all_stages = stages_for_all(settings)
+        for stage_name in all_stages:
             validate_inputs_for_stage(
                 stage_name,
                 settings,
@@ -1978,7 +2117,7 @@ def main() -> int:
         passthrough_args = build_stage_passthrough_args(sys.argv[1:])
         make_cmd_path = Path(__file__).resolve()
         stage_scripts: list[tuple[str, list[Path]]] = []
-        for stage_name in STAGE_SEQUENCE:
+        for stage_name in all_stages:
             stage_argv = [
                 sys.executable,
                 str(make_cmd_path),
@@ -2612,14 +2751,17 @@ def main() -> int:
                 print(
                     f"[emseq.make_cmd] submitted_count={len(generated_scripts)}"
                 )
-    elif stage == "saturation":
+    elif stage == "bin_matrix":
         command_args = argparse.Namespace(
-            saturation_script=settings["saturation_script"],
-            saturation_reads_threshold=settings["saturation_reads_threshold"],
+            bin_matrix_script=settings["bin_matrix_script"],
+            call_reference_file=settings["call_reference_file"],
+            bin_matrix=settings["bin_matrix"],
+            call_chromosomes=settings.get("call_chromosomes"),
+            split_barcodes=settings.get("split_barcodes"),
         )
-        command = build_saturation_command(command_args, sample_work)
+        command = build_bin_matrix_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "07_saturation.sh"
+            script_path = command_dir / "07_bin_matrix.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -2633,7 +2775,53 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "07_saturation.sbatch"
+            script_path = command_dir / "07_bin_matrix.sbatch"
+            job_name = f"emseq_bin_matrix_{settings['sample_id']}"
+            bin_output = (settings["slurm_output"] or "").replace("%x", job_name)
+            bin_error = (settings["slurm_error"] or "").replace("%x", job_name)
+            slurm_settings = {
+                "sample_id": settings["sample_id"],
+                "stage": stage,
+                "slurm_partition": settings["slurm_partition"],
+                "slurm_mem": settings["slurm_mem"],
+                "slurm_cpus_per_task": settings["slurm_cpus_per_task"],
+                "slurm_output": bin_output,
+                "slurm_error": bin_error,
+                "job_name": job_name,
+            }
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if not settings["dry_run"]:
+                generate_slurm_script(command, script_path, log_dir, slurm_settings)
+                print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"] and not settings["dry_run"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+    elif stage == "saturation":
+        command_args = argparse.Namespace(
+            saturation_script=settings["saturation_script"],
+            saturation_reads_threshold=settings["saturation_reads_threshold"],
+        )
+        command = build_saturation_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "08_saturation.sh"
+            print(f"[emseq.make_cmd] runner={settings['runner']}")
+            print(f"[emseq.make_cmd] stage={stage}")
+            print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
+            print(f"[emseq.make_cmd] script={script_path}")
+            print(f"[emseq.make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            print(f"[emseq.make_cmd] generated={script_path}")
+            if settings["submit"]:
+                submit_script(script_path, settings["runner"])
+                print("[emseq.make_cmd] submitted_count=1")
+        else:
+            script_path = command_dir / "08_saturation.sbatch"
             job_name = f"emseq_saturation_{settings['sample_id']}"
             sat_output = (settings["slurm_output"] or "").replace("%x", job_name)
             sat_error = (settings["slurm_error"] or "").replace("%x", job_name)
@@ -2668,7 +2856,7 @@ def main() -> int:
         )
         command = build_summary_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "08_summary.sh"
+            script_path = command_dir / "09_summary.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -2682,7 +2870,7 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "08_summary.sbatch"
+            script_path = command_dir / "09_summary.sbatch"
             job_name = f"emseq_summary_{settings['sample_id']}"
             summary_output = (settings["slurm_output"] or "").replace("%x", job_name)
             summary_error = (settings["slurm_error"] or "").replace("%x", job_name)
@@ -2714,7 +2902,7 @@ def main() -> int:
         )
         command = build_aggregate_command(command_args, sample_work)
         if settings["runner"] == "local":
-            script_path = command_dir / "11_aggregate.sh"
+            script_path = command_dir / "10_aggregate.sh"
             print(f"[emseq.make_cmd] runner={settings['runner']}")
             print(f"[emseq.make_cmd] stage={stage}")
             print(f"[emseq.make_cmd] sample_id={settings['sample_id']}")
@@ -2728,7 +2916,7 @@ def main() -> int:
                 submit_script(script_path, settings["runner"])
                 print("[emseq.make_cmd] submitted_count=1")
         else:
-            script_path = command_dir / "11_aggregate.sbatch"
+            script_path = command_dir / "10_aggregate.sbatch"
             job_name = f"emseq_aggregate_{settings['sample_id']}"
             aggregate_output = (settings["slurm_output"] or "").replace("%x", job_name)
             aggregate_error = (settings["slurm_error"] or "").replace("%x", job_name)

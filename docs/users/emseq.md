@@ -6,7 +6,7 @@ Use this guide for the EMSeq workflow.
 
 The mainline stages are `fastp_split` through `summary`. Full order and optional stages: [stage contracts](../developers/contracts.md).
 
-`--stage all` runs the mainline only (no `hmc_spike`).
+`--stage all` runs the mainline (plus `bin_matrix` when enabled; no `hmc_spike`).
 
 ## Before You Start
 

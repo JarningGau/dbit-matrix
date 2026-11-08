@@ -27,7 +27,7 @@ pixi run python scripts-emseq/make_cmd.py \
 - commands expand without missing parameters
 - stage order matches [contracts](../developers/contracts.md)
 - after `pool`, the next mainline stages are `pool -> mbias -> call` (`split` is not a stage)
-- `--stage all` covers the fixed mainline only (no `hmc_spike`)
+- `--stage all` covers the mainline (plus `bin_matrix` when enabled; no `hmc_spike`)
 - `methscan_*` stages are optional, explicit, and not part of `--stage all` (see [Methscan optional stages](../developers/contracts.md#methscan-optional-stages-methscan_) in contracts)
 - no path resolution errors appear
 - Slurm dry-run resolves tools from the active `pixi` environment unless explicit `--*-bin` overrides are used

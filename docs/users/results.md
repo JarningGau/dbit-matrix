@@ -24,7 +24,7 @@ Optional advanced outputs:
 
 - `coverage/aggregated_cg_by_id.tsv`
 - `coverage/aggregated_cg_by_pos.tsv`
-- `matrix/bins_<bin_size>/<CONTEXT>/` (`features.tsv`, `barcodes.tsv`, `matrix.mtx.gz`) from TAPS `bin_matrix`
+- `matrix/bins_<bin_size>/<CONTEXT>/` (`features.tsv`, `barcodes.tsv`, `matrix.mtx.gz`) from `bin_matrix` when enabled
 - `methscan/compact/`, `methscan/filter/`, `methscan/matrix/`, and other methscan outputs under `methscan/` (see contracts)
 
 ## Common Checks For RNA
