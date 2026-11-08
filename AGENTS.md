@@ -16,7 +16,7 @@ Use these rules when working in this repository.
 - TAPS / TAPS v2 may insert `hmc_spike` after `saturation` and before `summary` when `hmc_spike.enabled` is true. It depends only on demux `*.spike-in.fq.gz` (not a prerequisite for `align`). EMSeq does not implement `hmc_spike`.
 - `--stage all` generates `work/<sample>/commands/run.sh` or `run.sbatch` in stage order.
 - `split` is not in `--stage all` or `STAGE_CHOICES`. `scripts/split_bams.py` exists but is not a workflow stage.
-- `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
+- `aggregate`, `bin_matrix` (TAPS only), and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are optional explicit stages and are not part of `--stage all`.
 - `scripts-emseq/mbias.py` is the EMSeq `mbias` implementation and is different from TAPS `scripts/mbias.py`.
 - EMSeq `call` is pooled pysam (`scripts-emseq/methy_caller.py` / `scripts-emseq/call.py`), not biscuit pileup.
 

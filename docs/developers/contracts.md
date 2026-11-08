@@ -298,6 +298,34 @@ Contract:
 - `aggregated_cg_by_id.tsv` is sorted by `id`, then position
 - `aggregated_cg_by_pos.tsv` is sorted by position, then `id`
 
+### `bin_matrix`
+
+Purpose: build fixed genomic-bin sparse spot×bin matrices from host per-spot coverage, for one or more 5mC contexts.
+
+Input:
+
+- `coverage/host/**/*.CG.cov` for context `CG`
+- `coverage/host/**/*.CH.cov` for contexts `CA` / `CC` / `CT` / `CH` (`CH` = CA+CC+CT rows)
+- host FASTA via `call_reference_file` (sibling `.fai` required for contig lengths)
+- optional contig allowlist: `call_chromosomes`
+- optional barcode whitelist: `split_barcodes` (intersect discovered cov barcodes)
+
+Outputs (per context under `matrix/bins_<bin_size>/<CONTEXT>/`):
+
+- `features.tsv` — header `bin_id`, `chrom`, `start`, `end` (0-based half-open bins)
+- `barcodes.tsv` — one barcode per line (matrix columns)
+- `matrix.mtx.gz` — multi-value coordinate sparse matrix (features × barcodes, 1-indexed)
+
+Contract:
+
+- TAPS optional stage only (not part of `--stage all`); v1 wiring is `scripts/make_cmd.py`
+- `bin_matrix_bin_size` sets bin width in bp (default `100000`); last short bin per contig is kept: `[0,W)`, `[W,2W)`, …, `[kW, chrom_len)`
+- `bin_matrix_contexts` selects contexts in `{CG, CA, CC, CT, CH}` (default `CG,CA`); one output directory per context
+- cov site coordinates are pysam 0-based; bin index within a contig is `pos // bin_size`
+- per covered spot×bin: `meth = sum(meth)`, `cov = sum(meth+unmeth)`, `frac = meth/cov`
+- uncovered spot×bin entries are omitted (true sparse)
+- each `matrix.mtx.gz` body line is `row col meth cov frac` (comment documents columns); dims line is `n_features n_barcodes n_nonzero`
+
 ### Methscan optional stages (`methscan_*`)
 
 All methscan steps are **host-only**, **explicit** (not part of `--stage all`), and run `scripts/methscan_run.py` in the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it. Per-cell coverage **input** stays under `work/<sample>/coverage/host/`; all **methscan outputs** live under `work/<sample>/methscan/`.
@@ -383,7 +411,7 @@ Purpose: run `prepare`, `filter`, `profile`, `smooth`, `scan`, and `matrix` **in
 ## EMSeq-Specific Additions
 
 - `--stage all` covers only the fixed mainline
-- `aggregate` and the methscan optional stages are not part of `all`
+- `aggregate`, `bin_matrix` (TAPS), and the methscan optional stages are not part of `all`
 - `mbias` has EMSeq-specific chemistry (`scripts-emseq/mbias.py`)
 - `call` polarity is inverted relative to TAPS (retained base = methylated); `.cov` paths still follow the contract above
 - EMSeq uses `call_trimming` like TAPS; biscuit remains an align-stage tool, not a call-stage tool

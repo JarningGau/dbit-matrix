@@ -19,7 +19,7 @@ pixi run python <entry-script> \
 - `TAPS`, `TAPS v2`, and `EMSeq` expand `all` in stage order from [contracts](contracts.md); `hmc_spike` is included only when `hmc_spike.enabled` is true (TAPS / TAPS v2)
 - `RNA` expands `all` to:
   `demux_extract_bc -> align`
-- `aggregate` and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are explicit and are not part of `all`
+- `aggregate`, `bin_matrix` (TAPS), and methscan optional stages (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, `methscan_all`) are explicit and are not part of `all`
 
 ## `local`
 
@@ -45,6 +45,13 @@ In Slurm mode, `mbias` and `call` remain separate host and spike jobs. See [conf
 - available for TAPS and EMSeq only
 - reads `coverage/host/**/*.CG.cov`
 - writes `coverage/aggregated_cg_by_id.tsv` and `coverage/aggregated_cg_by_pos.tsv`
+
+### `bin_matrix`
+
+- available for TAPS only (`scripts/make_cmd.py`)
+- reads host `*.CG.cov` / `*.CH.cov` plus host FASTA `.fai`
+- writes `matrix/bins_<bin_size>/<CONTEXT>/{features.tsv,barcodes.tsv,matrix.mtx.gz}`
+- see [contracts](contracts.md#bin_matrix)
 
 ### Methscan optional stages
 

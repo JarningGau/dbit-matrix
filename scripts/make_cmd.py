@@ -46,9 +46,13 @@ METHSCAN_STAGES = (
     "methscan_matrix",
     "methscan_all",
 )
-STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", *METHSCAN_STAGES, "all"]
+STAGE_CHOICES = [*STAGE_SEQUENCE, "aggregate", "bin_matrix", *METHSCAN_STAGES, "all"]
 # Stages that may appear as top-level keys under workflow `slurm` (nested mode).
-SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {"aggregate", *METHSCAN_STAGES}
+SLURM_NEST_STAGE_KEYS = frozenset(STAGE_SEQUENCE) | {
+    "aggregate",
+    "bin_matrix",
+    *METHSCAN_STAGES,
+}
 STAGE_REQUIRED_FIELDS = {
     "fastp_split": ["r1", "r2", "number_of_split_parts"],
     "demux_extract_bc": [
@@ -64,6 +68,7 @@ STAGE_REQUIRED_FIELDS = {
     "hmc_spike": [],
     "summary": ["barcode_positions"],
     "aggregate": [],
+    "bin_matrix": ["call_reference_file"],
     "methscan_prepare": [],
     "methscan_filter": [],
     "methscan_profile": [],
@@ -361,6 +366,25 @@ def parse_args() -> argparse.Namespace:
             "Memory limit for GNU `sort -S` in aggregate stage "
             "(passed to scripts/aggregate.py via `--sort-mem`). "
             "Default comes from workflow config `aggregate_sort_mem` or 8G."
+        ),
+    )
+    parser.add_argument(
+        "--bin-matrix-script",
+        help="Path to bin_matrix script. Default: scripts/bin_matrix.py.",
+    )
+    parser.add_argument(
+        "--bin-matrix-bin-size",
+        type=int,
+        help=(
+            "Fixed genomic bin width in bp for bin_matrix. "
+            "Default comes from workflow config `bin_matrix_bin_size` or 100000."
+        ),
+    )
+    parser.add_argument(
+        "--bin-matrix-contexts",
+        help=(
+            "Comma-separated 5mC contexts for bin_matrix (CG,CA,CC,CT,CH). "
+            "Default comes from workflow config `bin_matrix_contexts` or CG,CA."
         ),
     )
     parser.add_argument(
@@ -797,6 +821,39 @@ def build_aggregate_command(args: argparse.Namespace, sample_work: Path) -> str:
     sort_mem = getattr(args, "sort_mem", None)
     if sort_mem:
         command.extend(["--sort-mem", str(sort_mem)])
+    return quoted(command)
+
+
+def normalize_bin_matrix_contexts(value) -> str:
+    if value is None:
+        return "CG,CA"
+    if isinstance(value, (list, tuple)):
+        parts = [str(v).strip() for v in value if str(v).strip()]
+        return ",".join(parts) if parts else "CG,CA"
+    text = str(value).strip()
+    return text if text else "CG,CA"
+
+
+def build_bin_matrix_command(args: argparse.Namespace, sample_work: Path) -> str:
+    script_path = Path(args.bin_matrix_script)
+    command = [
+        sys.executable,
+        str(script_path),
+        "--work-path",
+        str(sample_work),
+        "--reference",
+        str(args.call_reference_file),
+        "--bin-size",
+        str(args.bin_matrix_bin_size),
+        "--contexts",
+        str(args.bin_matrix_contexts),
+    ]
+    chromosomes = getattr(args, "call_chromosomes", None)
+    if chromosomes:
+        command.extend(["--chromosomes", str(chromosomes)])
+    barcodes = getattr(args, "split_barcodes", None)
+    if barcodes:
+        command.extend(["--barcodes", str(barcodes)])
     return quoted(command)
 
 
@@ -1296,6 +1353,21 @@ def validate_inputs_for_stage(
             )
     elif stage == "aggregate":
         wic.require_script_path("aggregate_script", settings["aggregate_script"])
+    elif stage == "bin_matrix":
+        wic.require_script_path("bin_matrix_script", settings["bin_matrix_script"])
+        wic.require_file(
+            "call_reference_file",
+            wic.resolve_config_path(settings["call_reference_file"]),
+        )
+        fai_path = Path(
+            str(wic.resolve_config_path(settings["call_reference_file"])) + ".fai"
+        )
+        wic.require_file("call_reference_file.fai", fai_path)
+        if settings.get("split_barcodes"):
+            wic.require_file(
+                "split_barcodes",
+                wic.resolve_config_path(settings["split_barcodes"]),
+            )
     elif stage in METHSCAN_STAGES:
         wic.require_script_path("methscan_run_script", settings["methscan_run_script"])
         wic.validate_optional_path_dir(
@@ -1503,7 +1575,11 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     stage = pick(args.stage, cfg.get("stage")) or "fastp_split"
     if stage == "all":
         slurm_stage_key = STAGE_SEQUENCE[0]
-    elif stage in STAGE_SEQUENCE or stage in ("aggregate", *METHSCAN_STAGES):
+    elif stage in STAGE_SEQUENCE or stage in (
+        "aggregate",
+        "bin_matrix",
+        *METHSCAN_STAGES,
+    ):
         slurm_stage_key = stage
     else:
         slurm_stage_key = STAGE_SEQUENCE[0]
@@ -1637,6 +1713,15 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "aggregate_sort_mem": pick(
             args.aggregate_sort_mem,
             cfg.get("aggregate_sort_mem", "8G"),
+        ),
+        "bin_matrix_script": pick(args.bin_matrix_script, cfg.get("bin_matrix_script")),
+        "bin_matrix_bin_size": pick(
+            args.bin_matrix_bin_size,
+            cfg.get("bin_matrix_bin_size"),
+        ),
+        "bin_matrix_contexts": pick(
+            args.bin_matrix_contexts,
+            cfg.get("bin_matrix_contexts"),
         ),
         "methscan_run_script": pick(args.methscan_run_script, cfg.get("methscan_run_script")),
         "methscan_prepare_chunksize": pick(
@@ -1981,6 +2066,19 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["summary_script"] = settings["summary_script"] or "scripts/summary.py"
     settings["aggregate_script"] = (
         settings["aggregate_script"] or "scripts/aggregate.py"
+    )
+    settings["bin_matrix_script"] = (
+        settings.get("bin_matrix_script") or "scripts/bin_matrix.py"
+    )
+    settings["bin_matrix_bin_size"] = (
+        int(settings["bin_matrix_bin_size"])
+        if settings.get("bin_matrix_bin_size") is not None
+        else 100_000
+    )
+    if settings["bin_matrix_bin_size"] < 1:
+        raise ValueError("bin_matrix_bin_size must be >= 1")
+    settings["bin_matrix_contexts"] = normalize_bin_matrix_contexts(
+        settings.get("bin_matrix_contexts")
     )
     settings["methscan_run_script"] = settings.get("methscan_run_script") or "scripts/methscan_run.py"
     settings["methscan_prepare_chunksize"] = (
@@ -3008,6 +3106,50 @@ def main() -> int:
                     ),
                     slurm_error=settings["slurm_error"].replace(
                         "%x", f"dbit_aggregate_{settings['sample_id']}"
+                    ),
+                    module_line="",
+                )
+                generate_slurm_script(command, script_path, log_dir, slurm_args)
+            generated_scripts.append(script_path)
+    elif settings["stage"] == "bin_matrix":
+        command_args = argparse.Namespace(
+            bin_matrix_script=settings["bin_matrix_script"],
+            call_reference_file=settings["call_reference_file"],
+            bin_matrix_bin_size=settings["bin_matrix_bin_size"],
+            bin_matrix_contexts=settings["bin_matrix_contexts"],
+            call_chromosomes=settings.get("call_chromosomes"),
+            split_barcodes=settings.get("split_barcodes"),
+        )
+        command = build_bin_matrix_command(command_args, sample_work)
+        if settings["runner"] == "local":
+            script_path = command_dir / "19_bin_matrix.sh"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if settings["dry_run"]:
+                return 0
+            generate_local_script(command, script_path)
+            generated_scripts.append(script_path)
+        else:
+            script_path = command_dir / "19_bin_matrix.sbatch"
+            print(f"[make_cmd] runner={settings['runner']}")
+            print(f"[make_cmd] stage={settings['stage']}")
+            print(f"[make_cmd] sample_id={settings['sample_id']}")
+            print(f"[make_cmd] script={script_path}")
+            print(f"[make_cmd] command={command}")
+            if not settings["dry_run"]:
+                slurm_args = argparse.Namespace(
+                    job_name=f"dbit_bin_matrix_{settings['sample_id']}",
+                    slurm_partition=settings["slurm_partition"],
+                    slurm_mem=settings["slurm_mem"],
+                    slurm_cpus_per_task=settings["slurm_cpus_per_task"],
+                    slurm_output=settings["slurm_output"].replace(
+                        "%x", f"dbit_bin_matrix_{settings['sample_id']}"
+                    ),
+                    slurm_error=settings["slurm_error"].replace(
+                        "%x", f"dbit_bin_matrix_{settings['sample_id']}"
                     ),
                     module_line="",
                 )
