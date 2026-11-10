@@ -297,7 +297,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--call-batch-size",
         type=int,
-        help="batch_size passed to methy_caller in call stage. Default: 10000000.",
+        help="batch_size passed to methy_caller in call stage. Default: 2000000.",
     )
     parser.add_argument(
         "--call-context-mode",
@@ -1604,7 +1604,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     settings["call_batch_size"] = (
         int(settings["call_batch_size"])
         if settings["call_batch_size"] is not None
-        else 10_000_000
+        else 2_000_000
     )
     if settings["call_batch_size"] <= 0:
         raise ValueError("call_batch_size must be > 0")

@@ -42,7 +42,7 @@ def parse_args(
     parser.add_argument("--min-base-quality", type=int, default=30)
     parser.add_argument("--min-mapping-quality", type=int, default=10)
     parser.add_argument("--max-depth", type=int, default=50_000)
-    parser.add_argument("--batch-size", type=int, default=10_000_000)
+    parser.add_argument("--batch-size", type=int, default=2_000_000)
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--sample-size", type=int, default=None)
     parser.add_argument("--r1-left-trimming", type=int, default=0)

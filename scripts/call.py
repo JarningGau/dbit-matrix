@@ -117,8 +117,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=10_000_000,
-        help="Forwarded to methy_caller batch_size. Default: 10,000,000.",
+        default=2_000_000,
+        help="Forwarded to methy_caller batch_size. Default: 2,000,000.",
     )
     parser.add_argument(
         "--r1-left-trimming",

@@ -51,7 +51,7 @@ In Slurm mode, `mbias` and `call` remain separate host and spike jobs. See [conf
 
 - available for TAPS / TAPS v2 / EMSeq (`scripts/bin_matrix.py`)
 - conditional mainline stage when `bin_matrix.enabled` is true
-- reads host `*.CG.cov` / `*.CH.cov` plus host FASTA `.fai`
+- reads host `*.CG.cov` / `*.CA.cov` / `*.CC.cov` / `*.CT.cov` (or legacy `*.CH.cov`) plus host FASTA `.fai`
 - writes `matrix/<bin_label>/<CONTEXT>/{features.tsv,barcodes.tsv,matrix.mtx.gz}` (`<bin_label>` rule in [contracts](contracts.md#bin_matrix))
 - see [contracts](contracts.md#bin_matrix)
 

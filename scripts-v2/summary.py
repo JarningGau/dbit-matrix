@@ -839,11 +839,58 @@ def parse_optional_coord(text: str | None) -> int | None:
 
 
 def ch_cov_path_from_cg(cg_cov_path: Path) -> Path:
-    """Sibling CH cov path for a CG cov path (suffix swap)."""
+    """Sibling aggregate CH cov path for a CG cov path (mito/spike suffix swap)."""
     name = cg_cov_path.name
     if name.endswith(".CG.cov"):
         return cg_cov_path.with_name(name[: -len(".CG.cov")] + ".CH.cov")
     return cg_cov_path.with_suffix("").with_suffix(".CH.cov")
+
+
+def host_ch_context_cov_paths_from_cg(cg_cov_path: Path) -> list[Path]:
+    """Host per-spot CA/CC/CT cov paths sibling to a CG cov path."""
+    name = cg_cov_path.name
+    if name.endswith(".CG.cov"):
+        stem = name[: -len(".CG.cov")]
+        return [
+            cg_cov_path.with_name(f"{stem}.{context}.cov")
+            for context in ("CA", "CC", "CT")
+        ]
+    stem_path = cg_cov_path.with_suffix("").with_suffix("")
+    return [
+        stem_path.with_name(stem_path.name + f".{context}.cov")
+        for context in ("CA", "CC", "CT")
+    ]
+
+
+def parse_host_ch_cov_stats(
+    cg_cov_path: Path,
+) -> tuple[tuple[float, int] | None, dict[str, tuple[float, int] | None]]:
+    """Parse host CA/CC/CT cov files; fall back to legacy sibling CH.cov."""
+    context_paths = host_ch_context_cov_paths_from_cg(cg_cov_path)
+    if any(path.exists() for path in context_paths):
+        ch_sum = 0.0
+        ch_count = 0
+        context_sums = {context: 0.0 for context in CH_CONTEXTS}
+        context_counts = {context: 0 for context in CH_CONTEXTS}
+        for path in context_paths:
+            if not path.exists():
+                continue
+            _, per_context = parse_ch_cov_stats(path)
+            for context in CH_CONTEXTS:
+                stats = per_context.get(context)
+                if stats is None:
+                    continue
+                mean_val, count_val = stats
+                context_sums[context] += mean_val * count_val
+                context_counts[context] += count_val
+                ch_sum += mean_val * count_val
+                ch_count += count_val
+        context_stats = {
+            context: _finalize_mean_count(context_sums[context], context_counts[context])
+            for context in CH_CONTEXTS
+        }
+        return _finalize_mean_count(ch_sum, ch_count), context_stats
+    return parse_ch_cov_stats(ch_cov_path_from_cg(cg_cov_path))
 
 
 def weighted_mean_from_rows(
@@ -904,7 +951,7 @@ def _parse_spot_cov_pair(
 ]:
     cb = cg_cov_path.name[: -len(".CG.cov")].upper()
     cg_stats = parse_cov_stats(cg_cov_path)
-    ch_stats, context_stats = parse_ch_cov_stats(ch_cov_path_from_cg(cg_cov_path))
+    ch_stats, context_stats = parse_host_ch_cov_stats(cg_cov_path)
     return cb, cg_stats, ch_stats, context_stats
 
 

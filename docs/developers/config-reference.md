@@ -66,6 +66,7 @@ Calling fields:
 - `call_r2_right_trimming` (legacy; global fallback default)
 - `call_caller_script`
 - `call_jobs`
+- `call_batch_size`
 - `call_min_mapping_quality`
 - `call_max_depth`
 - `split_barcodes` (CB whitelist for `call`; not a split-stage input)
@@ -96,7 +97,8 @@ Notes:
   New configs should prefer `call_trimming`.
 - TAPS `call_context_mode` accepts `cg`, `ch`, or `both`
 - `call_caller_script` selects the TAPS caller ([`scripts/methy_caller.py`](../../scripts/methy_caller.py)); CG and CH share one pass
-- `call_jobs` sets interval workers inside each chromosome (default `8`)
+- `call_jobs` sets interval workers across a single global genomic interval pool (default `8`)
+- `call_batch_size` is the fixed interval width in bp for that pool (default `2000000`); it is no longer capped per chromosome by `call_jobs`
 - `call_min_mapping_quality` defaults to `10`; `call_max_depth` defaults to `50000`
 - host `call` requires `split_barcodes` as the CB whitelist (defaults to `barcode1_whitelist` when omitted)
 - `call_smoke` writes host `.cov` only for the 16 spots with highest `reads` (see [contracts](contracts.md#call))

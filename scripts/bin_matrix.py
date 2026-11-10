@@ -20,6 +20,11 @@ from typing import Iterable, Iterator, Optional
 VALID_CONTEXTS = ("CG", "CA", "CC", "CT", "CH")
 CG_SUFFIX = ".CG.cov"
 CH_SUFFIX = ".CH.cov"
+CH_CONTEXT_SUFFIXES = {
+    "CA": ".CA.cov",
+    "CC": ".CC.cov",
+    "CT": ".CT.cov",
+}
 CH_DINUCLEOTIDES = frozenset({"CA", "CC", "CT"})
 
 
@@ -198,11 +203,12 @@ def bin_index_for_site(
 
 def spot_id_from_cov_path(cov_path: Path) -> str:
     name = cov_path.name
-    if name.endswith(CG_SUFFIX):
-        return name[: -len(CG_SUFFIX)]
-    if name.endswith(CH_SUFFIX):
-        return name[: -len(CH_SUFFIX)]
-    raise ValueError(f"expected *{CG_SUFFIX} or *{CH_SUFFIX}, got: {cov_path}")
+    for suffix in (CG_SUFFIX, *CH_CONTEXT_SUFFIXES.values(), CH_SUFFIX):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    raise ValueError(
+        f"expected *{CG_SUFFIX}, *.CA/CC/CT.cov, or *{CH_SUFFIX}, got: {cov_path}"
+    )
 
 
 def load_barcode_whitelist(path: Path) -> set[str]:
@@ -254,8 +260,14 @@ def discover_barcodes(
         for path in host_cov_root.rglob(f"*{CG_SUFFIX}"):
             barcodes.add(spot_id_from_cov_path(path))
     if need_ch:
-        for path in host_cov_root.rglob(f"*{CH_SUFFIX}"):
-            barcodes.add(spot_id_from_cov_path(path))
+        found_split = False
+        for suffix in CH_CONTEXT_SUFFIXES.values():
+            for path in host_cov_root.rglob(f"*{suffix}"):
+                barcodes.add(spot_id_from_cov_path(path))
+                found_split = True
+        if not found_split:
+            for path in host_cov_root.rglob(f"*{CH_SUFFIX}"):
+                barcodes.add(spot_id_from_cov_path(path))
     if whitelist is not None:
         adapted = adapt_whitelist_to_barcodes(whitelist, barcodes)
         barcodes &= adapted
@@ -275,6 +287,48 @@ def cov_path_for_barcode(
     if len(matches) > 1:
         raise ValueError(f"multiple cov files for barcode {barcode}: {matches}")
     return matches[0]
+
+
+def host_cov_paths_for_context(
+    host_cov_root: Path, barcode: str, context: str
+) -> list[Path]:
+    """Resolve host cov files for a context; CH expands to CA/CC/CT when present."""
+    if context == "CG":
+        path = cov_path_for_barcode(host_cov_root, barcode, CG_SUFFIX)
+        return [path] if path is not None else []
+    if context in CH_CONTEXT_SUFFIXES:
+        split = cov_path_for_barcode(
+            host_cov_root, barcode, CH_CONTEXT_SUFFIXES[context]
+        )
+        if split is not None:
+            return [split]
+        legacy = cov_path_for_barcode(host_cov_root, barcode, CH_SUFFIX)
+        return [legacy] if legacy is not None else []
+    if context == "CH":
+        split_paths = [
+            cov_path_for_barcode(host_cov_root, barcode, suffix)
+            for suffix in CH_CONTEXT_SUFFIXES.values()
+        ]
+        present = [path for path in split_paths if path is not None]
+        if present:
+            return present
+        legacy = cov_path_for_barcode(host_cov_root, barcode, CH_SUFFIX)
+        return [legacy] if legacy is not None else []
+    return []
+
+
+def barcode_has_context_inputs(
+    host_cov_root: Path, barcode: str, context: str
+) -> bool:
+    """True when the barcode has any input cov for this context family."""
+    if context == "CG":
+        return cov_path_for_barcode(host_cov_root, barcode, CG_SUFFIX) is not None
+    if any(
+        cov_path_for_barcode(host_cov_root, barcode, suffix) is not None
+        for suffix in CH_CONTEXT_SUFFIXES.values()
+    ):
+        return True
+    return cov_path_for_barcode(host_cov_root, barcode, CH_SUFFIX) is not None
 
 
 def iter_cov_counts(
@@ -376,11 +430,10 @@ def build_context_matrix(
     out_dir: Path,
     dry_run: bool,
 ) -> int:
-    suffix = CG_SUFFIX if context == "CG" else CH_SUFFIX
     missing = [
         bc
         for bc in barcodes
-        if cov_path_for_barcode(host_cov_root, bc, suffix) is None
+        if not barcode_has_context_inputs(host_cov_root, bc, context)
     ]
     if missing and context == "CG":
         raise FileNotFoundError(
@@ -388,7 +441,8 @@ def build_context_matrix(
         )
     if missing and context != "CG":
         raise FileNotFoundError(
-            f"missing {CH_SUFFIX} for barcodes (showing up to 5): {missing[:5]}"
+            f"missing CA/CC/CT or {CH_SUFFIX} for barcodes "
+            f"(showing up to 5): {missing[:5]}"
         )
 
     if dry_run:
@@ -408,15 +462,20 @@ def build_context_matrix(
     ) as body_tmp:
         body_path = Path(body_tmp.name)
         for col_idx, barcode in enumerate(barcodes, start=1):
-            cov_path = cov_path_for_barcode(host_cov_root, barcode, suffix)
-            assert cov_path is not None
-            acc = accumulate_spot_bins(
-                cov_path,
-                context,
-                chrom_offsets,
-                bin_size,
-                n_bins=len(bins),
-            )
+            cov_paths = host_cov_paths_for_context(host_cov_root, barcode, context)
+            acc: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+            for cov_path in cov_paths:
+                part = accumulate_spot_bins(
+                    cov_path,
+                    context,
+                    chrom_offsets,
+                    bin_size,
+                    n_bins=len(bins),
+                )
+                for row_idx, (meth, unmeth) in part.items():
+                    slot = acc[row_idx]
+                    slot[0] += meth
+                    slot[1] += unmeth
             for row_idx in sorted(acc):
                 meth, unmeth = acc[row_idx]
                 cov = meth + unmeth

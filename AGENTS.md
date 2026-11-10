@@ -8,6 +8,7 @@ Use these rules when working in this repository.
 - Prefer the simplest solution that preserves the required contract.
 - Build the MVP first. Extend only when the MVP is stable.
 - Make one main change per iteration.
+- Do NOT use superpowers.
 
 ## Current Workflow Status
 

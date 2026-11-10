@@ -11,8 +11,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Dict, Iterable, List, Optional, Set, Tuple
@@ -53,7 +54,7 @@ METH_STATS_FIELDS = [
     "ct_site_count",
 ]
 
-WORKER_CHROMOSOME_SEQUENCE: Optional[str] = None
+WORKER_FASTA: Optional[pysam.FastaFile] = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,167 @@ def scan_host_bam_for_counts_and_funnel(
         if spot is None:
             continue
         counts[spot] = counts.get(spot, 0) + 1
+    return counts, funnel
+
+
+def _merge_spot_counts(dest: Dict[str, int], src: Dict[str, int]) -> None:
+    for spot, reads in src.items():
+        dest[spot] = dest.get(spot, 0) + int(reads)
+
+
+def _merge_host_bam_funnel(dest: HostBamFunnel, src: HostBamFunnel) -> None:
+    for key in (
+        "host_mapped_reads",
+        "host_valid_reads",
+        "host_valid_reads_mito",
+        "host_valid_reads_nuclear",
+    ):
+        dest[key] = int(dest[key]) + int(src[key])
+
+
+def _pack_contigs_by_weight(
+    contig_weights: List[Tuple[str, int]],
+    jobs: int,
+) -> List[List[str]]:
+    """Greedy-bin contigs into up to jobs chunks by descending weight."""
+    if not contig_weights:
+        return []
+    worker_count = max(1, min(int(jobs), len(contig_weights)))
+    ordered = sorted(contig_weights, key=lambda item: item[1], reverse=True)
+    bins: List[List[str]] = [[] for _ in range(worker_count)]
+    bin_weights = [0] * worker_count
+    for contig, weight in ordered:
+        index = min(range(worker_count), key=lambda i: bin_weights[i])
+        bins[index].append(contig)
+        bin_weights[index] += max(1, weight)
+    return [chunk for chunk in bins if chunk]
+
+
+def _host_bam_contig_weights(bam_handle: pysam.AlignmentFile) -> List[Tuple[str, int]]:
+    try:
+        stats = bam_handle.get_index_statistics()
+    except (ValueError, OSError):
+        references = list(bam_handle.references)
+        lengths = list(bam_handle.lengths)
+        return [
+            (name, int(length) if length is not None else 1)
+            for name, length in zip(references, lengths)
+        ]
+    weights: List[Tuple[str, int]] = []
+    for entry in stats:
+        name = getattr(entry, "contig", None)
+        if not isinstance(name, str) or not name:
+            continue
+        mapped = int(getattr(entry, "mapped", 0) or 0)
+        weights.append((name, mapped if mapped > 0 else 1))
+    return weights
+
+
+def _scan_host_bam_contigs_counts(
+    bam_path: str,
+    contig_names: List[str],
+    cb_tag: str,
+    barcode_to_index: BarcodeMap,
+    barcode_len: int,
+    mito_chromosomes: frozenset[str],
+) -> Tuple[Dict[str, int], HostBamFunnel]:
+    with pysam.AlignmentFile(bam_path, "rb") as bam_handle:
+        records = (
+            read
+            for contig in contig_names
+            for read in bam_handle.fetch(contig)
+        )
+        return scan_host_bam_for_counts_and_funnel(
+            records,
+            cb_tag,
+            barcode_to_index,
+            barcode_len,
+            mito_chromosomes,
+        )
+
+
+def _scan_host_bam_unmapped_counts(
+    bam_path: str,
+    cb_tag: str,
+    barcode_to_index: BarcodeMap,
+    barcode_len: int,
+    mito_chromosomes: frozenset[str],
+) -> Tuple[Dict[str, int], HostBamFunnel]:
+    """Scan unmapped records so counts match until_eof (funnel ignores unmapped)."""
+    with pysam.AlignmentFile(bam_path, "rb") as bam_handle:
+        return scan_host_bam_for_counts_and_funnel(
+            bam_handle.fetch("*"),
+            cb_tag,
+            barcode_to_index,
+            barcode_len,
+            mito_chromosomes,
+        )
+
+
+def scan_host_bam_counts_and_funnel_parallel(
+    bam_path: str,
+    cb_tag: str,
+    barcode_to_index: BarcodeMap,
+    barcode_len: int,
+    mito_chromosomes: frozenset[str],
+    jobs: int,
+) -> Tuple[Dict[str, int], HostBamFunnel]:
+    """Parallel contig-weighted counts+funnel scan; falls back to until_eof."""
+    worker_count = max(1, int(jobs))
+    if worker_count <= 1:
+        with pysam.AlignmentFile(bam_path, "rb") as bam_handle:
+            return scan_host_bam_for_counts_and_funnel(
+                bam_handle.fetch(until_eof=True),
+                cb_tag,
+                barcode_to_index,
+                barcode_len,
+                mito_chromosomes,
+            )
+
+    with pysam.AlignmentFile(bam_path, "rb") as bam_handle:
+        has_index = bool(bam_handle.has_index())
+        contig_weights = _host_bam_contig_weights(bam_handle) if has_index else []
+    if not has_index or not contig_weights:
+        with pysam.AlignmentFile(bam_path, "rb") as bam_handle:
+            return scan_host_bam_for_counts_and_funnel(
+                bam_handle.fetch(until_eof=True),
+                cb_tag,
+                barcode_to_index,
+                barcode_len,
+                mito_chromosomes,
+            )
+
+    chunks = _pack_contigs_by_weight(contig_weights, worker_count)
+    counts: Dict[str, int] = {}
+    funnel = empty_host_bam_funnel(mito_chromosomes)
+    max_workers = max(1, len(chunks) + 1)
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(
+                _scan_host_bam_contigs_counts,
+                bam_path,
+                chunk,
+                cb_tag,
+                barcode_to_index,
+                barcode_len,
+                mito_chromosomes,
+            )
+            for chunk in chunks
+        ]
+        futures.append(
+            executor.submit(
+                _scan_host_bam_unmapped_counts,
+                bam_path,
+                cb_tag,
+                barcode_to_index,
+                barcode_len,
+                mito_chromosomes,
+            )
+        )
+        for future in as_completed(futures):
+            part_counts, part_funnel = future.result()
+            _merge_spot_counts(counts, part_counts)
+            _merge_host_bam_funnel(funnel, part_funnel)
     return counts, funnel
 
 
@@ -404,6 +566,34 @@ def has_unclear_conversion_strand(record: pysam.AlignedSegment) -> bool:
         return False
 
 
+def is_trimmed_from_fields(
+    is_read1: bool,
+    is_read2: bool,
+    is_reverse: bool,
+    query_pos: int,
+    read_len: int,
+    r1_left: int,
+    r1_right: int,
+    r2_left: int,
+    r2_right: int,
+) -> bool:
+    if is_read1:
+        left_trim, right_trim = r1_left, r1_right
+    elif is_read2:
+        left_trim, right_trim = r2_left, r2_right
+    else:
+        return False
+    if left_trim == 0 and right_trim == 0:
+        return False
+    if is_reverse:
+        left_cycle = read_len - query_pos
+        right_cycle = query_pos + 1
+    else:
+        left_cycle = query_pos + 1
+        right_cycle = read_len - query_pos
+    return left_cycle <= left_trim or right_cycle <= right_trim
+
+
 def is_trimmed(
     record: pysam.AlignedSegment,
     query_pos: int,
@@ -413,21 +603,67 @@ def is_trimmed(
     r2_left: int,
     r2_right: int,
 ) -> bool:
-    if record.is_read1:
-        left_trim, right_trim = r1_left, r1_right
-    elif record.is_read2:
-        left_trim, right_trim = r2_left, r2_right
-    else:
-        return False
-    if left_trim == 0 and right_trim == 0:
-        return False
-    if record.is_reverse:
-        left_cycle = read_len - query_pos
-        right_cycle = query_pos + 1
-    else:
-        left_cycle = query_pos + 1
-        right_cycle = read_len - query_pos
-    return left_cycle <= left_trim or right_cycle <= right_trim
+    return is_trimmed_from_fields(
+        bool(record.is_read1),
+        bool(record.is_read2),
+        bool(record.is_reverse),
+        query_pos,
+        read_len,
+        r1_left,
+        r1_right,
+        r2_left,
+        r2_right,
+    )
+
+
+# Cached pileup-read fields: (seq, read_len, is_read1, is_read2, is_reverse, spot).
+# None means the read is rejected for this interval (unclear YD / missing CB / spot filter).
+ReadCacheEntry = Optional[Tuple[str, int, bool, bool, bool, Optional[str]]]
+ReadCache = Dict[Tuple[str, int], ReadCacheEntry]
+
+
+def resolve_read_cache(
+    record: pysam.AlignedSegment,
+    cache: ReadCache,
+    host: bool,
+    cb_tag: str,
+    barcode_to_index: Optional[BarcodeMap],
+    barcode_len: int,
+    allowed_spots: Optional[Set[str]],
+    skip_spots: Set[str],
+) -> ReadCacheEntry:
+    key = (str(record.query_name), int(record.flag))
+    if key in cache:
+        return cache[key]
+    if has_unclear_conversion_strand(record):
+        cache[key] = None
+        return None
+    seq = record.query_sequence
+    if not seq:
+        cache[key] = None
+        return None
+    spot: Optional[str] = None
+    if host:
+        try:
+            cb = record.get_tag(cb_tag)
+        except KeyError:
+            cache[key] = None
+            return None
+        assert barcode_to_index is not None
+        spot = spot_id_from_cb(str(cb), barcode_to_index, barcode_len)
+        if not spot_is_allowed(spot, allowed_spots) or spot in skip_spots:
+            cache[key] = None
+            return None
+    entry: ReadCacheEntry = (
+        seq,
+        len(seq),
+        bool(record.is_read1),
+        bool(record.is_read2),
+        bool(record.is_reverse),
+        spot,
+    )
+    cache[key] = entry
+    return entry
 
 
 def spot_is_allowed(spot_id: Optional[str], allowed: Optional[Set[str]]) -> bool:
@@ -468,10 +704,30 @@ def parse_mito_chromosomes(chromosome_csv: str) -> frozenset[str]:
 
 
 def host_cov_path(out_dir: Path, spot_id: str, suffix: str) -> Path:
-    """Host cov path: coverage/host/<first3>/<CB>.{CG,CH}.cov."""
+    """Host cov path: coverage/host/<first3>/<CB>.{CG,CA,CC,CT}.cov."""
     if len(spot_id) < 3:
         raise ValueError(f"CB spot id too short for prefix subdir: {spot_id}")
     return out_dir / spot_id[:3] / f"{spot_id}.{suffix}.cov"
+
+
+def host_context_suffixes(context_mode: str) -> List[str]:
+    """Host per-spot cov suffixes for the configured context mode."""
+    suffixes: List[str] = []
+    if context_mode in {"cg", "both"}:
+        suffixes.append("CG")
+    if context_mode in {"ch", "both"}:
+        suffixes.extend(["CA", "CC", "CT"])
+    return suffixes
+
+
+def aggregate_context_suffixes(context_mode: str) -> List[str]:
+    """Aggregate (mito/spike) cov suffixes; CH stays a single file."""
+    suffixes: List[str] = []
+    if context_mode in {"cg", "both"}:
+        suffixes.append("CG")
+    if context_mode in {"ch", "both"}:
+        suffixes.append("CH")
+    return suffixes
 
 
 def new_meth_stats_accumulator() -> Dict[str, Dict[str, float | int]]:
@@ -509,7 +765,7 @@ def accumulate_cov_line_for_meth_stats(
         min_fields = 6
         spot_idx = 6
         context_idx: Optional[int] = None
-    elif suffix == "CH":
+    elif suffix in {"CH", "CA", "CC", "CT"}:
         min_fields = 6
         spot_idx = 8
         context_idx = 6
@@ -678,10 +934,25 @@ def format_ch_line(
     )
 
 
-def effective_batch_size(
-    chromosome_length: int, configured_batch_size: int, jobs: int
-) -> int:
-    return min(configured_batch_size, max(1, chromosome_length // max(jobs, 1)))
+def init_call_worker(reference: str) -> None:
+    global WORKER_FASTA
+    if WORKER_FASTA is not None:
+        try:
+            WORKER_FASTA.close()
+        except Exception:
+            pass
+        WORKER_FASTA = None
+    WORKER_FASTA = pysam.FastaFile(reference)
+
+
+def load_interval_sequence(chrom: str, start: int, stop: int) -> Tuple[str, int]:
+    """Fetch uppercase reference for [start, stop) with 1bp padding; return (seq, fetch_start)."""
+    if WORKER_FASTA is None:
+        raise RuntimeError("worker fasta was not initialized")
+    chrom_len = WORKER_FASTA.get_reference_length(chrom)
+    fetch_start = max(0, start - 1)
+    fetch_stop = min(chrom_len, stop + 1)
+    return WORKER_FASTA.fetch(chrom, fetch_start, fetch_stop).upper(), fetch_start
 
 
 def count_cg_column(
@@ -698,26 +969,45 @@ def count_cg_column(
     r2_left: int,
     r2_right: int,
     converted_means_methylated: bool,
+    read_cache: ReadCache,
 ) -> None:
     pos = pileup_col.pos
     for pileup_read in pileup_col.pileups:
         record = pileup_read.alignment
         if record.flag not in PAIRED_FLAGS:
             continue
-        if has_unclear_conversion_strand(record):
-            continue
         if pileup_read.is_del or pileup_read.is_refskip:
             continue
+        cached = resolve_read_cache(
+            record,
+            read_cache,
+            host,
+            cb_tag,
+            barcode_to_index,
+            barcode_len,
+            allowed_spots,
+            skip_spots,
+        )
+        if cached is None:
+            continue
+        seq, read_len, is_read1, is_read2, is_reverse, spot = cached
         qpos = pileup_read.query_position
-        if qpos is None:
+        if qpos is None or qpos + 1 >= read_len:
             continue
-        seq = record.query_sequence
-        if not seq or qpos + 1 >= len(seq):
+        if is_trimmed_from_fields(
+            is_read1, is_read2, is_reverse, qpos, read_len, r1_left, r1_right, r2_left, r2_right
+        ):
             continue
-        if is_trimmed(record, qpos, len(seq), r1_left, r1_right, r2_left, r2_right):
-            continue
-        if is_trimmed(
-            record, qpos + 1, len(seq), r1_left, r1_right, r2_left, r2_right
+        if is_trimmed_from_fields(
+            is_read1,
+            is_read2,
+            is_reverse,
+            qpos + 1,
+            read_len,
+            r1_left,
+            r1_right,
+            r2_left,
+            r2_right,
         ):
             continue
         methylated = classify_cg_observation(
@@ -728,14 +1018,6 @@ def count_cg_column(
         key = 0 if methylated else 1
         if not host:
             dest.setdefault(pos, [0, 0])[key] += 1
-            continue
-        try:
-            cb = record.get_tag(cb_tag)
-        except KeyError:
-            continue
-        assert barcode_to_index is not None
-        spot = spot_id_from_cb(str(cb), barcode_to_index, barcode_len)
-        if not spot_is_allowed(spot, allowed_spots) or spot in skip_spots:
             continue
         assert isinstance(spot, str)
         slot = dest.setdefault(spot, {}).setdefault(pos, [0, 0])
@@ -758,6 +1040,7 @@ def count_ch_column(
     r2_left: int,
     r2_right: int,
     converted_means_methylated: bool,
+    read_cache: ReadCache,
 ) -> None:
     pos = pileup_col.pos
     strand_flags = TOP_FLAGS if strand == "+" else BOT_FLAGS
@@ -765,20 +1048,30 @@ def count_ch_column(
         record = pileup_read.alignment
         if record.flag not in strand_flags:
             continue
-        if has_unclear_conversion_strand(record):
-            continue
         if pileup_read.is_del or pileup_read.is_refskip:
             continue
+        cached = resolve_read_cache(
+            record,
+            read_cache,
+            host,
+            cb_tag,
+            barcode_to_index,
+            barcode_len,
+            allowed_spots,
+            skip_spots,
+        )
+        if cached is None:
+            continue
+        seq, read_len, is_read1, is_read2, is_reverse, spot = cached
         qpos = pileup_read.query_position
-        if qpos is None:
+        if qpos is None or qpos >= read_len:
             continue
-        seq = record.query_sequence
-        if not seq or qpos >= len(seq):
-            continue
-        if is_trimmed(record, qpos, len(seq), r1_left, r1_right, r2_left, r2_right):
+        if is_trimmed_from_fields(
+            is_read1, is_read2, is_reverse, qpos, read_len, r1_left, r1_right, r2_left, r2_right
+        ):
             continue
         if strand == "+":
-            if qpos + 1 >= len(seq):
+            if qpos + 1 >= read_len:
                 continue
             neighbor_qpos = qpos + 1
             neighbor = seq[neighbor_qpos]
@@ -787,8 +1080,16 @@ def count_ch_column(
                 continue
             neighbor_qpos = qpos - 1
             neighbor = seq[neighbor_qpos]
-        if is_trimmed(
-            record, neighbor_qpos, len(seq), r1_left, r1_right, r2_left, r2_right
+        if is_trimmed_from_fields(
+            is_read1,
+            is_read2,
+            is_reverse,
+            neighbor_qpos,
+            read_len,
+            r1_left,
+            r1_right,
+            r2_left,
+            r2_right,
         ):
             continue
         if not ch_neighbor_matches(context, strand, neighbor):
@@ -803,14 +1104,6 @@ def count_ch_column(
             values = dest.setdefault((pos, context, strand), [0, 0])
             values[0] += meth
             values[1] += unmeth
-            continue
-        try:
-            cb = record.get_tag(cb_tag)
-        except KeyError:
-            continue
-        assert barcode_to_index is not None
-        spot = spot_id_from_cb(str(cb), barcode_to_index, barcode_len)
-        if not spot_is_allowed(spot, allowed_spots) or spot in skip_spots:
             continue
         assert isinstance(spot, str)
         slot = dest.setdefault(spot, {}).setdefault(pos, [0, 0, context, strand])
@@ -842,13 +1135,12 @@ def process_interval(
     allowed_positions: Optional[Set[int]],
     converted_means_methylated: bool,
 ) -> Tuple[int, Dict[str, str]]:
-    sequence = WORKER_CHROMOSOME_SEQUENCE
-    if sequence is None:
-        raise RuntimeError("worker chromosome sequence was not initialized")
+    sequence, fetch_start = load_interval_sequence(chrom, start, stop)
     cg_host: CgCounts = defaultdict(dict)
     ch_host: ChCounts = defaultdict(dict)
     cg_agg: Dict[int, List[int]] = defaultdict(lambda: [0, 0])
     ch_agg: Dict[Tuple[int, str, str], List[int]] = defaultdict(lambda: [0, 0])
+    read_cache: ReadCache = {}
     with pysam.AlignmentFile(bam_path, "rb") as bam:
         for pileup_col in bam.pileup(
             chrom,
@@ -866,7 +1158,10 @@ def process_interval(
         ):
             if allowed_positions is not None and pileup_col.pos not in allowed_positions:
                 continue
-            is_cpg, ch_target = classify_reference_position(sequence, pileup_col.pos)
+            local_pos = pileup_col.pos - fetch_start
+            if local_pos < 0 or local_pos >= len(sequence):
+                continue
+            is_cpg, ch_target = classify_reference_position(sequence, local_pos)
             if is_cpg and context_mode in {"cg", "both"}:
                 count_cg_column(
                     pileup_col,
@@ -882,6 +1177,7 @@ def process_interval(
                     r2_left,
                     r2_right,
                     converted_means_methylated,
+                    read_cache,
                 )
             if ch_target is not None and context_mode in {"ch", "both"}:
                 ctx, strand = ch_target
@@ -901,6 +1197,7 @@ def process_interval(
                     r2_left,
                     r2_right,
                     converted_means_methylated,
+                    read_cache,
                 )
     part_root = Path(part_dir)
     paths: Dict[str, str] = {}
@@ -923,26 +1220,46 @@ def process_interval(
                     handle.write(format_cg_line(chrom, pos, meth, unmeth))
         paths["CG"] = str(cg_path)
     if context_mode in {"ch", "both"}:
-        ch_path = part_root / f"batch_{batch_index:06d}.CH.part"
-        with ch_path.open("w", encoding="utf-8") as handle:
-            if host:
+        if host:
+            ch_handles = {
+                ctx: (part_root / f"batch_{batch_index:06d}.{ctx}.part").open(
+                    "w", encoding="utf-8"
+                )
+                for ctx in ("CA", "CC", "CT")
+            }
+            try:
                 for spot_id, pos_map in ch_host.items():
                     for pos, values in pos_map.items():
                         meth, unmeth, ctx, strand = values
                         if int(meth) + int(unmeth) <= 0:
                             continue
-                        handle.write(
+                        ctx_key = str(ctx)
+                        if ctx_key not in ch_handles:
+                            continue
+                        ch_handles[ctx_key].write(
                             format_ch_line(
-                                chrom, pos, int(meth), int(unmeth), str(ctx), str(strand)
+                                chrom,
+                                pos,
+                                int(meth),
+                                int(unmeth),
+                                ctx_key,
+                                str(strand),
                             ).rstrip("\n")
                             + f"\t{spot_id}\n"
                         )
-            else:
+            finally:
+                for handle in ch_handles.values():
+                    handle.close()
+            for ctx in ("CA", "CC", "CT"):
+                paths[ctx] = str(part_root / f"batch_{batch_index:06d}.{ctx}.part")
+        else:
+            ch_path = part_root / f"batch_{batch_index:06d}.CH.part"
+            with ch_path.open("w", encoding="utf-8") as handle:
                 for (pos, ctx, strand), (meth, unmeth) in sorted(ch_agg.items()):
                     if meth + unmeth <= 0:
                         continue
                     handle.write(format_ch_line(chrom, pos, meth, unmeth, ctx, strand))
-        paths["CH"] = str(ch_path)
+            paths["CH"] = str(ch_path)
     return batch_index, paths
 
 
@@ -958,7 +1275,13 @@ def append_parts(
             shutil.copyfileobj(part_handle, handles[context], length=16 * 1024 * 1024)
 
 
-def sort_part_by_spot(part_path: Path, field_index: int, sorted_path: Path) -> None:
+def sort_part_by_spot(
+    part_path: Path,
+    field_index: int,
+    sorted_path: Path,
+    parallel: int = 1,
+    buffer_size: str = "50%",
+) -> None:
     """Sort a combined part file by the spot_id column into sorted_path."""
     try:
         subprocess.run(
@@ -969,6 +1292,10 @@ def sort_part_by_spot(part_path: Path, field_index: int, sorted_path: Path) -> N
                 "\t",
                 "-k",
                 f"{field_index},{field_index}",
+                "--parallel",
+                str(max(1, int(parallel))),
+                "-S",
+                str(buffer_size),
                 "-T",
                 str(part_path.parent),
                 "-o",
@@ -1002,15 +1329,26 @@ def stream_sorted_parts(
     allowed_spots: Set[str],
     skip_spots: Set[str],
     meth_acc: Optional[Dict[str, Dict[str, float | int]]] = None,
-) -> None:
+    sort_parallel: int = 1,
+) -> Dict[str, Dict[str, float | int]]:
+    """Sort+split one combined part into per-spot cov files; return local meth stats."""
+    local_acc = meth_acc if meth_acc is not None else new_meth_stats_accumulator()
     if not part_path.is_file() or part_path.stat().st_size == 0:
-        return
-    sorted_path = part_path.with_name(part_path.name + f".sorted.{os.getpid()}")
+        return local_acc
+    sorted_path = part_path.with_name(
+        part_path.name + f".sorted.{os.getpid()}.{suffix}"
+    )
     current_spot: Optional[str] = None
     current_temp: Optional[Path] = None
     current_handle = None
+    expected_tabs = expected_fields - 1
     try:
-        sort_part_by_spot(part_path, expected_fields, sorted_path)
+        sort_part_by_spot(
+            part_path,
+            expected_fields,
+            sorted_path,
+            parallel=sort_parallel,
+        )
 
         def close_current() -> None:
             nonlocal current_spot, current_temp, current_handle
@@ -1023,11 +1361,13 @@ def stream_sorted_parts(
             current_temp = None
 
         with sorted_path.open(encoding="utf-8") as handle:
-            for line in handle:
-                fields = line.rstrip("\n").split("\t")
-                if len(fields) != expected_fields:
+            for raw_line in handle:
+                line = raw_line.rstrip("\n")
+                if line.count("\t") != expected_tabs:
                     continue
-                spot_id = fields[-1]
+                prefix, sep, spot_id = line.rpartition("\t")
+                if not sep:
+                    continue
                 if spot_id not in allowed_spots or spot_id in skip_spots:
                     continue
                 if spot_id != current_spot:
@@ -1035,14 +1375,16 @@ def stream_sorted_parts(
                     current_spot = spot_id
                     final_path = host_cov_path(out_dir, spot_id, suffix)
                     current_temp = final_path.with_name(
-                        final_path.name + f".tmp.{os.getpid()}"
+                        final_path.name + f".tmp.{os.getpid()}.{suffix}"
                     )
                     final_path.parent.mkdir(parents=True, exist_ok=True)
                     current_handle = current_temp.open("w", encoding="utf-8")
                 assert current_handle is not None
-                current_handle.write("\t".join(fields[:-1]) + "\n")
-                if meth_acc is not None:
-                    accumulate_cov_line_for_meth_stats(meth_acc, suffix, fields)
+                current_handle.write(prefix + "\n")
+                if meth_acc is not None or local_acc is not None:
+                    accumulate_cov_line_for_meth_stats(
+                        local_acc, suffix, line.split("\t")
+                    )
         close_current()
     finally:
         if current_handle is not None:
@@ -1056,6 +1398,7 @@ def stream_sorted_parts(
             sorted_path.unlink()
         except FileNotFoundError:
             pass
+    return local_acc
 
 
 def merge_skip_spot_meth_stats(
@@ -1075,13 +1418,9 @@ def merge_skip_spot_meth_stats(
             # Prefer re-parse only when prior row is absent (below).
             _rehydrate_meth_stats_from_row(acc, prior)
             continue
-        if context_mode in {"cg", "both"}:
+        for suffix in host_context_suffixes(context_mode):
             parse_existing_cov_into_meth_stats(
-                acc, host_cov_path(out_dir, spot_id, "CG"), "CG", spot_id
-            )
-        if context_mode in {"ch", "both"}:
-            parse_existing_cov_into_meth_stats(
-                acc, host_cov_path(out_dir, spot_id, "CH"), "CH", spot_id
+                acc, host_cov_path(out_dir, spot_id, suffix), suffix, spot_id
             )
 
 
@@ -1114,42 +1453,62 @@ def _rehydrate_meth_stats_from_row(
     apply("mean_5mCT", "ct_site_count", "ct_sum", "ct_count")
 
 
+def _merge_meth_stats_acc(
+    dest: Dict[str, Dict[str, float | int]],
+    src: Dict[str, Dict[str, float | int]],
+) -> None:
+    for spot_id, bucket in src.items():
+        target = _spot_meth_bucket(dest, spot_id)
+        for key, value in bucket.items():
+            if key.endswith("_sum"):
+                target[key] = float(target[key]) + float(value)
+            else:
+                target[key] = int(target[key]) + int(value)
+
+
 def shuffle_host_parts(
-    combined_cg: Path,
-    combined_ch: Optional[Path],
+    combined_parts: Dict[str, Path],
     out_dir: Path,
     roster: List[str],
     skip_spots: Set[str],
     context_mode: str,
     meth_stats_path: Optional[Path] = None,
+    sort_jobs: int = 1,
 ) -> None:
+    """Sort+split host combined parts concurrently into per-spot cov files."""
     allowed_spots = set(roster)
+    suffixes = host_context_suffixes(context_mode)
+    field_counts = {
+        "CG": HOST_CG_FIELDS,
+        "CA": HOST_CH_FIELDS,
+        "CC": HOST_CH_FIELDS,
+        "CT": HOST_CH_FIELDS,
+    }
+    jobs = [suffix for suffix in suffixes if suffix in combined_parts]
+    sort_parallel = max(1, int(sort_jobs) // max(1, len(jobs)))
     meth_acc = new_meth_stats_accumulator()
-    if context_mode in {"cg", "both"}:
-        stream_sorted_parts(
-            combined_cg,
-            "CG",
-            HOST_CG_FIELDS,
+
+    def _run_one(suffix: str) -> Dict[str, Dict[str, float | int]]:
+        return stream_sorted_parts(
+            combined_parts[suffix],
+            suffix,
+            field_counts[suffix],
             out_dir,
             allowed_spots,
             skip_spots,
-            meth_acc=meth_acc,
+            meth_acc=new_meth_stats_accumulator(),
+            sort_parallel=sort_parallel,
         )
-    if context_mode in {"ch", "both"} and combined_ch is not None:
-        stream_sorted_parts(
-            combined_ch,
-            "CH",
-            HOST_CH_FIELDS,
-            out_dir,
-            allowed_spots,
-            skip_spots,
-            meth_acc=meth_acc,
-        )
-    suffixes = []
-    if context_mode in {"cg", "both"}:
-        suffixes.append("CG")
-    if context_mode in {"ch", "both"}:
-        suffixes.append("CH")
+
+    if len(jobs) <= 1:
+        for suffix in jobs:
+            _merge_meth_stats_acc(meth_acc, _run_one(suffix))
+    else:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+            futures = [executor.submit(_run_one, suffix) for suffix in jobs]
+            for future in as_completed(futures):
+                _merge_meth_stats_acc(meth_acc, future.result())
+
     for spot_id in roster:
         if spot_id in skip_spots:
             continue
@@ -1166,9 +1525,36 @@ def shuffle_host_parts(
         write_per_spot_meth_stats_tsv(meth_stats_path, rows)
 
 
-def process_chromosome(
+def build_call_intervals(
+    reference: str,
+    chromosomes: List[str],
+    batch_size: int,
+    context_mode: str,
+    sample_size: Optional[int],
+) -> List[Tuple[int, str, int, int, Optional[Set[int]]]]:
+    """Build globally numbered (batch_index, chrom, start, stop, allowed_positions) intervals."""
+    intervals: List[Tuple[int, str, int, int, Optional[Set[int]]]] = []
+    batch_index = 0
+    with pysam.FastaFile(reference) as fasta:
+        for chrom in chromosomes:
+            chrom_len = int(fasta.get_reference_length(chrom))
+            allowed_positions: Optional[Set[int]] = None
+            if sample_size is not None:
+                sequence = fasta.fetch(chrom).upper()
+                allowed_positions = select_sample_positions(
+                    sequence, context_mode, sample_size
+                )
+            step = max(1, int(batch_size))
+            for start in range(0, chrom_len, step):
+                stop = min(start + step, chrom_len)
+                intervals.append((batch_index, chrom, start, stop, allowed_positions))
+                batch_index += 1
+    return intervals
+
+
+def process_all_intervals(
     args: argparse.Namespace,
-    chrom: str,
+    chromosomes: List[str],
     part_root: Path,
     host: bool,
     barcode_to_index: Optional[BarcodeMap],
@@ -1178,21 +1564,17 @@ def process_chromosome(
     combined_handles: Dict[str, BinaryIO],
     converted_means_methylated: bool,
 ) -> None:
-    global WORKER_CHROMOSOME_SEQUENCE
-    with pysam.FastaFile(args.reference) as fasta:
-        sequence = fasta.fetch(chrom).upper()
-    WORKER_CHROMOSOME_SEQUENCE = sequence
-    chrom_len = len(sequence)
-    allowed_positions = select_sample_positions(
-        sequence, args.context_mode, args.sample_size
+    global WORKER_FASTA
+    intervals = build_call_intervals(
+        args.reference,
+        chromosomes,
+        args.batch_size,
+        args.context_mode,
+        args.sample_size,
     )
-    batch = effective_batch_size(chrom_len, args.batch_size, args.jobs)
-    intervals = [
-        (index, start, min(start + batch, chrom_len))
-        for index, start in enumerate(range(0, chrom_len, batch))
-    ]
-    chrom_dir = part_root / chrom
-    chrom_dir.mkdir(parents=True, exist_ok=True)
+    if not intervals:
+        return
+    part_root.mkdir(parents=True, exist_ok=True)
     interval_args = [
         (
             args.bam,
@@ -1200,7 +1582,7 @@ def process_chromosome(
             batch_index,
             start,
             stop,
-            str(chrom_dir),
+            str(part_root),
             args.context_mode,
             host,
             args.cb_tag,
@@ -1218,17 +1600,25 @@ def process_chromosome(
             allowed_positions,
             converted_means_methylated,
         )
-        for batch_index, start, stop in intervals
+        for batch_index, chrom, start, stop, allowed_positions in intervals
     ]
-    results = []
+    results: List[Tuple[int, Dict[str, str]]] = []
     if args.jobs == 1 or len(intervals) == 1:
-        for worker_args in interval_args:
-            results.append(process_interval(*worker_args))
+        init_call_worker(args.reference)
+        try:
+            for worker_args in interval_args:
+                results.append(process_interval(*worker_args))
+        finally:
+            if WORKER_FASTA is not None:
+                WORKER_FASTA.close()
+                WORKER_FASTA = None
     else:
         fork_context = multiprocessing.get_context("fork")
         with ProcessPoolExecutor(
             max_workers=min(args.jobs, len(intervals)),
             mp_context=fork_context,
+            initializer=init_call_worker,
+            initargs=(args.reference,),
         ) as executor:
             futures = [
                 executor.submit(process_interval, *worker_args)
@@ -1238,19 +1628,13 @@ def process_chromosome(
                 results.append(future.result())
     for _, part_paths in sorted(results):
         append_parts(part_paths, combined_handles)
-    shutil.rmtree(chrom_dir)
-    WORKER_CHROMOSOME_SEQUENCE = None
 
 
 def existing_skip_spots(
     out_dir: Path, roster: List[str], context_mode: str
 ) -> Set[str]:
     skip: Set[str] = set()
-    suffixes = []
-    if context_mode in {"cg", "both"}:
-        suffixes.append("CG")
-    if context_mode in {"ch", "both"}:
-        suffixes.append("CH")
+    suffixes = host_context_suffixes(context_mode)
     for spot_id in roster:
         if all(host_cov_path(out_dir, spot_id, suffix).is_file() for suffix in suffixes):
             skip.add(spot_id)
@@ -1359,20 +1743,29 @@ def run_caller(
                 load_host_bam_funnel_json(funnel_path) is not None
                 and not args.force_recount
             )
+            t_count = time.perf_counter()
             if counts_ready and funnel_ready:
                 counts = counts_dict_from_rows(load_counts_tsv(counts_path))
+                print(
+                    f"[{log_prefix}] phase=count_scan elapsed_s="
+                    f"{time.perf_counter() - t_count:.3f} reused=1"
+                )
             else:
-                # One BAM pass refreshes counts and/or funnel together.
-                with pysam.AlignmentFile(args.bam, "rb") as bam_in:
-                    counts, funnel = scan_host_bam_for_counts_and_funnel(
-                        bam_in.fetch(until_eof=True),
-                        args.cb_tag,
-                        barcode_to_index,
-                        barcode_len,
-                        mito_chromosomes,
-                    )
+                # Contig-parallel BAM pass refreshes counts and funnel together.
+                counts, funnel = scan_host_bam_counts_and_funnel_parallel(
+                    args.bam,
+                    args.cb_tag,
+                    barcode_to_index,
+                    barcode_len,
+                    mito_chromosomes,
+                    args.jobs,
+                )
                 write_counts_tsv(counts_path, counts)
                 write_host_bam_funnel_json(funnel_path, funnel)
+                print(
+                    f"[{log_prefix}] phase=count_scan elapsed_s="
+                    f"{time.perf_counter() - t_count:.3f} reused=0"
+                )
             roster_ids = (
                 load_roster_ids(Path(args.spot_roster)) if args.spot_roster else None
             )
@@ -1384,11 +1777,11 @@ def run_caller(
         skip_spots = existing_skip_spots(Path(args.out_dir), roster, args.context_mode)
         print(f"[{log_prefix}] roster_spots={len(roster)} skip_spots={len(skip_spots)}")
 
-    suffixes = []
-    if args.context_mode in {"cg", "both"}:
-        suffixes.append("CG")
-    if args.context_mode in {"ch", "both"}:
-        suffixes.append("CH")
+    suffixes = (
+        host_context_suffixes(args.context_mode)
+        if host
+        else aggregate_context_suffixes(args.context_mode)
+    )
 
     if host:
         out_dir = Path(args.out_dir)
@@ -1409,32 +1802,40 @@ def run_caller(
     }
     handles = {suffix: path.open("wb") for suffix, path in combined_temps.items()}
     try:
+        t_call = time.perf_counter()
         with tempfile.TemporaryDirectory(prefix=".methy-call-parts.", dir=combined_dir) as part_dir:
-            for chrom in chromosomes:
-                process_chromosome(
-                    args,
-                    chrom,
-                    Path(part_dir),
-                    host,
-                    barcode_to_index,
-                    barcode_len,
-                    allowed_spots,
-                    skip_spots,
-                    handles,
-                    converted_means_methylated,
-                )
+            process_all_intervals(
+                args,
+                chromosomes,
+                Path(part_dir),
+                host,
+                barcode_to_index,
+                barcode_len,
+                allowed_spots,
+                skip_spots,
+                handles,
+                converted_means_methylated,
+            )
         for handle in handles.values():
             handle.close()
         handles.clear()
+        print(
+            f"[{log_prefix}] phase=call elapsed_s={time.perf_counter() - t_call:.3f}"
+        )
         if host:
+            t_shuffle = time.perf_counter()
             shuffle_host_parts(
-                combined_temps.get("CG", Path("/dev/null")),
-                combined_temps.get("CH"),
+                combined_temps,
                 Path(args.out_dir),
                 roster,
                 skip_spots,
                 args.context_mode,
                 meth_stats_path=resolved_meth_stats_path(args),
+                sort_jobs=args.jobs,
+            )
+            print(
+                f"[{log_prefix}] phase=shuffle elapsed_s="
+                f"{time.perf_counter() - t_shuffle:.3f}"
             )
         else:
             for suffix, temp_path in combined_temps.items():

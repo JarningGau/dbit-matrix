@@ -260,7 +260,7 @@ class ShuffleHostPartsTests(unittest.TestCase):
             )
             roster = ["AAAAAAAA", "CCCCAAAA", "GGGGAAAA"]
             mc.shuffle_host_parts(
-                combined_cg, None, out_dir, roster, set(), "cg"
+                {"CG": combined_cg}, out_dir, roster, set(), "cg"
             )
             path_aa = out_dir / "AAA" / "AAAAAAAA.CG.cov"
             path_ca = out_dir / "CCC" / "CCCCAAAA.CG.cov"
@@ -295,8 +295,7 @@ class ShuffleHostPartsTests(unittest.TestCase):
                 encoding="utf-8",
             )
             mc.shuffle_host_parts(
-                combined_cg,
-                None,
+                {"CG": combined_cg},
                 out_dir,
                 ["AAAAAAAA", "CCCCAAAA"],
                 {"AAAAAAAA"},
@@ -312,23 +311,24 @@ class ShuffleHostPartsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_dir = root / "out"
-            combined_ch = root / "combined.CH"
-            combined_ch.write_text(
+            combined_ca = root / "combined.CA"
+            combined_ca.write_text(
                 "chr1\t10\t10\t100.00\t1\t0\tCA\t+\tAAAAAAAA\n"
                 "chr1\t11\t11\t0.00\t0\t1\tAAAAAAAA\n",
                 encoding="utf-8",
             )
             mc.shuffle_host_parts(
-                Path("/dev/null"),
-                combined_ch,
+                {"CA": combined_ca},
                 out_dir,
                 ["AAAAAAAA"],
                 set(),
                 "ch",
             )
-            text = (out_dir / "AAA" / "AAAAAAAA.CH.cov").read_text(encoding="utf-8")
+            text = (out_dir / "AAA" / "AAAAAAAA.CA.cov").read_text(encoding="utf-8")
             self.assertEqual(text, "chr1\t10\t10\t100.00\t1\t0\tCA\t+\n")
             self.assertNotIn("00_00", text)
+            self.assertEqual((out_dir / "AAA" / "AAAAAAAA.CC.cov").read_text(encoding="utf-8"), "")
+            self.assertEqual((out_dir / "AAA" / "AAAAAAAA.CT.cov").read_text(encoding="utf-8"), "")
 
 
 if __name__ == "__main__":

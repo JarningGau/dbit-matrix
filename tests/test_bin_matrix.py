@@ -107,15 +107,20 @@ class BinMatrixIntegrationTests(unittest.TestCase):
                 ],
             )
             _write_ch(
-                host / "AAAABBBB.CH.cov",
+                host / "AAAABBBB.CA.cov",
                 [
                     ("chr1", 5, 2, 2, "CA", "+"),
-                    ("chr1", 120, 4, 0, "CC", "+"),
                     ("chr1", 130, 1, 1, "CA", "-"),
                 ],
             )
             _write_ch(
-                host / "CCCCDDDD.CH.cov",
+                host / "AAAABBBB.CC.cov",
+                [
+                    ("chr1", 120, 4, 0, "CC", "+"),
+                ],
+            )
+            _write_ch(
+                host / "CCCCDDDD.CT.cov",
                 [
                     ("chr1", 8, 1, 0, "CT", "+"),
                 ],
@@ -135,9 +140,11 @@ class BinMatrixIntegrationTests(unittest.TestCase):
 
             cg_dir = work / "matrix" / "100bp" / "CG"
             self.assertTrue((cg_dir / "matrix.mtx.gz").is_file())
-            barcodes = (cg_dir / "barcodes.tsv").read_text(encoding="utf-8").splitlines()
+            with gzip.open(cg_dir / "barcodes.tsv.gz", "rt", encoding="utf-8") as handle:
+                barcodes = handle.read().splitlines()
             self.assertEqual(barcodes, ["AAAABBBB", "CCCCDDDD"])
-            features = (cg_dir / "features.tsv").read_text(encoding="utf-8").splitlines()
+            with gzip.open(cg_dir / "features.tsv.gz", "rt", encoding="utf-8") as handle:
+                features = handle.read().splitlines()
             self.assertEqual(features[0], "bin_id\tchrom\tstart\tend")
             self.assertEqual(len(features) - 1, 3)
 

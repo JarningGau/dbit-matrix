@@ -154,7 +154,7 @@ Outputs:
 - `coverage/host_bam_funnel.json` (host mapped/valid/mito/nuclear counts for summary)
 - `coverage/per_spot_meth_stats.tsv` (per-spot CG/CH/CA/CC/CT means and site counts for summary)
 - `coverage/host/<cb[0:3]>/<cb>.CG.cov`
-- `coverage/host/<cb[0:3]>/<cb>.CH.cov` (optional)
+- `coverage/host/<cb[0:3]>/<cb>.CA.cov` / `.CC.cov` / `.CT.cov` (optional; replaces host `.CH.cov`)
 - `coverage/host_mito.CG.cov`
 - `coverage/host_mito.CH.cov` (optional)
 - `coverage/<spike_name>.CG.cov`
@@ -174,7 +174,9 @@ Contract:
 - `host_mito.CG.cov` is a single aggregate output
 - `host_mito.CH.cov` is a single aggregate output when CH calling is enabled
 - `.CG.cov` outputs contain covered CpG sites only
-- `.CH.cov` outputs are headerless, include covered CH sites only, and add trailing `context` and `strand` columns
+- host CH contexts are written as separate per-spot files (`.CA.cov` / `.CC.cov` / `.CT.cov`), not a combined host `.CH.cov`
+- aggregate mito/spike `.CH.cov` outputs remain a single file when CH calling is enabled
+- host `.CA.cov` / `.CC.cov` / `.CT.cov` and aggregate `.CH.cov` are headerless, include covered sites only, and add trailing `context` and `strand` columns
 - `context` is one of `CA`, `CC`, or `CT`
 - `strand` is `+` or `-` and indicates which genomic strand contains the target cytosine
 - CH outputs are controlled by `call_context_mode`
@@ -264,9 +266,9 @@ Contract:
 - Non-integer numeric fields in both TSV outputs use two decimal places (`.2f`); integer counts stay unpadded integers; rate columns with a `%` suffix keep `NN.NN%`
 - `per_spot_summary.tsv` fixed columns (left to right): `barcode`, `array_row`, `array_col`, `reads`, `is_HQ_spot`, `mean_5mCG`, `mean_5mCH`, `mean_5mCA`, `mean_5mCC`, `mean_5mCT`, `cpg_site_count`, `ch_site_count`, `ca_site_count`, `cc_site_count`, `ct_site_count`
 - `is_HQ_spot` is `1` when `reads > reads_threshold` from `qc/saturation/saturation_summary.tsv`, else `0`; writes `NA` when `reads_threshold` is missing or `reads` is unparsable
-- `mean_5mCG` / `mean_5mCH` are unweighted means of site `%` from per-spot `*.CG.cov` / `*.CH.cov` (or equivalent values from `coverage/per_spot_meth_stats.tsv` on the fast path); missing or empty cov writes `NA` for the matching rate and site count
-- `mean_5mCA` / `mean_5mCC` / `mean_5mCT` are unweighted means of site `%` from per-spot `*.CH.cov` rows whose `context` column is `CA`, `CC`, or `CT`; a context with no covered sites writes `NA` for that rate and site count. Rows without a recognized context still count toward `mean_5mCH` only
-- when both `coverage/host_bam_funnel.json` and `coverage/per_spot_meth_stats.tsv` exist and parse cleanly, summary uses them for host funnel metrics and per-spot methylation columns (no host BAM scan; no host `*.CG.cov`/`*.CH.cov` walk). If either sidecar is missing/invalid, summary logs `warning=missing_sidecars; using_slow_path` and falls back to the previous full host BAM + host cov scan. Slow-path host cov parsing and host BAM metrics may run with `--jobs` workers (from `slurm.summary.cpus_per_task`); results must match sequential (`--jobs 1`) semantics. Parallel host BAM scan requires a BAM index and otherwise falls back to sequential `until_eof`
+- `mean_5mCG` / `mean_5mCH` are unweighted means of site `%` from per-spot `*.CG.cov` and host `*.CA.cov`/`*.CC.cov`/`*.CT.cov` (or legacy `*.CH.cov`; or equivalent values from `coverage/per_spot_meth_stats.tsv` on the fast path); missing or empty cov writes `NA` for the matching rate and site count
+- `mean_5mCA` / `mean_5mCC` / `mean_5mCT` are unweighted means of site `%` from the matching host context cov file (or from legacy `*.CH.cov` rows whose `context` column is `CA`, `CC`, or `CT`); a context with no covered sites writes `NA` for that rate and site count. Rows without a recognized context still count toward `mean_5mCH` only
+- when both `coverage/host_bam_funnel.json` and `coverage/per_spot_meth_stats.tsv` exist and parse cleanly, summary uses them for host funnel metrics and per-spot methylation columns (no host BAM scan; no host cov walk). If either sidecar is missing/invalid, summary logs `warning=missing_sidecars; using_slow_path` and falls back to the previous full host BAM + host cov scan. Slow-path host cov parsing and host BAM metrics may run with `--jobs` workers (from `slurm.summary.cpus_per_task`); results must match sequential (`--jobs 1`) semantics. Parallel host BAM scan requires a BAM index and otherwise falls back to sequential `until_eof`
 - summary `barcode` is `<bcB><bcA>` (same CB as cov stem / counts; no `host` suffix)
 - `array_row` / `array_col` are copied from `barcode_positions` by joining on CB; missing positions write `NA`
 - heatmaps plot metrics on `array_col` (x) and `array_row` (y), 0-based inclusive
@@ -307,7 +309,7 @@ Purpose: build fixed genomic-bin sparse spot×bin matrices from host per-spot co
 Input:
 
 - `coverage/host/**/*.CG.cov` for context `CG`
-- `coverage/host/**/*.CH.cov` for contexts `CA` / `CC` / `CT` / `CH` (`CH` = CA+CC+CT rows)
+- `coverage/host/**/*.CA.cov` / `*.CC.cov` / `*.CT.cov` (preferred) or legacy `*.CH.cov` for contexts `CA` / `CC` / `CT` / `CH` (`CH` = CA+CC+CT rows)
 - host FASTA via `call_reference_file` (sibling `.fai` required for contig lengths)
 - optional contig allowlist: `call_chromosomes`
 - optional barcode whitelist: `split_barcodes` (intersect discovered cov barcodes)
