@@ -86,8 +86,9 @@ Summary only; [`docs/developers/contracts.md`](docs/developers/contracts.md) is 
 - `pool` writes:
   - host: `pooled/pooled.host.sorted.bam` (coordinate-sorted, indexed; no `-t CB`)
   - spike-in: `pooled/pooled.<spike_name>.sorted.bam` (mapped reads only)
-- Intermediate CB is concatenated `<bcB><bcA>` (no `+`); host cov is `coverage/host/<cb[0:3]>/<cb>.CG.cov`.
+- Intermediate CB is concatenated `<bcB><bcA>` (no `+`); host cov is `coverage/host/<cb[0:3]>/<cb>.CG.cov`, plus optional split CH contexts `<cb>.CA.cov` / `.CC.cov` / `.CT.cov` (no combined host `.CH.cov`; mito/spike aggregate `.CH.cov` unchanged). Readers still accept legacy host `.CH.cov`.
 - `call` writes `coverage/per_spot_read_counts.tsv` (`barcode`, `reads`), plus summary sidecars `coverage/host_bam_funnel.json` and `coverage/per_spot_meth_stats.tsv`. Smoke is `call_smoke` (top 16 CBs by reads).
+- `bin_matrix` writes `matrix/<bin_label>/<CONTEXT>/matrix.mtx.gz` plus `barcodes.tsv.gz` / `features.tsv.gz` (`bin_label` like `500bp`, `100k`, `1M`).
 - `split_barcodes` is the CB whitelist for `call`, not a split-stage input.
 - Summary uses `barcode_positions` for `array_row`/`array_col`; summary `barcode` is `<bcB><bcA>`.
 
