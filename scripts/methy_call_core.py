@@ -1279,8 +1279,8 @@ def sort_part_by_spot(
     part_path: Path,
     field_index: int,
     sorted_path: Path,
-    parallel: int = 1,
-    buffer_size: str = "50%",
+    parallel: int = 2,
+    buffer_size: str = "16G",
 ) -> None:
     """Sort a combined part file by the spot_id column into sorted_path."""
     try:
@@ -1329,7 +1329,7 @@ def stream_sorted_parts(
     allowed_spots: Set[str],
     skip_spots: Set[str],
     meth_acc: Optional[Dict[str, Dict[str, float | int]]] = None,
-    sort_parallel: int = 1,
+    sort_parallel: int = 2,
 ) -> Dict[str, Dict[str, float | int]]:
     """Sort+split one combined part into per-spot cov files; return local meth stats."""
     local_acc = meth_acc if meth_acc is not None else new_meth_stats_accumulator()
@@ -1473,7 +1473,6 @@ def shuffle_host_parts(
     skip_spots: Set[str],
     context_mode: str,
     meth_stats_path: Optional[Path] = None,
-    sort_jobs: int = 1,
 ) -> None:
     """Sort+split host combined parts concurrently into per-spot cov files."""
     allowed_spots = set(roster)
@@ -1485,7 +1484,6 @@ def shuffle_host_parts(
         "CT": HOST_CH_FIELDS,
     }
     jobs = [suffix for suffix in suffixes if suffix in combined_parts]
-    sort_parallel = max(1, int(sort_jobs) // max(1, len(jobs)))
     meth_acc = new_meth_stats_accumulator()
 
     def _run_one(suffix: str) -> Dict[str, Dict[str, float | int]]:
@@ -1497,7 +1495,6 @@ def shuffle_host_parts(
             allowed_spots,
             skip_spots,
             meth_acc=new_meth_stats_accumulator(),
-            sort_parallel=sort_parallel,
         )
 
     if len(jobs) <= 1:
@@ -1831,7 +1828,6 @@ def run_caller(
                 skip_spots,
                 args.context_mode,
                 meth_stats_path=resolved_meth_stats_path(args),
-                sort_jobs=args.jobs,
             )
             print(
                 f"[{log_prefix}] phase=shuffle elapsed_s="

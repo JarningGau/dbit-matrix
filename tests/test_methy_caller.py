@@ -8,11 +8,13 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts import methy_call_core as mcc
 from scripts import methy_caller as mc
 from scripts.split_bams import parse_cb_value, read_barcodes
 
@@ -245,6 +247,21 @@ class MissingHostInputsTests(unittest.TestCase):
 
 
 class ShuffleHostPartsTests(unittest.TestCase):
+    def test_sort_part_by_spot_bounds_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            part = root / "part"
+            part.write_text(
+                "chr1\t10\t10\t0.00\t0\t1\tAAAAAAAA\n",
+                encoding="utf-8",
+            )
+            sorted_path = root / "sorted"
+            with patch("scripts.methy_call_core.subprocess.run") as run_mock:
+                mcc.sort_part_by_spot(part, 7, sorted_path)
+            cmd = run_mock.call_args.args[0]
+            self.assertEqual(cmd[cmd.index("--parallel") + 1], "2")
+            self.assertEqual(cmd[cmd.index("-S") + 1], "16G")
+
     def test_streams_roster_spots_and_ignores_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
