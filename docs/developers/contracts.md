@@ -335,7 +335,14 @@ Contract:
 
 ### Methscan optional stages (`methscan_*`)
 
-All methscan steps are **host-only**, **explicit** (not part of `--stage all`), and run `scripts/methscan_run.py` in the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it. Per-cell coverage **input** stays under `work/<sample>/coverage/host/`; all **methscan outputs** live under `work/<sample>/methscan/`.
+All methscan steps are **host-only**, **explicit** (not part of `--stage all`), and run `scripts/methscan_run.py` in the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it. Per-cell coverage **input** stays under `work/<sample>/coverage/host/`; all **methscan outputs** live under `work/<sample>/methscan/` (or `methscan/<CONTEXT>/` for non-CG).
+
+`methscan_context` (`CG` / `CA` / `CC` / `CT`, default `CG`) selects which host cov glob and output root to use:
+
+- `CG` (default): `coverage/host/**/*.CG.cov` → `methscan/compact|filter|matrix/` and default `methscan/VMRs.bed`
+- other contexts: `coverage/host/**/*.<CONTEXT>.cov` → `methscan/<CONTEXT>/compact|filter|matrix/` and default `methscan/<CONTEXT>/VMRs.bed`
+
+Choose which steps to run with `--stage` (`methscan_prepare`, `methscan_filter`, `methscan_profile`, `methscan_smooth`, `methscan_scan`, `methscan_matrix`, or `methscan_all`).
 
 #### `methscan_prepare`
 
@@ -343,11 +350,11 @@ Purpose: run `methscan prepare` on per-spot Bismark-like coverage.
 
 Input:
 
-- `coverage/host/**/*.CG.cov`
+- `coverage/host/**/*.<CONTEXT>.cov` (`CONTEXT` from `methscan_context`, default `CG`)
 
 Output:
 
-- `methscan/compact/`
+- `methscan/compact/` (CG) or `methscan/<CONTEXT>/compact/`
 
 #### `methscan_filter`
 
@@ -355,11 +362,11 @@ Purpose: run `methscan filter` from prepared data to filtered cells.
 
 Input:
 
-- `methscan/compact/`
+- `methscan/compact/` (or context-scoped compact)
 
 Output:
 
-- `methscan/filter/`
+- `methscan/filter/` (or context-scoped filter)
 
 #### `methscan_profile`
 
@@ -368,11 +375,11 @@ Purpose: run `methscan profile` for mean methylation over regions (e.g. TSS).
 Input:
 
 - sorted regions `.bed` (`methscan_tss_bed` in workflow config or CLI)
-- prepared directory: default `methscan/compact/`; optional `methscan/filter/` via `methscan_profile_prepared_subdir` (`compact` or `filter`)
+- prepared directory: default compact; optional filter via `methscan_profile_prepared_subdir` (`compact` or `filter`)
 
 Output:
 
-- default `methscan/TSS_profile.csv` (override with `methscan_profile_csv`)
+- default `methscan/TSS_profile.csv` or `methscan/<CONTEXT>/TSS_profile.csv` (override with `methscan_profile_csv`)
 
 #### `methscan_smooth`
 
@@ -380,11 +387,11 @@ Purpose: run `methscan smooth` on filtered data.
 
 Input:
 
-- `methscan/filter/`
+- filter directory for the active context
 
 Output:
 
-- smoothed values under `methscan/filter/smoothed/` (methscan layout)
+- smoothed values under `.../filter/smoothed/` (methscan layout)
 
 #### `methscan_scan`
 
@@ -392,11 +399,11 @@ Purpose: run `methscan scan` for VMRs.
 
 Input:
 
-- `methscan/filter/` (includes smoothed outputs from `methscan smooth`)
+- filter directory (includes smoothed outputs from `methscan smooth`)
 
 Output:
 
-- default `methscan/VMRs.bed` (override with `methscan_vmrs_bed`)
+- default `methscan/VMRs.bed` or `methscan/<CONTEXT>/VMRs.bed` when `methscan_vmrs_bed` is unset; otherwise the configured path
 
 #### `methscan_matrix`
 
@@ -404,12 +411,12 @@ Purpose: run `methscan matrix` for region × cell tables.
 
 Input:
 
-- VMRs `.bed` (default `methscan/VMRs.bed`)
-- `methscan/filter/`
+- regions `.bed`: default is the scan-generated `VMRs.bed` under the context root when `methscan_vmrs_bed` is unset; set `methscan_vmrs_bed` to quantify custom regions (e.g. gene bodies)
+- filter directory for the active context
 
 Output:
 
-- default output directory `methscan/matrix/` (override with `methscan_matrix_prefix`)
+- default `methscan/matrix/` or `methscan/<CONTEXT>/matrix/` (override with `methscan_matrix_prefix`)
 
 #### `methscan_all`
 

@@ -247,6 +247,7 @@ TAPS and EMSeq methscan fields:
 
 - `methscan_run_script` (default: `scripts/methscan_run.py`)
 - `methscan_pixi_manifest`
+- `methscan_context` (`CG` / `CA` / `CC` / `CT`, default `CG`; CLI `--methscan-context`)
 - `methscan_prepare_chunksize` (default: `10000000`)
 - `methscan_filter_min_sites` (default: `50000`)
 - `methscan_tss_bed` (required for `methscan_profile` and `methscan_all`)
@@ -256,7 +257,7 @@ TAPS and EMSeq methscan fields:
 - `methscan_smooth_bandwidth` (optional)
 - `methscan_smooth_use_weights` (boolean)
 - `methscan_scan_threads` (default: `10`)
-- `methscan_vmrs_bed` (optional path)
+- `methscan_vmrs_bed` (optional; default unset / None → scan writes and matrix reads context-root `VMRs.bed`; set to a custom regions BED for `methscan_matrix` / `methscan_scan` / `methscan_all`)
 - `methscan_matrix_threads` (default: `10`)
 - `methscan_matrix_sparse` (boolean)
 - `methscan_matrix_prefix` (optional output directory)

@@ -423,6 +423,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to methscan_run.py. Default: scripts/methscan_run.py.",
     )
     parser.add_argument(
+        "--methscan-context",
+        choices=("CG", "CA", "CC", "CT"),
+        help="Host cov context for methscan (default: CG). JSON: methscan_context.",
+    )
+    parser.add_argument(
         "--methscan-prepare-chunksize",
         type=int,
         help="Passed to methscan prepare --chunksize (default: 10000000).",
@@ -471,7 +476,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--methscan-vmrs-bed",
-        help="methscan scan/matrix VMRs .bed path (optional; default methscan/VMRs.bed).",
+        help=(
+            "methscan scan/matrix regions .bed (optional; default unset → "
+            "methscan-generated VMRs.bed under the context root)."
+        ),
     )
     parser.add_argument(
         "--methscan-matrix-threads",
@@ -952,6 +960,8 @@ def build_methscan_run_command(
     manifest = getattr(args, "methscan_pixi_manifest", None)
     if manifest:
         command.extend(["--pixi-manifest", str(manifest)])
+    context = getattr(args, "methscan_context", None) or "CG"
+    command.extend(["--context", str(context)])
     if step == "prepare":
         command.extend(
             ["--chunksize", str(getattr(args, "methscan_prepare_chunksize", 10_000_000))]
@@ -1040,6 +1050,7 @@ def methscan_namespace_from_settings(settings: dict) -> argparse.Namespace:
     return argparse.Namespace(
         methscan_run_script=settings["methscan_run_script"],
         methscan_pixi_manifest=settings.get("methscan_pixi_manifest"),
+        methscan_context=settings.get("methscan_context", "CG"),
         methscan_prepare_chunksize=settings["methscan_prepare_chunksize"],
         methscan_filter_min_sites=settings["methscan_filter_min_sites"],
         methscan_tss_bed=settings.get("methscan_tss_bed"),
@@ -1419,6 +1430,7 @@ def resolve_settings(args: argparse.Namespace) -> dict:
         "bin_matrix_script": pick(args.bin_matrix_script, cfg.get("bin_matrix_script")),
         "bin_matrix": normalize_bin_matrix_config(cfg.get("bin_matrix")),
         "methscan_run_script": pick(args.methscan_run_script, cfg.get("methscan_run_script")),
+        "methscan_context": pick(args.methscan_context, cfg.get("methscan_context")),
         "methscan_prepare_chunksize": pick(
             args.methscan_prepare_chunksize,
             cfg.get("methscan_prepare_chunksize"),
@@ -1704,6 +1716,14 @@ def resolve_settings(args: argparse.Namespace) -> dict:
     ):
         settings["bin_matrix"] = validate_bin_matrix_config(settings["bin_matrix"])
     settings["methscan_run_script"] = settings.get("methscan_run_script") or "scripts/methscan_run.py"
+    settings["methscan_context"] = (
+        str(settings.get("methscan_context") or "CG").upper()
+    )
+    if settings["methscan_context"] not in ("CG", "CA", "CC", "CT"):
+        raise ValueError(
+            "methscan_context must be one of CG, CA, CC, CT; "
+            f"got {settings['methscan_context']!r}"
+        )
     settings["methscan_prepare_chunksize"] = (
         int(settings["methscan_prepare_chunksize"])
         if settings.get("methscan_prepare_chunksize") is not None

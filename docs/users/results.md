@@ -25,7 +25,7 @@ Optional advanced outputs:
 - `coverage/aggregated_cg_by_id.tsv`
 - `coverage/aggregated_cg_by_pos.tsv`
 - `matrix/<bin_label>/<CONTEXT>/` (`features.tsv`, `barcodes.tsv`, `matrix.mtx.gz`) from `bin_matrix` when enabled (`<bin_label>` in [contracts](../developers/contracts.md#bin_matrix))
-- `methscan/compact/`, `methscan/filter/`, `methscan/matrix/`, and other methscan outputs under `methscan/` (see contracts)
+- `methscan/compact/`, `methscan/filter/`, `methscan/matrix/` for CG (default); non-CG contexts under `methscan/<CONTEXT>/` (see contracts)
 
 ## Common Checks For RNA
 

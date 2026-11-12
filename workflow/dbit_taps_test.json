@@ -63,6 +63,7 @@
     "saturation_reads_threshold": "auto",
     "summary_script": "scripts/summary.py",
     "methscan_tss_bed": "data/genome/mm10_encode_VM21_tss_4k.bed",
+    "methscan_context": "CG",
     "spike_in_index": {
         "lambda": "/mnt/e/LiLab_HL/resource/bwa/lambda/genome.fa",
         "puc19": "/mnt/e/LiLab_HL/resource/bwa/puc19/genome.fa"

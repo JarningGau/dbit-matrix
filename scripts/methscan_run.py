@@ -2,7 +2,8 @@
 """Run methscan steps via envs/methscan pixi workspace.
 
 Reads per-cell coverage from work/coverage/host/; writes all methscan outputs under
-work/methscan/ (see methscan_dirs).
+work/methscan/ (see methscan_dirs). Context CG keeps the legacy layout; other contexts
+nest under work/methscan/<CONTEXT>/.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ DEFAULT_FILTER_MIN_SITES = 50_000
 DEFAULT_PROFILE_STRAND_COLUMN = 6
 DEFAULT_SCAN_THREADS = 10
 DEFAULT_MATRIX_THREADS = 10
+METHSCAN_CONTEXTS = ("CG", "CA", "CC", "CT")
+DEFAULT_CONTEXT = "CG"
 
 
 def repo_root_from_script() -> Path:
@@ -40,12 +43,26 @@ def validate_manifest(manifest: Path) -> str | None:
     return None
 
 
+def normalize_context(context: str | None) -> str:
+    value = (context or DEFAULT_CONTEXT).upper()
+    if value not in METHSCAN_CONTEXTS:
+        raise ValueError(
+            f"methscan context must be one of {', '.join(METHSCAN_CONTEXTS)}; got {context!r}"
+        )
+    return value
+
+
 def coverage_host_dir(work: Path) -> Path:
     return work / "coverage" / "host"
 
 
-def methscan_dirs(work: Path) -> dict[str, Path]:
-    root = work / "methscan"
+def cov_glob_suffix(context: str) -> str:
+    return f"*.{context}.cov"
+
+
+def methscan_dirs(work: Path, context: str = DEFAULT_CONTEXT) -> dict[str, Path]:
+    context = normalize_context(context)
+    root = work / "methscan" if context == "CG" else work / "methscan" / context
     return {
         "root": root,
         "compact": root / "compact",
@@ -54,8 +71,8 @@ def methscan_dirs(work: Path) -> dict[str, Path]:
     }
 
 
-def prepared_subdir_path(work: Path, name: str) -> Path:
-    m = methscan_dirs(work)
+def prepared_subdir_path(work: Path, name: str, context: str = DEFAULT_CONTEXT) -> Path:
+    m = methscan_dirs(work, context)
     if name == "compact":
         return m["compact"]
     if name == "filter":
@@ -81,11 +98,13 @@ def run_methscan(
 
 
 def cmd_prepare(args: argparse.Namespace, work: Path, manifest: Path) -> int:
+    context = normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
     cov_dir = coverage_host_dir(work)
-    out_dir = methscan_dirs(work)["compact"]
-    cov_files = sorted(p for p in cov_dir.rglob("*.CG.cov") if p.is_file())
+    out_dir = methscan_dirs(work, context)["compact"]
+    pattern = cov_glob_suffix(context)
+    cov_files = sorted(p for p in cov_dir.rglob(pattern) if p.is_file())
     if not cov_files and not args.dry_run:
-        print(f"error: no *.CG.cov under {cov_dir}", file=sys.stderr)
+        print(f"error: no {pattern} under {cov_dir}", file=sys.stderr)
         return 1
     if args.chunksize < 1:
         print("error: --chunksize must be >= 1", file=sys.stderr)
@@ -106,7 +125,7 @@ def cmd_prepare(args: argparse.Namespace, work: Path, manifest: Path) -> int:
         else:
             display_args = [
                 "prepare",
-                "<INPUT: coverage/host/**/*.CG.cov>",
+                f"<INPUT: coverage/host/**/{pattern}>",
                 str(out_dir),
                 "--input-format",
                 "bismark",
@@ -114,24 +133,26 @@ def cmd_prepare(args: argparse.Namespace, work: Path, manifest: Path) -> int:
                 str(args.chunksize),
             ]
             print(
-                f"note: no *.CG.cov under {cov_dir} yet; "
-                "prepare needs per-cell .CG.cov files before this command is valid.",
+                f"note: no {pattern} under {cov_dir} yet; "
+                f"prepare needs per-cell .{context}.cov files before this command is valid.",
                 file=sys.stderr,
             )
         print("command=" + " ".join(["pixi", "run", "methscan", *display_args]))
+        print(f"context={context}")
         print(f"input_count={len(cov_files)}")
         print(f"output_dir={out_dir}")
         print(f"chunksize={args.chunksize}")
         return 0
     if not cov_files:
-        print(f"error: no *.CG.cov under {cov_dir}", file=sys.stderr)
+        print(f"error: no {pattern} under {cov_dir}", file=sys.stderr)
         return 1
     out_dir.mkdir(parents=True, exist_ok=True)
     return run_methscan(manifest, methscan_args, dry_run=False)
 
 
 def cmd_filter(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    paths = methscan_dirs(work)
+    context = normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
+    paths = methscan_dirs(work, context)
     data_dir = paths["compact"]
     filtered_dir = paths["filter"]
     methscan_args = [
@@ -145,15 +166,16 @@ def cmd_filter(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_profile(args: argparse.Namespace, work: Path, manifest: Path) -> int:
+    context = normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
     bed = Path(args.tss_bed).resolve()
     if not bed.is_file() and not args.dry_run:
         print(f"error: TSS bed not found: {bed}", file=sys.stderr)
         return 1
-    data_dir = prepared_subdir_path(work, args.prepared_dir)
+    data_dir = prepared_subdir_path(work, args.prepared_dir, context)
     out_csv = (
         Path(args.profile_csv).resolve()
         if args.profile_csv
-        else methscan_dirs(work)["root"] / "TSS_profile.csv"
+        else methscan_dirs(work, context)["root"] / "TSS_profile.csv"
     )
     methscan_args = [
         "profile",
@@ -167,7 +189,8 @@ def cmd_profile(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_smooth(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    data_dir = methscan_dirs(work)["filter"]
+    context = normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
+    data_dir = methscan_dirs(work, context)["filter"]
     methscan_args = ["smooth", str(data_dir)]
     if args.bandwidth is not None:
         methscan_args.extend(["--bandwidth", str(args.bandwidth)])
@@ -177,11 +200,12 @@ def cmd_smooth(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_scan(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    data_dir = methscan_dirs(work)["filter"]
+    context = normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
+    data_dir = methscan_dirs(work, context)["filter"]
     out_bed = (
         Path(args.vmrs_bed).resolve()
         if args.vmrs_bed
-        else methscan_dirs(work)["root"] / "VMRs.bed"
+        else methscan_dirs(work, context)["root"] / "VMRs.bed"
     )
     methscan_args = [
         "scan",
@@ -194,19 +218,20 @@ def cmd_scan(args: argparse.Namespace, work: Path, manifest: Path) -> int:
 
 
 def cmd_matrix(args: argparse.Namespace, work: Path, manifest: Path) -> int:
+    context = normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
     regions = (
         Path(args.vmrs_bed).resolve()
         if args.vmrs_bed
-        else methscan_dirs(work)["root"] / "VMRs.bed"
+        else methscan_dirs(work, context)["root"] / "VMRs.bed"
     )
     if not regions.is_file() and not args.dry_run:
         print(f"error: VMRs bed not found: {regions}", file=sys.stderr)
         return 1
-    data_dir = methscan_dirs(work)["filter"]
+    data_dir = methscan_dirs(work, context)["filter"]
     out_dir = (
         Path(args.matrix_prefix).resolve()
         if args.matrix_prefix
-        else methscan_dirs(work)["matrix"]
+        else methscan_dirs(work, context)["matrix"]
     )
     methscan_args = [
         "matrix",
@@ -232,6 +257,13 @@ def add_common(p: argparse.ArgumentParser) -> None:
         help="Directory containing pixi.toml for methscan (default: <repo>/envs/methscan).",
     )
     p.add_argument(
+        "--context",
+        choices=METHSCAN_CONTEXTS,
+        default=DEFAULT_CONTEXT,
+        help=f"Host cov context to prepare/analyze (default: {DEFAULT_CONTEXT}). "
+        "CG uses methscan/; other contexts use methscan/<CONTEXT>/.",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Print resolved command; do not run pixi.",
@@ -244,7 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_prep = sub.add_parser("prepare", help="methscan prepare from coverage/host/*.CG.cov")
+    p_prep = sub.add_parser(
+        "prepare",
+        help="methscan prepare from coverage/host/*.<CONTEXT>.cov",
+    )
     add_common(p_prep)
     p_prep.add_argument(
         "--chunksize",
@@ -254,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"bp per chromosome chunk (default: {METHSCAN_DEFAULT_CHUNKSIZE}).",
     )
 
-    p_filt = sub.add_parser("filter", help="methscan filter compact -> methscan/filter")
+    p_filt = sub.add_parser("filter", help="methscan filter compact -> filter")
     add_common(p_filt)
     p_filt.add_argument(
         "--min-sites",
@@ -285,10 +320,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_prof.add_argument(
         "--profile-csv",
-        help="Output .csv path (default: methscan/TSS_profile.csv).",
+        help="Output .csv path (default: methscan[/CONTEXT]/TSS_profile.csv).",
     )
 
-    p_smooth = sub.add_parser("smooth", help="methscan smooth on methscan/filter")
+    p_smooth = sub.add_parser("smooth", help="methscan smooth on filter dir")
     add_common(p_smooth)
     p_smooth.add_argument(
         "--bandwidth",
@@ -303,7 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Weigh each site by log1p(coverage).",
     )
 
-    p_scan = sub.add_parser("scan", help="methscan scan VMRs from methscan/filter")
+    p_scan = sub.add_parser("scan", help="methscan scan VMRs from filter dir")
     add_common(p_scan)
     p_scan.add_argument(
         "--threads",
@@ -313,10 +348,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_scan.add_argument(
         "--vmrs-bed",
-        help="Output .bed path (default: methscan/VMRs.bed).",
+        help="Output .bed path (default: methscan[/CONTEXT]/VMRs.bed).",
     )
 
-    p_matrix = sub.add_parser("matrix", help="methscan matrix from VMRs bed + methscan/filter")
+    p_matrix = sub.add_parser("matrix", help="methscan matrix from regions bed + filter dir")
     add_common(p_matrix)
     p_matrix.add_argument(
         "--threads",
@@ -331,11 +366,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_matrix.add_argument(
         "--vmrs-bed",
-        help="Input VMRs .bed (default: methscan/VMRs.bed).",
+        help="Input regions .bed (default: methscan[/CONTEXT]/VMRs.bed from scan).",
     )
     p_matrix.add_argument(
         "--matrix-prefix",
-        help="Output directory (default: methscan/matrix).",
+        help="Output directory (default: methscan[/CONTEXT]/matrix).",
     )
 
     p_all = sub.add_parser(
@@ -372,7 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_all.add_argument(
         "--profile-csv",
-        help="Profile output .csv (default: methscan/TSS_profile.csv).",
+        help="Profile output .csv (default: methscan[/CONTEXT]/TSS_profile.csv).",
     )
     p_all.add_argument(
         "--bandwidth",
@@ -400,18 +435,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_all.add_argument(
         "--vmrs-bed",
-        help="VMRs .bed path for scan output / matrix input (default: methscan/VMRs.bed).",
+        help="VMRs .bed path for scan output / matrix input (default: methscan[/CONTEXT]/VMRs.bed).",
     )
     p_all.add_argument(
         "--matrix-prefix",
-        help="Matrix output directory (default: methscan/matrix).",
+        help="Matrix output directory (default: methscan[/CONTEXT]/matrix).",
     )
 
     return parser
 
 
+def _ns_with_context(args: argparse.Namespace, **kwargs) -> argparse.Namespace:
+    return argparse.Namespace(
+        work_path=str(kwargs.pop("work")),
+        pixi_manifest=getattr(args, "pixi_manifest", None),
+        dry_run=args.dry_run,
+        context=normalize_context(getattr(args, "context", DEFAULT_CONTEXT)),
+        **kwargs,
+    )
+
+
 def dispatch(args: argparse.Namespace) -> int:
     work = Path(args.work_path).resolve()
+    try:
+        normalize_context(getattr(args, "context", DEFAULT_CONTEXT))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     manifest = resolve_manifest(getattr(args, "pixi_manifest", None))
     err = validate_manifest(manifest)
     if err:
@@ -437,30 +487,19 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
     steps = [
         (
             "prepare",
-            argparse.Namespace(
-                work_path=str(work),
-                pixi_manifest=getattr(args, "pixi_manifest", None),
-                dry_run=args.dry_run,
-                chunksize=args.chunksize,
-            ),
+            _ns_with_context(args, work=work, chunksize=args.chunksize),
             cmd_prepare,
         ),
         (
             "filter",
-            argparse.Namespace(
-                work_path=str(work),
-                pixi_manifest=getattr(args, "pixi_manifest", None),
-                dry_run=args.dry_run,
-                min_sites=args.min_sites,
-            ),
+            _ns_with_context(args, work=work, min_sites=args.min_sites),
             cmd_filter,
         ),
         (
             "profile",
-            argparse.Namespace(
-                work_path=str(work),
-                pixi_manifest=getattr(args, "pixi_manifest", None),
-                dry_run=args.dry_run,
+            _ns_with_context(
+                args,
+                work=work,
                 tss_bed=args.tss_bed,
                 strand_column=args.strand_column,
                 prepared_dir=args.prepared_dir,
@@ -470,10 +509,9 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
         ),
         (
             "smooth",
-            argparse.Namespace(
-                work_path=str(work),
-                pixi_manifest=getattr(args, "pixi_manifest", None),
-                dry_run=args.dry_run,
+            _ns_with_context(
+                args,
+                work=work,
                 bandwidth=args.bandwidth,
                 use_weights=args.use_weights,
             ),
@@ -481,10 +519,9 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
         ),
         (
             "scan",
-            argparse.Namespace(
-                work_path=str(work),
-                pixi_manifest=getattr(args, "pixi_manifest", None),
-                dry_run=args.dry_run,
+            _ns_with_context(
+                args,
+                work=work,
                 threads=args.scan_threads,
                 vmrs_bed=args.vmrs_bed,
             ),
@@ -492,10 +529,9 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
         ),
         (
             "matrix",
-            argparse.Namespace(
-                work_path=str(work),
-                pixi_manifest=getattr(args, "pixi_manifest", None),
-                dry_run=args.dry_run,
+            _ns_with_context(
+                args,
+                work=work,
                 threads=args.matrix_threads,
                 sparse=args.sparse,
                 vmrs_bed=args.vmrs_bed,
@@ -504,7 +540,7 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
             cmd_matrix,
         ),
     ]
-    for name, ns, fn in steps:
+    for _name, ns, fn in steps:
         rc = fn(ns, work, manifest)
         if rc != 0:
             return rc
