@@ -420,7 +420,7 @@ Output:
 
 #### `methscan_all`
 
-Purpose: run `prepare`, `filter`, `profile`, `smooth`, `scan`, and `matrix` **in order** in one generated script (same effect as running those stages sequentially). Requires `methscan_tss_bed` for the profile step.
+Purpose: run `prepare`, `filter`, `profile`, `smooth`, `scan`, and `matrix` **in order** in one generated script (same effect as running those stages sequentially). Requires `methscan_tss_bed` for the profile step. When `methscan_vmrs_bed` is set, **skip `scan`** and pass that BED to `matrix` (custom regions; do not overwrite the BED with scan output).
 
 ## EMSeq-Specific Additions
 

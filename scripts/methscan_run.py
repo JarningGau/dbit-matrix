@@ -375,7 +375,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_all = sub.add_parser(
         "all",
-        help="Run prepare, filter, profile, smooth, scan, matrix in order (sequential).",
+        help=(
+            "Run prepare, filter, profile, smooth, scan, matrix in order "
+            "(sequential). Skip scan when --vmrs-bed is set."
+        ),
     )
     add_common(p_all)
     p_all.add_argument(
@@ -483,7 +486,11 @@ def dispatch(args: argparse.Namespace) -> int:
 
 
 def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
-    """Run all six steps with shared flags; fail on first error."""
+    """Run prepare/filter/profile/smooth/[scan]/matrix; fail on first error.
+
+    Skip scan when ``vmrs_bed`` is set so a custom regions BED is used by
+    matrix and is not overwritten by methscan scan.
+    """
     steps = [
         (
             "prepare",
@@ -517,16 +524,21 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
             ),
             cmd_smooth,
         ),
-        (
-            "scan",
-            _ns_with_context(
-                args,
-                work=work,
-                threads=args.scan_threads,
-                vmrs_bed=args.vmrs_bed,
-            ),
-            cmd_scan,
-        ),
+    ]
+    if not args.vmrs_bed:
+        steps.append(
+            (
+                "scan",
+                _ns_with_context(
+                    args,
+                    work=work,
+                    threads=args.scan_threads,
+                    vmrs_bed=args.vmrs_bed,
+                ),
+                cmd_scan,
+            )
+        )
+    steps.append(
         (
             "matrix",
             _ns_with_context(
@@ -538,8 +550,8 @@ def cmd_all(args: argparse.Namespace, work: Path, manifest: Path) -> int:
                 matrix_prefix=args.matrix_prefix,
             ),
             cmd_matrix,
-        ),
-    ]
+        )
+    )
     for _name, ns, fn in steps:
         rc = fn(ns, work, manifest)
         if rc != 0:

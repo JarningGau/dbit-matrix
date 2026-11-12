@@ -65,5 +65,5 @@ In Slurm mode, `mbias` and `call` remain separate host and spike jobs. See [conf
 - `methscan_smooth` reads `methscan/filter/` (writes `methscan/filter/smoothed/` per methscan)
 - `methscan_scan` reads `methscan/filter/` and writes VMRs (default `methscan/VMRs.bed`)
 - `methscan_matrix` reads VMRs bed + `methscan/filter/` (default matrix dir `methscan/matrix/`)
-- `methscan_all` runs the six steps in one script; requires `methscan_tss_bed`
+- `methscan_all` runs prepare/filter/profile/smooth/[scan]/matrix in one script; requires `methscan_tss_bed`; skips `scan` when `methscan_vmrs_bed` is set
 - uses the `envs/methscan` pixi workspace unless `methscan_pixi_manifest` overrides it

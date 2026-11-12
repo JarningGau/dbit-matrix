@@ -4,6 +4,7 @@ This page is the active release history for the repository.
 
 ## Current
 
+- **Methscan `all` skips scan with custom BED:** when `methscan_vmrs_bed` / `--vmrs-bed` is set, `methscan_all` skips `scan` and uses that BED for `matrix`. Cov→matrix still needs prepare → filter → smooth → (scan if no custom BED) → matrix. See [contracts](../developers/contracts.md#methscan_all).
 - **Methscan context:** `methscan_context` / `--methscan-context` (`CG` default, also `CA`/`CC`/`CT`) selects host `*.<CONTEXT>.cov` and nests non-CG outputs under `methscan/<CONTEXT>/`. `methscan_vmrs_bed` stays optional (unset → scan-generated `VMRs.bed`). See [contracts](../developers/contracts.md#methscan-optional-stages-methscan_) and [config reference](../developers/config-reference.md).
 - **BREAKING host CH cov split:** host `call` writes per-spot `.CA.cov` / `.CC.cov` / `.CT.cov` instead of `.CH.cov` (mito/spike aggregate `.CH.cov` unchanged). `summary` slow path and `bin_matrix` read the split files (legacy `.CH.cov` still accepted). Re-run host `call`, then `bin_matrix` / `summary`. See [contracts](../developers/contracts.md#call).
 - **call_host performance:** shared caller uses a per-read pileup cache, one cross-chromosome interval pool with fixed `call_batch_size` (default `2000000`), parallel counts/funnel scan, and concurrent host sort/shuffle. On the ~500 GB large test, host methylation calling wall time went from 21 h to 10.5 h (~2×). Phase timing logs: `phase=count_scan|call|shuffle`. See [config reference](../developers/config-reference.md#taps-fields).
